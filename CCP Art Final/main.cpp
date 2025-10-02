@@ -2,6 +2,7 @@
 #include "RendererHelpers.h"
 #include "PhysicsHelpers.h"
 #include <iostream>
+#include <filesystem> 
 
 using namespace std;
 
@@ -10,22 +11,29 @@ struct LevelDef
     string name;
     string folder;
     float spawnX = 2.0f, spawnY = 9.5f, spawnDirDeg = 0.f;
+    int levelId = 0;
 };
 
-static bool loadLevel( Engine &engineContext, const LevelDef &L ) {
+enum Levels
+{
+    MUSEUM = 0,
+    CAVE = 1
+};
+
+static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     namespace fs = std::filesystem;
 
     // Clear per-level state
-    engineContext.artworks.clear(); 
+    engineContext.artworks.clear();
     engineContext.artImages.clear();
     engineContext.props.clear();
     engineContext.propImages.clear();
-    engineContext.quads.clear();  
+    engineContext.quads.clear();
     engineContext.benches3D.clear();
 
 
-    fs::path folder = L.folder;
-
+    fs::path folder = level .folder;
+    /*
     {
         BoxProp box;
         box.centerX = 7.4f; box.centerY = 4.6f;
@@ -50,6 +58,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &L ) {
         engineContext.benches3D.push_back( std::move( box ) );
 
     }
+    */
 
 
     // Map (1=wall, D=door)
@@ -70,25 +79,76 @@ static bool loadLevel( Engine &engineContext, const LevelDef &L ) {
 
     // Props
     loadProps( (folder / "props.txt").string(), engineContext.props, engineContext.propImages, engineContext.quads );
-
-    if (loadArtworks( (folder / "artworks.txt").string(), engineContext.artworks ))
+    // Build spatial buckets for quads (by tile)
+    engineContext.quadBuckets.assign( engineContext.map.width * engineContext.map.height, {} );
+    for (int i = 0; i < (int)engineContext.quads.size(); ++i)
     {
-        attachArtworksToWalls( engineContext );
-        engineContext.artImages.resize( engineContext.artworks.size() );
-        for (size_t i = 0; i < engineContext.artworks.size(); ++i)
+        const auto &q = engineContext.quads[ i ];
+        int tx = (int)std::floor( q.centerX );
+        int ty = (int)std::floor( q.centerY );
+        if ((unsigned)tx < (unsigned)engineContext.map.width && (unsigned)ty < (unsigned)engineContext.map.height)
         {
-            std::filesystem::path ip = engineContext.artworks[ i ].imagePath;
-            if (!ip.is_absolute()) ip = folder / ip;   // resolve relative to level folder
-            // Always ensure art valid texture to avoid crashes later
-            loadImageOrFallback( ip.string(), engineContext.artImages[ i ], rgb( 220, 220, 220 ) );
+            engineContext.quadBuckets[ ty * engineContext.map.width + tx ].push_back( i );
         }
     }
 
+
+    if (level.levelId == Levels::MUSEUM)
+    {
+        if (loadArtworks( (folder / "artworks.txt").string(), engineContext.artworks ))
+        {
+            attachArtworksToWalls( engineContext );
+            engineContext.artImages.resize( engineContext.artworks.size() );
+            for (size_t i = 0; i < engineContext.artworks.size(); ++i)
+            {
+                std::filesystem::path ip = engineContext.artworks[ i ].imagePath;
+                if (!ip.is_absolute()) ip = folder / ip;   // resolve relative to level folder
+                // Always ensure art valid texture to avoid crashes later
+                loadImageOrFallback( ip.string(), engineContext.artImages[ i ], rgb( 220, 220, 220 ) );
+            }
+        }
+    }
+
+    engineContext.caveMode = (level.levelId == Levels::CAVE);
+    engineContext.hasWallOverlay = false;
+    auto tryLoad = [&]( const std::filesystem::path &p, Image &dst, bool &flag ) {
+        flag = dst.loadBMP( p.string() );
+        };
+
+    if (engineContext.caveMode)
+    {
+        // Optional overlay for rock variation
+      //  std::filesystem::path overlay = (folder / "wall_overlay.bmp");
+      //  if (engineContext.wallOverlay.loadBMP( overlay.string() ))
+     //   {
+     //       engineContext.hasWallOverlay = true;
+     //   }
+        // Defaults: tweak to taste
+        engineContext.lightRadius = 2.0f;
+        engineContext.lightFalloff = 2.0f;
+        engineContext.caveAmbient = 0.06f;
+
+        engineContext.hasFloorCracks = engineContext.hasFloorStains = engineContext.hasFloorPuddles = false;
+        engineContext.hasWallCracks = engineContext.hasWallStains = false;
+
+        //tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
+        //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
+        tryLoad( folder / "floor_puddles.bmp", engineContext.floorOverlayPuddles, engineContext.hasFloorPuddles );
+
+        tryLoad( folder / "wall_cracks.bmp", engineContext.wallOverlayCracks, engineContext.hasWallCracks );
+        //tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
+
+
+    }
+
     // Spawn & camera
-    engineContext.positionX = L.spawnX; engineContext.positionY = L.spawnY;
-    float art = L.spawnDirDeg * 3.14159265f / 180.f;
-    engineContext.directionX = std::cos( art ); engineContext.directionY = std::sin( art );
-    engineContext.planeX = -engineContext.directionY * FOV_TAN; engineContext.planeY = engineContext.directionX * FOV_TAN;
+    engineContext.positionX = level.spawnX;
+    engineContext.positionY = level.spawnY;
+    float art = level.spawnDirDeg * 3.14159265f / 180.f;
+    engineContext.directionX = std::cos( art );
+    engineContext.directionY = std::sin( art );
+    engineContext.planeX = -engineContext.directionY * FOV_TAN;
+    engineContext.planeY = engineContext.directionX * FOV_TAN;
 
     return true;
 }
@@ -117,7 +177,7 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
     }
     else
     {
-        stepX = 1; 
+        stepX = 1;
         sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
     }
     if (rayDirY < 0)
@@ -127,7 +187,7 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
     }
     else
     {
-        stepY = 1; 
+        stepY = 1;
         sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
     }
 
@@ -185,230 +245,93 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
 }
 
 
+
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
+
+    auto luma = []( Uint32 c ) -> float {
+        float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
+        return (0.299f * r + 0.587f * g + 0.114f * b) / 255.0f;
+        };
+
+  
+    auto mulFromOverlay = [&]( Uint32 oc, float strength, float minMul, float maxMul, float gamma = 1.0f ) -> float {
+        float L = std::pow( std::clamp( luma( oc ), 0.0f, 1.0f ), gamma );
+        float m = 1.0f - strength * (1.0f - L);               // dark pixels -> lower multiplier
+        return std::clamp( m, minMul, maxMul );
+        };
+
+    // Apply brightness multiplier to a packed ARGB8888 color (no hue shift)
+    auto applyMul = [&]( Uint32 base, float m ) -> Uint32 {
+        float rf = float( (base >> 16) & 255 ) * m;
+        float gf = float( (base >> 8) & 255 ) * m;
+        float bf = float( base & 255 ) * m;
+        Uint8 r = Uint8( std::clamp( rf, 0.0f, 255.0f ) );
+        Uint8 g = Uint8( std::clamp( gf, 0.0f, 255.0f ) );
+        Uint8 b = Uint8( std::clamp( bf, 0.0f, 255.0f ) );
+        return rgb( r, g, b );
+        };
 
     auto shadeCol = []( Uint32 c, float s ) -> Uint32 {
         s = std::clamp( s, 0.0f, 1.0f );
         Uint8 r = Uint8( ((c >> 16) & 255) * s );
         Uint8 g = Uint8( ((c >> 8) & 255) * s );
-        Uint8 box = Uint8( (c & 255) * s );
-        return rgb( r, g, box );
+        Uint8 b = Uint8( (c & 255) * s );
+        return rgb( r, g, b );
+        };
+
+    auto caveLight = [&]( float dist ) -> float {
+        if (!engineContext.caveMode) return 1.0f;
+        float R = engineContext.lightRadius;
+        float t = std::clamp( 1.0f - std::pow( dist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+        return std::max( engineContext.caveAmbient, t );
         };
 
     const int half = RENDER_H / 2;
-
     engineContext.zbuffer.assign( RENDER_W, 1e9f );
 
+    static int clipTop[ RENDER_W ];
+    static int clipBot[ RENDER_W ];
+    for (int i = 0; i < RENDER_W; ++i)
+    {
+        clipTop[ i ] = RENDER_H;
+        clipBot[ i ] = -1;
+    }
+
+	// Walls (raycasted)
     for (int x = 0; x < RENDER_W; ++x)
     {
+        // Build ray
         float camX = 2.0f * x / float( RENDER_W ) - 1.0f;
         float rayDirX = engineContext.directionX + engineContext.planeX * camX;
         float rayDirY = engineContext.directionY + engineContext.planeY * camX;
 
         int mapX = int( engineContext.positionX );
         int mapY = int( engineContext.positionY );
+
         float sideDistX, sideDistY;
         float deltaDistX = (rayDirX == 0) ? 1e30f : std::fabs( 1.0f / rayDirX );
         float deltaDistY = (rayDirY == 0) ? 1e30f : std::fabs( 1.0f / rayDirY );
-        int stepX = 0;
-        int stepY = 0;
-        int side = 0;
+        int stepX = 0, stepY = 0, side = 0;
 
         if (rayDirX < 0)
         {
-            stepX = -1; 
-            sideDistX = (engineContext.positionX - mapX) * deltaDistX;
+            stepX = -1; sideDistX = (engineContext.positionX - mapX) * deltaDistX;
         }
         else
         {
-            stepX = 1; 
-            sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
+            stepX = 1; sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
         }
         if (rayDirY < 0)
         {
-            stepY = -1; 
-            sideDistY = (engineContext.positionY - mapY) * deltaDistY;
+            stepY = -1; sideDistY = (engineContext.positionY - mapY) * deltaDistY;
         }
         else
         {
-            stepY = 1; 
-            sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
+            stepY = 1; sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
         }
 
-        int hitTile = 0;
-        while (!hitTile)
-        {
-            if (sideDistX < sideDistY)
-            {
-                sideDistX += deltaDistX;
-                mapX += stepX; 
-                side = 0;
-            }
-            else
-            {
-                sideDistY += deltaDistY; 
-                mapY += stepY; 
-                side = 1;
-            }
-
-            if (mapX < 0 || mapY < 0 || mapX >= engineContext.map.width || mapY >= engineContext.map.height) break;
-
-            int tile = engineContext.map.tiles[ mapY * engineContext.map.width + mapX ];
-            if (tile > 0)
-            {
-                hitTile = tile;
-            }
-        }
-        if (!hitTile) continue;
-
-        float perpWallDist;
-        if (side == 0)
-        {
-            perpWallDist = ((mapX - engineContext.positionX) + (1 - stepX) * 0.5f) / (rayDirX == 0 ? 1e-6f : rayDirX);
-        }
-        else
-        {
-            perpWallDist = ((mapY - engineContext.positionY) + (1 - stepY) * 0.5f) / (rayDirY == 0 ? 1e-6f : rayDirY);
-        }
-
-        engineContext.zbuffer[ x ] = std::max( std::fabs( perpWallDist ), 0.05f );
-
-      
-    }
-
-
-    float rayDirX0 = engineContext.directionX - engineContext.planeX;
-    float rayDirY0 = engineContext.directionY - engineContext.planeY;
-    float rayDirX1 = engineContext.directionX + engineContext.planeX;
-    float rayDirY1 = engineContext.directionY + engineContext.planeY;
-
-    const float posZ = 0.5f * RENDER_H;
-
-    for (int y = 0; y < RENDER_H; ++y)
-    {
-        const int prop = y - half;
-        if (prop == 0) continue; 
-
-        float rowDist = std::fabs( posZ / float( prop ) ); // distance to this row in world units
-
-        // Step across the row
-        float stepX = rowDist * (rayDirX1 - rayDirX0) / float( RENDER_W );
-        float stepY = rowDist * (rayDirY1 - rayDirY0) / float( RENDER_W );
-
-        // World position at the left edge for this row
-        float worldX = engineContext.positionX + rowDist * rayDirX0;
-        float worldY = engineContext.positionY + rowDist * rayDirY0;
-
-        for (int x = 0; x < RENDER_W; ++x)
-        {
-            float fx = worldX - std::floor( worldX );
-            float fy = worldY - std::floor( worldY );
-
-            if (y >= half)
-            {
-                // Floor
-                if (engineContext.hasFloor)
-                {
-                    int tx = int( fx * engineContext.floorTex.width );
-                    int ty = int( fy * engineContext.floorTex.height );
-                    Uint32 color = engineContext.floorTex.sample( tx, ty );
-                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.30f, 1.0f );
-                    putPix( engineContext, x, y, shadeCol( color, shade) );
-                }
-                else
-                {
-                    putPix( engineContext, x, y, rgb( 12, 12, 14 ) );
-                }
-            }
-            else
-            {
-                // Ceiling
-                if (engineContext.hasCeiling)
-                {
-                    int tx = int( fx * engineContext.ceilTex.width );
-                    int ty = int( fy * engineContext.ceilTex.height );
-                    Uint32 color = engineContext.ceilTex.sample( tx, ty );
-                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.35f, 1.0f );
-                    putPix( engineContext, x, y, shadeCol( color, shade ) );
-                }
-                else
-                {
-                    putPix( engineContext, x, y, rgb( 30, 30, 38 ) );
-                }
-            }
-
-       
-            if (y >= half && rowDist < engineContext.zbuffer[ x ])
-            {
-                if (!engineContext.quads.empty())
-                {
-                    for (const auto &q : engineContext.quads)
-                    {
-                        float u, v;
-                        if (!quadprop_local_uv( q, worldX, worldY, u, v )) continue;
-
-                        Uint32 color = sample_bilinear_uv_keyed( q.texture, u, v );
-
-                        // magenta = transparent
-                        if (((color >> 16) & 255) == 255 && ((color >> 8) & 255) == 0 && (color & 255) == 255)
-                        {
-                            // skip
-                        }
-                        else
-                        {
-                            float shade = std::clamp( (1.0f / (0.02f * rowDist)) * q.AOMultiplier, 0.25f, 1.0f );
-                            Uint8 r = Uint8( ((color >> 16) & 255) * shade );
-                            Uint8 g = Uint8( ((color >> 8) & 255) * shade );
-                            Uint8 box = Uint8( (color & 255) * shade );
-                            putPix( engineContext, x, y, rgb( r, g, box ) );
-                        }
-                    }
-                }
-            }
-
-            worldX += stepX;
-            worldY += stepY;
-        }
-    }
-
-
-    for (int x = 0; x < RENDER_W; ++x)
-    {
-        // Rebuild ray for this column
-        float camX = 2.0f * x / float( RENDER_W ) - 1.0f;
-        float rayDirX = engineContext.directionX + engineContext.planeX * camX;
-        float rayDirY = engineContext.directionY + engineContext.planeY * camX;
-
-        int mapX = int( engineContext.positionX ), mapY = int( engineContext.positionY );
-        float sideDistX, sideDistY;
-        float deltaDistX = (rayDirX == 0) ? 1e30f : std::fabs( 1.0f / rayDirX );
-        float deltaDistY = (rayDirY == 0) ? 1e30f : std::fabs( 1.0f / rayDirY );
-        int stepX = 0;
-        int stepY = 0;
-        int side = 0;
-
-        if (rayDirX < 0)
-        {
-            stepX = -1; 
-            sideDistX = (engineContext.positionX - mapX) * deltaDistX;
-        }
-        else
-        {
-            stepX = 1; 
-            sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
-        }
-        if (rayDirY < 0)
-        {
-            stepY = -1; 
-            sideDistY = (engineContext.positionY - mapY) * deltaDistY;
-        }
-        else
-        {
-            stepY = 1; 
-            sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
-        }
-
+        // DDA
         int hitTile = 0;
         while (!hitTile)
         {
@@ -422,44 +345,35 @@ static void render( Engine &engineContext, float dt ) {
             }
 
             if (mapX < 0 || mapY < 0 || mapX >= engineContext.map.width || mapY >= engineContext.map.height) break;
-
             int tile = engineContext.map.tiles[ mapY * engineContext.map.width + mapX ];
-            if (tile > 0) hitTile = tile; // 1 wall, 2 door
+            if (tile > 0) hitTile = tile;
         }
         if (!hitTile) continue;
 
-        float perpWallDist;
-        if (side == 0)
-        {
-            perpWallDist = ((mapX - engineContext.positionX) + (1 - stepX) * 0.5f) / (rayDirX == 0 ? 1e-6f : rayDirX);
-        }
-        else
-        {
-            perpWallDist = ((mapY - engineContext.positionY) + (1 - stepY) * 0.5f) / (rayDirY == 0 ? 1e-6f : rayDirY);
-        }
-
+        // Perpendicular distance
+        float perpWallDist = (side == 0)
+            ? ((mapX - engineContext.positionX) + (1 - stepX) * 0.5f) / (rayDirX == 0 ? 1e-6f : rayDirX)
+            : ((mapY - engineContext.positionY) + (1 - stepY) * 0.5f) / (rayDirY == 0 ? 1e-6f : rayDirY);
         perpWallDist = std::max( std::fabs( perpWallDist ), 0.05f );
 
+        // Column geometry
         int lineH = int( RENDER_H / std::max( perpWallDist, 1e-3f ) );
-        int drawStart = std::max( 0, -lineH / 2 + RENDER_H / 2 );
-        int drawEnd = std::min( RENDER_H - 1, lineH / 2 + RENDER_H / 2 );
-
-        float wallX;
-        if (side == 0)
-        {
-            wallX = engineContext.positionY + perpWallDist * rayDirY;
-        }
-        else
-        {
-            wallX = engineContext.positionX + perpWallDist * rayDirX;
-        }
-
+        int drawStart = std::max( 0, -lineH / 2 + half );
+        int drawEnd = std::min( RENDER_H - 1, lineH / 2 + half );
+        clipTop[ x ] = std::min( clipTop[ x ], drawStart );
+        clipBot[ x ] = std::max( clipBot[ x ], drawEnd );
+        // Wall X coordinate (for texture)
+        float wallX = (side == 0)
+            ? (engineContext.positionY + perpWallDist * rayDirY)
+            : (engineContext.positionX + perpWallDist * rayDirX);
         wallX -= std::floor( wallX );
 
+        // Texture selection
         const Image &wallTexture = (hitTile == 2) ? engineContext.doorTexture : engineContext.wallTex;
+
+        // Draw wall column (uses fixed-step in RendererHelpers)
         drawTexturedColumn( engineContext, wallTexture, x, drawStart, drawEnd, perpWallDist, wallX );
 
-        // Framed artwork overlay (only on real walls)
         if (hitTile == 1)
         {
             for (size_t artIndex = 0; artIndex < engineContext.artworks.size(); ++artIndex)
@@ -513,7 +427,7 @@ static void render( Engine &engineContext, float dt ) {
                     {
                         bool topOrLeft = (vLocal < vTopFrameEdge + 0.02f) || (uLocal < uLeftFrameEdge + 0.02f);
                         bool bottomOrRight = (vLocal > vBottomFrameEdge - 0.02f) || (uLocal > uRightFrameEdge - 0.02f);
-                        color = goldMid; 
+                        color = goldMid;
                         if (topOrLeft)
                         {
                             color = goldLight;
@@ -552,9 +466,152 @@ static void render( Engine &engineContext, float dt ) {
                 }
             }
         }
+
+        // Fill zbuffer for sprites/floor/ceiling occlusion
+        engineContext.zbuffer[ x ] = perpWallDist;
     }
-    
-    // Props 
+
+    // Floor and ceiling 
+    float rayDirX0 = engineContext.directionX - engineContext.planeX;
+    float rayDirY0 = engineContext.directionY - engineContext.planeY;
+    float rayDirX1 = engineContext.directionX + engineContext.planeX;
+    float rayDirY1 = engineContext.directionY + engineContext.planeY;
+
+    const float posZ = 0.5f * RENDER_H;
+
+    for (int y = 0; y < RENDER_H; ++y)
+    {
+        const int prop = y - half;
+        if (prop == 0) continue;
+
+        float rowDist = std::fabs( posZ / float( prop ) );
+
+        // Step across row
+        float stepX = rowDist * (rayDirX1 - rayDirX0) / float( RENDER_W );
+        float stepY = rowDist * (rayDirY1 - rayDirY0) / float( RENDER_W );
+        float worldX = engineContext.positionX + rowDist * rayDirX0;
+        float worldY = engineContext.positionY + rowDist * rayDirY0;
+
+        for (int x = 0; x < RENDER_W; ++x)
+        {
+            float fx = worldX - std::floor( worldX );
+            float fy = worldY - std::floor( worldY );
+            if (y >= clipTop[ x ] && y <= clipBot[ x ])
+            {
+                worldX += stepX;
+                worldY += stepY;
+                continue; // don't overwrite walls
+            }
+
+            if (y >= half)
+            {
+                if (engineContext.hasFloor)
+                {
+                    int tx = int( fx * engineContext.floorTex.width );
+                    int ty = int( fy * engineContext.floorTex.height );
+                    Uint32 color = engineContext.floorTex.sample( tx, ty );
+
+                    float m = 1.0f;
+
+                    if (engineContext.hasFloorStains)
+                    {
+                        int ox = int( fx * engineContext.floorOverlayStains.width ) % engineContext.floorOverlayStains.width;
+                        int oy = int( fy * engineContext.floorOverlayStains.height ) % engineContext.floorOverlayStains.height;
+                        Uint32 oc = engineContext.floorOverlayStains.sample( ox, oy );
+                        m *= mulFromOverlay( oc, /*strength*/0.45f, /*min*/0.80f, /*max*/1.03f, /*gamma*/1.2f );
+                    }
+                    if (engineContext.hasFloorCracks)
+                    {
+                        int ox = int( fx * engineContext.floorOverlayCracks.width ) % engineContext.floorOverlayCracks.width;
+                        int oy = int( fy * engineContext.floorOverlayCracks.height ) % engineContext.floorOverlayCracks.height;
+                        Uint32 oc = engineContext.floorOverlayCracks.sample( ox, oy );
+                        m *= mulFromOverlay( oc, /*strength*/0.85f, /*min*/0.55f, /*max*/1.00f, /*gamma*/1.6f );
+                    }
+                    if (engineContext.hasFloorPuddles)
+                    {
+                        int ox = int( fx * engineContext.floorOverlayPuddles.width ) % engineContext.floorOverlayPuddles.width;
+                        int oy = int( fy * engineContext.floorOverlayPuddles.height ) % engineContext.floorOverlayPuddles.height;
+                        Uint32 oc = engineContext.floorOverlayPuddles.sample( ox, oy );
+                        m *= mulFromOverlay( oc, /*strength*/0.60f, /*min*/0.70f, /*max*/1.02f, /*gamma*/1.1f );
+                    }
+
+                    color = applyMul( color, m );
+
+                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.30f, 1.0f );
+                    shade *= caveLight( rowDist );  // keep your cave torch falloff
+                    putPix( engineContext, x, y, shadeCol( color, shade ) );
+
+                    if (rowDist < engineContext.zbuffer[ x ] && !engineContext.quadBuckets.empty())
+                    {
+                        if (shade >= 0.06f) // skip work when very dark
+                        {
+                            int txTile = (int)std::floor( worldX );
+                            int tyTile = (int)std::floor( worldY );
+                            if ((unsigned)txTile < (unsigned)engineContext.map.width && (unsigned)tyTile < (unsigned)engineContext.map.height)
+                            {
+                                const auto &bucket = engineContext.quadBuckets[ tyTile * engineContext.map.width + txTile ];
+                                for (int qi : bucket)
+                                {
+                                    const auto &q = engineContext.quads[ qi ];
+                                    float u, v;
+                                    if (!quadprop_local_uv( q, worldX, worldY, u, v )) continue;
+
+                                    Uint32 dc = sample_bilinear_uv_keyed( q.texture, u, v );
+                                    // magenta keyed; ignore transparent
+                                    if (((dc >> 16) & 255) == 255 && ((dc >> 8) & 255) == 0 && (dc & 255) == 255) continue;
+
+                                    // Treat quad as neutral detail: compute multiplier from its luminance
+                                    float mul = mulFromOverlay( dc, /*strength*/1.00f, /*min*/0.55f, /*max*/1.05f, /*gamma*/1.4f );
+                                    // Incorporate decal AO & cave light (as darkening influence)
+                                    float ao = std::clamp( q.AOMultiplier, 0.5f, 1.0f );
+                                    float l = caveLight( rowDist );
+                                    float finalMul = std::clamp( mul * (0.9f + 0.1f * ao) * l, 0.0f, 1.05f );
+
+                                    // Multiply the pixel already written in backbuffer
+                                    Uint32 under = engineContext.backbuffer[ y * RENDER_W + x ];
+                                    putPix( engineContext, x, y, applyMul( under, finalMul ) );
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    putPix( engineContext, x, y, rgb( 12, 12, 14 ) );
+                }
+            }
+            else
+            {
+                if (y >= clipTop[ x ] && y <= clipBot[ x ])
+                {
+                    worldX += stepX;
+                    worldY += stepY;
+                    continue; // don't overwrite walls
+                }
+
+                // Ceiling
+                if (engineContext.hasCeiling)
+                {
+                    int tx = int( fx * engineContext.ceilTex.width );
+                    int ty = int( fy * engineContext.ceilTex.height );
+                    Uint32 color = engineContext.ceilTex.sample( tx, ty );
+                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.35f, 1.0f );
+                    shade *= caveLight( rowDist );             
+
+                    putPix( engineContext, x, y, shadeCol( color, shade ) );
+                }
+                else
+                {
+                    putPix( engineContext, x, y, rgb( 30, 30, 38 ) );
+                }
+            }
+
+            worldX += stepX;
+            worldY += stepY;
+        }
+    }
+
+	// Props (billboarded)
     for (size_t i = 0; i < engineContext.props.size(); ++i)
     {
         const auto &prop = engineContext.props[ i ];
@@ -568,31 +625,22 @@ static void render( Engine &engineContext, float dt ) {
         if (transY <= 0) continue;
 
         int spriteScreenX = int( (RENDER_W / 2) * (1 + transX / transY) );
-
-        // Unscaled height at this distance
         float baseH = (RENDER_H / transY);
-
-        // Scaled screen size
         int spriteH = std::max( 1, int( std::fabs( baseH * prop.scale ) ) );
-        int spriteW = spriteH; // square billboard
-
-        // Floor-contact Y in screen space (stable regardless of scale)
+        int spriteW = spriteH;
         int bottomY = int( RENDER_H * 0.5f + baseH * 0.5f );
 
-        // Sprite rect in screen space BEFORE clipping
-        int y0 = bottomY - spriteH;   // top
-        int y1 = bottomY - 1;         // bottom inclusive
+        int y0 = bottomY - spriteH;
+        int y1 = bottomY - 1;
         int x0 = -spriteW / 2 + spriteScreenX;
         int x1 = spriteW / 2 + spriteScreenX - 1;
 
-        // Clip to screen, but remember unclipped origins for texture mapping
         int cy0 = std::max( 0, y0 );
         int cy1 = std::min( RENDER_H - 1, y1 );
         int cx0 = std::max( 0, x0 );
         int cx1 = std::min( RENDER_W - 1, x1 );
         if (cy0 > cy1 || cx0 > cx1) continue;
 
-        // Precompute reciprocal for mapping
         float invSpriteH = 1.0f / std::max( 1, spriteH );
         float invSpriteW = 1.0f / std::max( 1, spriteW );
 
@@ -600,14 +648,12 @@ static void render( Engine &engineContext, float dt ) {
         {
             if (!(transY > 0 && transY < engineContext.zbuffer[ sx ])) continue;
 
-            // Horizontal texture coord: use unclipped sprite left x0
-            float u = float( sx - x0 ) * invSpriteW;     // 0..1 across sprite width
+            float u = float( sx - x0 ) * invSpriteW;
             int texX = std::clamp( int( u * texture.width ), 0, texture.width - 1 );
 
             for (int sy = cy0; sy <= cy1; ++sy)
             {
-                // Vertical texture coord: use unclipped top y0
-                float v = float( sy - y0 ) * invSpriteH; // 0..1 down sprite height
+                float v = float( sy - y0 ) * invSpriteH;
                 int texY = std::clamp( int( v * texture.height ), 0, texture.height - 1 );
 
                 Uint32 color = texture.sample( texX, texY );
@@ -619,23 +665,19 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
+    // 3D benches
+   /* for (const auto &box : engineContext.benches3D)
+    {
+        render_box( engineContext, box );
+        render_legs( engineContext, box );
+        // render_box_top( engineContext, box, (box.sideTexure.width > 0 ? box.sideTexure : engineContext.floorTex) );
+    }
+    */
 
-       for (const auto &box : engineContext.benches3D)
-        {
-            render_box( engineContext, box );
-            render_legs( engineContext, box );
-
-           // render_box_top( engineContext, box, (box.sideTexure.width > 0 ? box.sideTexure : engineContext.floorTex) );
-
-        }
-
-    
-       // UI
     if (engineContext.showHelp)
     {
-
-        drawTextBox( engineContext, 4, 4, 110, 12, rgb( 10, 10, 16 ), rgb( 90, 90, 120 ) );
-        drawStringTiny( engineContext, 8, 8, "E: Interact, F: Open Door", rgb( 220, 220, 220 ) );
+        //drawTextBox( engineContext, 4, 4, 250, 25, rgb( 10, 10, 16 ), rgb( 90, 90, 120 ) );
+        drawStringTinyScaled( engineContext, 10, RENDER_H - 50, "E: Interact, F: Open Door", rgb( 255, 0, 0), 3, 3, 3, true );
     }
 
     if (engineContext.placardOpen && engineContext.openArtId >= 0)
@@ -645,8 +687,7 @@ static void render( Engine &engineContext, float dt ) {
         {
             if (artWork.id == engineContext.openArtId)
             {
-                art = &artWork;
-                break;
+                art = &artWork; break;
             }
         }
         if (art)
@@ -655,21 +696,20 @@ static void render( Engine &engineContext, float dt ) {
             int x = 8, y = RENDER_H - 130;
             drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
             std::string header = art->title + " (" + art->date + ")\n" +
-                art->artist + " — " + art->period + "\n" +
+                art->artist + " ? " + art->period + "\n" +
                 art->medium + ", " + art->location + "\n";
-            drawStringTiny( engineContext, x + 8, y + 8, header, rgb( 230, 230, 240 ) );
-            drawStringTiny( engineContext, x + 8, y + 26, "Why it matters:\n" + art->rationale, rgb( 210, 210, 210 ) );
-            drawStringTiny( engineContext, x + 8, y + 44, "My take:\n" + art->reflection, rgb( 200, 200, 200 ) );
+            drawStringTinyScaled( engineContext, x + 8, y + 8, header, rgb( 230, 230, 240 ), 3, 5, 5, false );
+            drawStringTinyScaled( engineContext, x + 8, y + 40, "Why it matters:\n" + art->rationale, rgb( 210, 210, 210 ), 3, 5, 55, false);
+            drawStringTinyScaled( engineContext, x + 8, y + 72, "My take:\n" + art->reflection, rgb( 200, 200, 200 ), 3, 5, 55, false );
         }
     }
 
+    // Crosshair
     putPix( engineContext, RENDER_W / 2, RENDER_H / 2, rgb( 0, 0, 0 ) );
     putPix( engineContext, RENDER_W / 2 + 1, RENDER_H / 2, rgb( 0, 0, 0 ) );
     putPix( engineContext, RENDER_W / 2 - 1, RENDER_H / 2, rgb( 0, 0, 0 ) );
     putPix( engineContext, RENDER_W / 2, RENDER_H / 2 + 1, rgb( 0, 0, 0 ) );
     putPix( engineContext, RENDER_W / 2, RENDER_H / 2 - 1, rgb( 0, 0, 0 ) );
-
-
 }
 
 
@@ -684,7 +724,7 @@ int main( int argc, char **argv ) {
         return 1;
     }
 
-    Engine engineContext; 
+    Engine engineContext;
     engineContext.backbuffer.resize( RENDER_W * RENDER_H );
     engineContext.window = SDL_CreateWindow( "Micro Museum", RENDER_W * WIN_SCALE, RENDER_H * WIN_SCALE, 0 );
     SDL_SetWindowPosition( engineContext.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED );
@@ -698,23 +738,24 @@ int main( int argc, char **argv ) {
 
     if (!engineContext.renderer)
     {
-        std::fprintf( stderr, "SDL_CreateRenderer: %s\n", SDL_GetError() ); 
+        std::fprintf( stderr, "SDL_CreateRenderer: %s\n", SDL_GetError() );
         return 1;
     }
     engineContext.backtexure = SDL_CreateTexture( engineContext.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, RENDER_W, RENDER_H );
 
 
- 
+
     engineContext.hasFloor = true;
     engineContext.hasCeiling = true;
 
     std::filesystem::path cwd = std::filesystem::current_path();
 
     std::vector<LevelDef> levels = {
-    {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 1.5f, 90.f }
+    {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 1.5f, 90.f, 0 },
+    {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 }
     };
 
-    int curLevel = 0;
+    int curLevel = 1;
     if (!loadLevel( engineContext, levels[ curLevel ] )) return 1;
 
     std::vector<float2> floors, doors, walls;
@@ -745,16 +786,17 @@ int main( int argc, char **argv ) {
         }
     }
     */
-   
+
 
     // Main loop
-    bool running = true; Uint32 prev = SDL_GetTicks();
+    bool running = true; 
+    Uint32 prev = SDL_GetTicks();
     while (running)
     {
 
-        Uint32 now = SDL_GetTicks(); 
-        float dt = (now - prev) / 1000.0f; 
-        prev = now; 
+        Uint32 now = SDL_GetTicks();
+        float dt = (now - prev) / 1000.0f;
+        prev = now;
         if (dt > 0.05f) dt = 0.05f;
         // Input
         SDL_Event ev;
@@ -828,7 +870,7 @@ int main( int argc, char **argv ) {
                 else if (ev.key.scancode == SDL_SCANCODE_C)
                 {
                     float2 pos( engineContext.positionX, engineContext.positionY );
-                    placeCan( engineContext, pos, levels[ curLevel ].folder + "/trashcan.bmp");
+                    placeCan( engineContext, pos, levels[ curLevel ].folder + "/trashcan.bmp" );
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_O)
                 {
@@ -838,7 +880,8 @@ int main( int argc, char **argv ) {
             }
         }
         const bool *ks = SDL_GetKeyboardState( nullptr );
-        float ms = actualSpeed * dt; float ts = TURN_SPEED * dt;
+        float ms = actualSpeed * dt;
+        float ts = TURN_SPEED * dt;
         if (ks[ SDL_SCANCODE_LEFT ])
         {
             float ang = -ts;
@@ -867,7 +910,7 @@ int main( int argc, char **argv ) {
         }
         if (ks[ SDL_SCANCODE_S ])
         {
-            nx -= engineContext.directionX * ms; 
+            nx -= engineContext.directionX * ms;
             ny -= engineContext.directionY * ms;
         }
         // strafe: A/D
@@ -887,6 +930,8 @@ int main( int argc, char **argv ) {
             int t = engineContext.map.tiles[ my * engineContext.map.width + mx ];
             if (t != 0) return false;
 
+
+            /*
             // Quad collisions: inflate bench art tiny bit
             for (const auto &q : engineContext.quads)
             {
@@ -898,8 +943,8 @@ int main( int argc, char **argv ) {
                     const float pad = 0.02f;
                     if (u > pad && u < 1.0f - pad && v > pad && v < 1.0f - pad) return false;
                 }
-            }
-
+            }*/
+            /*
             const float pad = 0.02f;
             for (const auto &box : engineContext.benches3D)
             {
@@ -915,7 +960,7 @@ int main( int argc, char **argv ) {
                 {
                     return false; // blocked by bench body
                 }
-            }
+            }*/
             return true;
             };
         // Use art radius
@@ -934,7 +979,7 @@ int main( int argc, char **argv ) {
             {
                 if (under == engineContext.openArtId)
                 {
-                    engineContext.lastPlacardTick = now; // still looking at it ? refresh timer
+                    engineContext.lastPlacardTick = now; // still looking at it: refresh timer
                 }
                 else if (now - engineContext.lastPlacardTick > KEEP_MS)
                 {
@@ -952,9 +997,9 @@ int main( int argc, char **argv ) {
         SDL_RenderPresent( engineContext.renderer );
     }
 
-    SDL_DestroyTexture( engineContext.backtexure ); 
+    SDL_DestroyTexture( engineContext.backtexure );
     SDL_DestroyRenderer( engineContext.renderer );
-    SDL_DestroyWindow( engineContext.window ); 
+    SDL_DestroyWindow( engineContext.window );
     SDL_Quit();
     return 0;
 }

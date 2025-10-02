@@ -10,7 +10,7 @@ static inline Uint32 rgb( Uint8 r, Uint8 g, Uint8 b ) {
 struct Image
 {
     int width = 0;
-    int height = 0; 
+    int height = 0;
     std::vector<Uint32> pixels; // ARGB8888
     int resolution = 1;
     bool loadBMP( const std::string &path ) {
@@ -22,7 +22,7 @@ struct Image
             std::fprintf( stderr, "SDL_LoadBMP failed for %s: %s\n", path.c_str(), SDL_GetError() );
             return false;
         }
-		// Get converted surface into a format for pixel colors 
+        // Get converted surface into a format for pixel colors 
         SDL_Surface *ColoredSurface = SDL_ConvertSurface( BMPSurface, SDL_PIXELFORMAT_ARGB8888 );
         SDL_DestroySurface( BMPSurface );
 
@@ -31,7 +31,7 @@ struct Image
             std::fprintf( stderr, "SDL_ConvertSurface failed for %s: %s\n", path.c_str(), SDL_GetError() );
             return false;
         }
-		// Set width, height, and copy pixel data
+        // Set width, height, and copy pixel data
         width = ColoredSurface->w;
         height = ColoredSurface->h;
         resolution = width * height;
@@ -40,11 +40,11 @@ struct Image
         SDL_DestroySurface( ColoredSurface );
         return true;
     }
-	// Gets pixel color data at (x,y) snapping to nearest valid pixel if needed
+    // Gets pixel color data at (x,y) snapping to nearest valid pixel if needed
     Uint32 sample( int x, int y ) const {
-        x = std::clamp( x, 0, width - 1 ); 
-        y = std::clamp( y, 0, height - 1 ); 
-		// Convert from 2D to 1D index with row-major order using offset of x
+        x = std::clamp( x, 0, width - 1 );
+        y = std::clamp( y, 0, height - 1 );
+        // Convert from 2D to 1D index with row-major order using offset of x
         return pixels[ y * width + x ];
     }
 };
@@ -53,8 +53,8 @@ struct Map
 {
     // Map width, height
     int width = 0;
-    int height = 0; 
-	// Type of tile: door, wall, empty
+    int height = 0;
+    // Type of tile: door, wall, empty
     std::vector<int> tiles;
 };
 
@@ -62,7 +62,7 @@ struct Prop
 {
     float x, y;       // world position
     int textureID = -1;        // which texture to use
-    std::string kind;     
+    std::string kind;
     std::string filename; // original bmp filename
     float scale = 1.0f;
 };
@@ -82,21 +82,21 @@ struct QuadProp
     // Texture
     Image texture;
     std::string texturePath;
-    
-	// Direction vectors (unit length)
+
+    // Direction vectors (unit length)
     float ux = 1.0f, uy = 0.0f;   // +U
     float vx = 0.0f, vy = 1.0f;   // +V
-	// Ambient occlusion multiplier (1.0 = none) or shading factor
+    // Ambient occlusion multiplier (1.0 = none) or shading factor
     float AOMultiplier = 1.0f;
 
-    std::string kind;     
-    std::string filename; 
+    std::string kind;
+    std::string filename;
 };
 
 
 struct Artwork
 {
-	// Wall x,y if on wall; -1,-1 if free-standing
+    // Wall x,y if on wall; -1,-1 if free-standing
     int wx = -1;
     int wy = -1;
     int side = -1;
@@ -105,7 +105,7 @@ struct Artwork
     float vCenter = 0.67f;   // vertical center
     float vHeight = 1.5f;   // height on the wall
     bool onWall = false;
-    int id = 0; 
+    int id = 0;
     std::string title;
     std::string artist;
     std::string date;
@@ -123,15 +123,15 @@ struct Sprite
 {
     float x;
     float y;
-    int textureID; 
-    int artworkID; 
+    int textureID;
+    int artworkID;
     float distance;
 };
 
 
 struct BoxProp
 {
- 
+
     float centerX = 0.f;
     float centerY = 0.f;
 
@@ -156,19 +156,19 @@ struct BoxProp
 
 struct Engine
 {
-    SDL_Window *window = nullptr; 
-    SDL_Renderer *renderer = nullptr; 
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
     SDL_Texture *backtexure = nullptr; // streaming texture
     std::vector<Uint32> backbuffer;
 
-    Map map; 
-    Image wallTex; 
-    Image floorTex; 
-    Image ceilTex; 
+    Map map;
+    Image wallTex;
+    Image floorTex;
+    Image ceilTex;
     bool hasFloor = false;
     bool hasCeiling = false;
-    std::vector<Artwork> artworks; 
-    std::vector<Image> artImages; 
+    std::vector<Artwork> artworks;
+    std::vector<Image> artImages;
     std::vector<Sprite> sprites;
 
     float positionX = 3.5f, positionY = 3.5f; // player pos
@@ -177,10 +177,10 @@ struct Engine
     float planeY = directionX * FOV_TAN;
     std::vector<float> zbuffer; // SSAO
 
-    bool showHelp = true; 
-    int nearestArt = -1; 
+    bool showHelp = true;
+    int nearestArt = -1;
     Uint32 lastPlacardTick = 0;
-    bool placardOpen = false; 
+    bool placardOpen = false;
     int openArtId = -1;
 
     Image doorTexture;
@@ -189,8 +189,38 @@ struct Engine
     std::vector<Image> propImages;
 
     std::vector<QuadProp> quads;
+    std::vector<std::vector<int>> quadBuckets;
 
     std::vector<BoxProp> benches3D;   // NEW: true 3D benches (box + legs)
+
+    bool caveMode = false;
+    bool hasWallOverlay = false;
+	float lightRadius = 5.0f;
+	float lightFalloff = 2.0f;
+	float caveAmbient = 0.08f;
+
+    Image wallOverlay;
+    Image floorOverlayCracks, floorOverlayStains, floorOverlayPuddles;
+    bool hasFloorCracks = false, hasFloorStains = false, hasFloorPuddles = false;
+
+    Image wallOverlayCracks, wallOverlayStains;   // (file name: wall_stain.bmp)
+    bool hasWallCracks = false, hasWallStains = false;
+
+    struct GrayTex
+    {
+        int width = 0, height = 0;
+        std::vector<Uint8> data;  // 0..255, treated as multiplier m = v/255
+        bool valid() const {
+            return width > 0 && height > 0 && (int)data.size() == width * height;
+        }
+    };
+
+
+    // Combined, baked multipliers (precomposed from cracks/stains/puddles)
+    GrayTex floorMul;   
+    bool hasFloorMul = false;
+    GrayTex wallMul;    
+    bool hasWallMul = false;
 };
 
 
@@ -202,7 +232,7 @@ static bool loadMap( const std::string &path, Map &mapToLoad ) {
     }
 
 
-    std::vector<std::string> lines; 
+    std::vector<std::string> lines;
     std::string line;
 
 
@@ -242,7 +272,7 @@ inline void makeDirectionalQuad( QuadProp &prop, float centerX, float centerY, f
     const float cos = std::cos( angleRadian );
     const float sin = std::sin( angleRadian );
 
-	// For both multiply by sin/cos to get direction, then by 0.5*length/depth to get depth
+    // For both multiply by sin/cos to get direction, then by 0.5*length/depth to get depth
 
     // half extent vectors
     prop.ux = 0.5f * length * cos;
@@ -255,7 +285,7 @@ inline void makeDirectionalQuad( QuadProp &prop, float centerX, float centerY, f
 }
 
 static bool splitLine( const std::string &s, char sep, std::vector<std::string> &out ) {
-    out.clear(); 
+    out.clear();
     std::string cur; cur.reserve( s.size() );
     for (char c : s)
     {
@@ -267,21 +297,21 @@ static bool splitLine( const std::string &s, char sep, std::vector<std::string> 
         {
             cur.push_back( c );
         }
-    } out.push_back( cur ); 
+    } out.push_back( cur );
     return true;
 }
 
 // id|title|artist|date|period|medium|location|placard|rationale|reflection|imagePath|x|y
 static bool loadArtworks( const std::string &path, std::vector<Artwork> &works ) {
     std::ifstream artFileStream( path );
-    
+
     if (!artFileStream.is_open())
     {
         std::fprintf( stderr, "Couldn't open %s\n", path.c_str() ); return false;
     }
 
-    std::string line; 
-    int lineTrack = 0; 
+    std::string line;
+    int lineTrack = 0;
     works.clear();
 
     while (std::getline( artFileStream, line ))
@@ -296,19 +326,19 @@ static bool loadArtworks( const std::string &path, std::vector<Artwork> &works )
             std::fprintf( stderr, "Bad line %d in %s (got %zu fields)\n", lineTrack, path.c_str(), v.size() ); continue;
         }
 
-        Artwork art; 
-        art.id = std::stoi( v[ 0 ] ); 
-        art.title = v[ 1 ]; 
-        art.artist = v[ 2 ]; 
-        art.date = v[ 3 ]; 
-        art.period = v[ 4 ]; 
-        art.medium = v[ 5 ]; 
+        Artwork art;
+        art.id = std::stoi( v[ 0 ] );
+        art.title = v[ 1 ];
+        art.artist = v[ 2 ];
+        art.date = v[ 3 ];
+        art.period = v[ 4 ];
+        art.medium = v[ 5 ];
         art.location = v[ 6 ];
-        art.placard = v[ 7 ]; 
-        art.rationale = v[ 8 ]; 
-        art.reflection = v[ 9 ]; 
-        art.imagePath = v[ 10 ]; 
-        art.x = std::stof( v[ 11 ] ); 
+        art.placard = v[ 7 ];
+        art.rationale = v[ 8 ];
+        art.reflection = v[ 9 ];
+        art.imagePath = v[ 10 ];
+        art.x = std::stof( v[ 11 ] );
         art.y = std::stof( v[ 12 ] );
         works.push_back( art );
     }
@@ -318,8 +348,8 @@ static bool loadArtworks( const std::string &path, std::vector<Artwork> &works )
 static bool loadImageOrFallback( const std::string &path, Image &out, Uint32 fillRgb = 0 ) {
     if (out.loadBMP( path )) return true;
     // simple 64x64 fallback if missing
-    out.width = 64; 
-    out.height = 64; 
+    out.width = 64;
+    out.height = 64;
     out.pixels.assign( 64 * 64, fillRgb ? fillRgb : rgb( 255, 0, 255 ) );
     return false;
 }
@@ -333,8 +363,8 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
         return false;
     }
 
-    outProps.clear(); 
-    outQuads.clear(); 
+    outProps.clear();
+    outQuads.clear();
     outPropImages.clear();
 
     const fs::path base = fs::path( path ).parent_path();
@@ -369,7 +399,7 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
 
         if (kind.empty()) continue;
 
-		// Normalize to uppercase
+        // Normalize to uppercase
         for (auto &c : kind)
         {
             c = char( std::toupper( unsigned char( c ) ) );
@@ -394,7 +424,7 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
 
             if (!(ss >> scale)) scale = 1.0f;
             Prop prop;
-            prop.x = x; 
+            prop.x = x;
             prop.y = y;
             prop.textureID = getBillboardTextureIndex( bmp );
             prop.kind = kind;
@@ -410,7 +440,7 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
                 std::fprintf( stderr, "Bad %s line %d\n", kind.c_str(), lineTrack ); continue;
             }
             Prop prop;
-            prop.x = x; 
+            prop.x = x;
             prop.y = y;
             prop.textureID = getBillboardTextureIndex( bmp );
             prop.kind = kind;
@@ -425,9 +455,9 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
 static inline void quadprop_recalc_axes( QuadProp &quad ) {
     float cos = std::cos( quad.angle );
     float sin = std::sin( quad.angle );
-    quad.ux = cos; 
+    quad.ux = cos;
     quad.uy = sin;
-    quad.vx = -sin; 
+    quad.vx = -sin;
     quad.vy = cos;
 }
 
@@ -441,7 +471,7 @@ inline bool quadprop_local_uv( const QuadProp &quad, float wx, float wy,
 
     const float UdotU = quad.ux * quad.ux + quad.uy * quad.uy;
     const float VdotV = quad.vx * quad.vx + quad.vy * quad.vy;
-	// Degenerate test
+    // Degenerate test
     if (UdotU < 1e-8f || VdotV < 1e-8f) return false;
 
     const float dU = dx * quad.ux + dy * quad.uy;
@@ -458,12 +488,12 @@ inline bool quadprop_local_uv( const QuadProp &quad, float wx, float wy,
 
 static bool addQuadProp( Engine &engineContext, float centerX, float centerY, float width, float depth, float angle, const char *texturePath, float AO = 1.0f ) {
     QuadProp quad;
-    quad.centerX = centerX; 
-    quad.centerY = centerY; 
-    quad.width = width; 
-    quad.depth = depth; 
-    quad.angle = angle; 
-    quad.texturePath = texturePath; 
+    quad.centerX = centerX;
+    quad.centerY = centerY;
+    quad.width = width;
+    quad.depth = depth;
+    quad.angle = angle;
+    quad.texturePath = texturePath;
     quad.AOMultiplier = AO;
 
     // Compute coords for local axes and vectors
@@ -471,9 +501,9 @@ static bool addQuadProp( Engine &engineContext, float centerX, float centerY, fl
 
     if (!quad.texture.loadBMP( quad.texturePath ))
     {
-       // Throw error
+        // Throw error
         std::fprintf( stderr, "Couldn't load quad texture %s\n", texturePath );
-		return false;
+        return false;
     }
     engineContext.quads.push_back( std::move( quad ) );
     return true;
@@ -491,7 +521,7 @@ void placePlant( Engine &engineContext, const float2 &position, const std::strin
     int textureID = (int)engineContext.propImages.size();
     engineContext.propImages.push_back( std::move( img ) );
     plant.textureID = textureID;
-  //  p.scale = 0.8f;
+    //  p.scale = 0.8f;
     engineContext.props.push_back( plant );
 }
 
@@ -550,12 +580,12 @@ void placeVase( Engine &engineContext, const float2 &position, const std::string
     vase.y = position.y;
     vase.kind = actualVase;
     vase.scale = 0.5f;
-    
+
 
 
     // Load texture once (if not already loaded)
     Image img;
-    loadImageOrFallback( bmp + "/" + vase.filename, img, rgb(255, 0, 255));
+    loadImageOrFallback( bmp + "/" + vase.filename, img, rgb( 255, 0, 255 ) );
     int texId = (int)engineContext.propImages.size();
     engineContext.propImages.push_back( std::move( img ) );
     vase.textureID = texId;
@@ -599,7 +629,7 @@ static bool saveProps( const std::string &path, const std::vector<Prop> &props, 
     {
         const Prop &prop = props[ index ];
 
-        propsFileStream << prop.kind << " " << prop.x << " " << prop.y<< " " << prop.filename << " " << prop.scale << "\n";
+        propsFileStream << prop.kind << " " << prop.x << " " << prop.y << " " << prop.filename << " " << prop.scale << "\n";
     }
 
     /*
@@ -607,7 +637,7 @@ static bool saveProps( const std::string &path, const std::vector<Prop> &props, 
     for (size_t i = 0; i < quads.size(); i++)
     {
         const QuadProp &q = quads[ i ];
-        // You’ll need to store back the params you used for make_oriented_quad.
+        // You?ll need to store back the params you used for make_oriented_quad.
         // For now, dump as BENCH placeholder.
         f << "BENCH " << q.cx << " " << q.cy
             << " " << q.len << " " << q.wid

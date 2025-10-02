@@ -24,7 +24,75 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
         float t = (y - drawStart) / float( std::max( height, 1 ) );
         int textureY = int( t * (textureH - 1) );
         Uint32 color = texture.sample( textureX, textureY );
+        float mul = 1.0f;
+
+        // Use texture-space tiling so overlays repeat seamlessly regardless of texture size
+        if (engineContext.hasWallStains) {
+            int ow = engineContext.wallOverlayStains.width, oh = engineContext.wallOverlayStains.height;
+            if (ow > 0 && oh > 0) {
+                int ox = (int)((textureX / float(textureW)) * ow) % ow;
+                int oy = (int)((textureY / float(textureH)) * oh) % oh;
+                if (ox < 0) ox += ow; if (oy < 0) oy += oh;
+                Uint32 oc = engineContext.wallOverlayStains.sample(ox, oy);
+                // Subtle, broad discoloration
+                // strength, min..max, gamma tuned to keep color natural
+                float m = 1.0f - 0.40f * (1.0f - std::pow(
+                    std::clamp((0.299f*((oc>>16)&255) + 0.587f*((oc>>8)&255) + 0.114f*(oc&255)) / 255.0f, 0.0f, 1.0f), 1.2f));
+                mul *= std::clamp(m, 0.85f, 1.03f);
+            }
+        }
+        if (engineContext.hasWallCracks) {
+            int ow = engineContext.wallOverlayCracks.width, oh = engineContext.wallOverlayCracks.height;
+            if (ow > 0 && oh > 0) {
+                int ox = (int)((textureX / float(textureW)) * ow) % ow;
+                int oy = (int)((textureY / float(textureH)) * oh) % oh;
+                if (ox < 0) ox += ow; if (oy < 0) oy += oh;
+                Uint32 oc = engineContext.wallOverlayCracks.sample(ox, oy);
+                // Stronger dark filaments, no color shift
+                float L = (0.299f*((oc>>16)&255) + 0.587f*((oc>>8)&255) + 0.114f*(oc&255)) / 255.0f;
+                float m = 1.0f - 0.90f * (1.0f - std::pow(std::clamp(L, 0.0f, 1.0f), 1.6f));
+                mul *= std::clamp(m, 0.55f, 1.00f);
+            }
+        }
+
+        // Apply brightness multiplier 
+        {
+            float rf = float((color >> 16) & 255) * mul;
+            float gf = float((color >> 8 ) & 255) * mul;
+            float bf = float( color        & 255) * mul;
+            color = rgb(
+                Uint8(std::clamp(rf, 0.0f, 255.0f)),
+                Uint8(std::clamp(gf, 0.0f, 255.0f)),
+                Uint8(std::clamp(bf, 0.0f, 255.0f))
+            );
+        }
+
+
+        if (engineContext.caveMode && engineContext.hasWallOverlay)
+        {
+            int ox = textureX % engineContext.wallOverlay.width;
+            int oy = textureY % engineContext.wallOverlay.height;
+            Uint32 o = engineContext.wallOverlay.sample( ox, oy );
+            float mr = (((o >> 16) & 255) / 255.0f) * 0.20f + 0.85f;
+            float mg = (((o >> 8) & 255) / 255.0f) * 0.20f + 0.85f;
+            float mb = ((o & 255) / 255.0f) * 0.20f + 0.85f;
+            Uint8 r = Uint8( ((color >> 16) & 255) * mr );
+            Uint8 g = Uint8( ((color >> 8) & 255) * mg );
+            Uint8 b = Uint8( (color & 255) * mb );
+            color = rgb( r, g, b );
+        }
+
+
         float shade = std::clamp( 1.0f / (0.4f * perpDist), 0.15f, 1.0f );
+
+        if (engineContext.caveMode)
+        {
+            float R = engineContext.lightRadius;
+            float t = std::clamp( 1.0f - std::pow( perpDist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+            float l = std::max( engineContext.caveAmbient, t );
+            shade *= l;
+        }
+
         Uint8 r = (color >> 16) & 255, g = (color >> 8) & 255, box = color & 255;
         r = Uint8( r * shade ); g = Uint8( g * shade ); box = Uint8( box * shade );
         putPix( engineContext, x, y, rgb( r, g, box ) );
@@ -109,6 +177,31 @@ static const std::unordered_map<char, Glyph> TINY_GLYPHS = {
     {'Z', {0b111,0b001,0b010,0b100,0b111}},
 };
 
+
+static void drawGlyphTinyScaled( Engine &engineContext, int x, int y, const Glyph &g, Uint32 color, int scale ) {
+    if (scale <= 0) return;
+    for (int row = 0; row < 5; ++row)
+    {
+        uint8_t mask = g[ row ];
+        for (int bit = 0; bit < 3; ++bit)
+        {
+            if (mask & (1 << (2 - bit)))
+            {
+                // scale the single pixel into a scale x scale block
+                int px = x + bit * scale;
+                int py = y + row * scale;
+                for (int dy = 0; dy < scale; ++dy)
+                {
+                    Uint32 *dst = &engineContext.backbuffer[ (py + dy) * RENDER_W + px ];
+                    for (int dx = 0; dx < scale; ++dx) dst[ dx ] = color;
+                }
+            }
+        }
+    }
+}
+
+
+
 static std::string asciiize( const std::string &s ) {
     std::string out; out.reserve( s.size() );
     for (size_t i = 0; i < s.size(); )
@@ -163,6 +256,55 @@ static std::string asciiize( const std::string &s ) {
     return out;
 }
 
+static void drawCharTinyScaled( Engine &engineContext, int x, int y, char c, Uint32 color, int scale ) {
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
+    auto it = TINY_GLYPHS.find( c );
+    if (it == TINY_GLYPHS.end()) it = TINY_GLYPHS.find( '?' );
+    const Glyph &g = (it != TINY_GLYPHS.end()) ? it->second : TINY_GLYPHS.at( ' ' );
+    drawGlyphTinyScaled( engineContext, x, y, g, color, scale );
+}
+
+static void drawStringTinyScaled( Engine &engineContext,
+    int x, int y,
+    const std::string &text,
+    Uint32 color,
+    int scale,
+    int letterSpacing = 1,
+    int lineSpacing = 1,
+    bool dropShadow = true ) {
+    std::string t = asciiize( text );
+
+    const int charW = 3 * scale;
+    const int charH = 5 * scale;
+    const int advX = charW + letterSpacing;  // original was 3+1 = 4
+    const int advY = charH + lineSpacing;    // original was 5+1 = 6
+
+    int cx = x, cy = y;
+
+    for (char c : t)
+    {
+        if (c == '\n' || cx > RENDER_W - advX)
+        {
+            // newline or wrap
+            if (c == '\n')
+            { /* keep */
+            }
+            cx = x;
+            cy += advY;
+            if (c == '\n') continue;
+        }
+
+        if (dropShadow)
+        {
+            // subtle 1px*scale shadow for readability
+            drawCharTinyScaled( engineContext, cx + scale, cy + scale, c, rgb( 0, 0, 0 ), scale );
+        }
+        drawCharTinyScaled( engineContext, cx, cy, c, color, scale );
+        cx += advX;
+    }
+}
+
+
 static void drawCharTiny( Engine &engineContext, int x, int y, char c, Uint32 color ) {
     // Uppercase a–z to A–Z
     if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
@@ -195,13 +337,16 @@ static void drawStringTiny( Engine &engineContext, int x, int y, const std::stri
     {
         if (c == '\n')
         {
-            centerY += 6; centerX = x; continue;
+            centerY += 6; 
+            centerX = x; 
+            continue;
         }
         drawCharTiny( engineContext, centerX, centerY, c, color );
         centerX += 4;                       // advance
         if (centerX > RENDER_W - 4)
         {
-            centerY += 6; centerX = x;
+            centerY += 6; 
+            centerX = x;
         }
     }
 }
