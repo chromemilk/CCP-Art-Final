@@ -107,6 +107,31 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
                 loadImageOrFallback( ip.string(), engineContext.artImages[ i ], rgb( 220, 220, 220 ) );
             }
         }
+
+        {
+            BoxProp box;
+            box.centerX = 2.6f; box.centerY = 2.0f;
+            box.halfLength = 0.5f;   // 2.0m long
+            box.halfDepth = 0.35f;  // 0.5m deep
+            box.height = 0.15f; // 55cm tall
+            box.angle = 3.14159265f;
+
+            // Load textures (or reuse existing images)
+            if (!box.sideTexure.loadBMP( (folder / "bench.bmp").string() ))
+            {
+                box.sideTexure.width = 64; box.sideTexure.height = 64; box.sideTexure.pixels.assign( 64 * 64, rgb( 139, 90, 43 ) );
+            }
+
+            box.legTexure = box.sideTexure; // fallback
+
+
+            box.legHalf = 0.05f;
+            box.legInsetLength = 0.05f;   // pull legs inward along length
+            box.legInsetDepth = 0.05f;   // pull legs inward along depth
+
+            engineContext.benches3D.push_back( std::move( box ) );
+
+        }
     }
 
     engineContext.caveMode = (level.levelId == Levels::CAVE);
@@ -611,6 +636,18 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
+    // 3D benches
+    if (engineContext.benches3D.size() > 0)
+    {
+        for (const auto &box : engineContext.benches3D)
+        {
+            render_box( engineContext, box );
+            render_legs( engineContext, box );
+            // render_box_top( engineContext, box, (box.sideTexure.width > 0 ? box.sideTexure : engineContext.floorTex) );
+        }
+    }
+
+
 	// Props (billboarded)
     for (size_t i = 0; i < engineContext.props.size(); ++i)
     {
@@ -665,14 +702,7 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    // 3D benches
-   /* for (const auto &box : engineContext.benches3D)
-    {
-        render_box( engineContext, box );
-        render_legs( engineContext, box );
-        // render_box_top( engineContext, box, (box.sideTexure.width > 0 ? box.sideTexure : engineContext.floorTex) );
-    }
-    */
+  
 
     if (engineContext.showHelp)
     {
@@ -751,7 +781,7 @@ int main( int argc, char **argv ) {
     std::filesystem::path cwd = std::filesystem::current_path();
 
     std::vector<LevelDef> levels = {
-    {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 1.5f, 90.f, 0 },
+    {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 16.5f, 270.f, 0 },
     {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 }
     };
 
@@ -943,8 +973,8 @@ int main( int argc, char **argv ) {
                     const float pad = 0.02f;
                     if (u > pad && u < 1.0f - pad && v > pad && v < 1.0f - pad) return false;
                 }
-            }*/
-            /*
+            }
+            */
             const float pad = 0.02f;
             for (const auto &box : engineContext.benches3D)
             {
@@ -960,7 +990,8 @@ int main( int argc, char **argv ) {
                 {
                     return false; // blocked by bench body
                 }
-            }*/
+            }
+
             return true;
             };
         // Use art radius
