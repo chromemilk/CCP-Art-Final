@@ -14,11 +14,7 @@ struct LevelDef
     int levelId = 0;
 };
 
-enum Levels
-{
-    MUSEUM = 0,
-    CAVE = 1
-};
+
 
 static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     namespace fs = std::filesystem;
@@ -174,6 +170,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.directionY = std::sin( art );
     engineContext.planeX = -engineContext.directionY * FOV_TAN;
     engineContext.planeY = engineContext.directionX * FOV_TAN;
+    engineContext.yaw = level.spawnDirDeg;
 
     return true;
 }
@@ -401,94 +398,99 @@ static void render( Engine &engineContext, float dt ) {
 
         if (hitTile == 1)
         {
-            for (size_t artIndex = 0; artIndex < engineContext.artworks.size(); ++artIndex)
-            {
-                const auto &art = engineContext.artworks[ artIndex ];
-                if (!art.onWall) continue;
-                if (art.wx != mapX || art.wy != mapY || art.side != side) continue;
-
-                float u0 = std::clamp( art.uCenter - art.uWidth * 0.5f, 0.0f, 1.0f );
-                float u1 = std::clamp( art.uCenter + art.uWidth * 0.5f, 0.0f, 1.0f );
-                if (wallX < u0 || wallX > u1) continue;
-
-                const Image &texture = engineContext.artImages[ artIndex ];
-
-                // Frame/mat proportions
-                const float FRAME_U = 0.08f, FRAME_V = 0.08f;
-                const float MAT_U = 0.03f, MAT_V = 0.04f;
-
-                const Uint32 goldLight = rgb( 235, 200, 80 );
-                const Uint32 goldMid = rgb( 212, 175, 55 );
-                const Uint32 goldDark = rgb( 160, 130, 40 );
-                const Uint32 matCol = rgb( 235, 235, 220 );
-
-                float uLocal = (wallX - u0) / std::max( 0.0001f, (u1 - u0) );
-
-                int bandH = std::max( 1, int( lineH * art.vHeight ) );
-                int bandCenter = RENDER_H / 2 + int( (art.vCenter - 0.5f) * lineH );
-                int bandStart = std::clamp( bandCenter - bandH / 2, 0, RENDER_H - 1 );
-                int bandEnd = std::clamp( bandStart + bandH - 1, 0, RENDER_H - 1 );
-
-                float uLeftFrameEdge = FRAME_U;
-                float uRightFrameEdge = 1.0f - FRAME_U;
-                float uLeftMatEdge = FRAME_U + MAT_U;
-                float uRightMatEdge = 1.0f - (FRAME_U + MAT_U);
-
-                for (int y = bandStart; y <= bandEnd; ++y)
+            if (engineContext.currentLevel == Levels::MUSEUM) {
+                for (size_t artIndex = 0; artIndex < engineContext.artworks.size(); ++artIndex)
                 {
-                    float vLocal = (y - bandStart) / float( std::max( 1, bandH - 1 ) );
-                    float vTopFrameEdge = FRAME_V;
-                    float vBottomFrameEdge = 1.0f - FRAME_V;
-                    float vTopMatEdge = FRAME_V + MAT_V;
-                    float vBottomMatEdge = 1.0f - (FRAME_V + MAT_V);
+                    const auto& art = engineContext.artworks[artIndex];
+                    if (!art.onWall) continue;
+                    if (art.wx != mapX || art.wy != mapY || art.side != side) continue;
 
-                    Uint32 color;
+                    float u0 = std::clamp(art.uCenter - art.uWidth * 0.5f, 0.0f, 1.0f);
+                    float u1 = std::clamp(art.uCenter + art.uWidth * 0.5f, 0.0f, 1.0f);
+                    if (wallX < u0 || wallX > u1) continue;
 
-                    bool inFrame =
-                        (uLocal < uLeftFrameEdge) || (uLocal > uRightFrameEdge) ||
-                        (vLocal < vTopFrameEdge) || (vLocal > vBottomFrameEdge);
+                    const Image& texture = engineContext.artImages[artIndex];
 
-                    if (inFrame)
+                    // Frame/mat proportions
+                    const float FRAME_U = 0.08f, FRAME_V = 0.08f;
+                    const float MAT_U = 0.03f, MAT_V = 0.04f;
+
+                    const Uint32 goldLight = rgb(235, 200, 80);
+                    const Uint32 goldMid = rgb(212, 175, 55);
+                    const Uint32 goldDark = rgb(160, 130, 40);
+                    const Uint32 matCol = rgb(235, 235, 220);
+
+                    float uLocal = (wallX - u0) / std::max(0.0001f, (u1 - u0));
+
+                    int bandH = std::max(1, int(lineH * art.vHeight));
+                    int bandCenter = RENDER_H / 2 + int((art.vCenter - 0.5f) * lineH);
+                    int bandStart = std::clamp(bandCenter - bandH / 2, 0, RENDER_H - 1);
+                    int bandEnd = std::clamp(bandStart + bandH - 1, 0, RENDER_H - 1);
+
+                    float uLeftFrameEdge = FRAME_U;
+                    float uRightFrameEdge = 1.0f - FRAME_U;
+                    float uLeftMatEdge = FRAME_U + MAT_U;
+                    float uRightMatEdge = 1.0f - (FRAME_U + MAT_U);
+
+                    for (int y = bandStart; y <= bandEnd; ++y)
                     {
-                        bool topOrLeft = (vLocal < vTopFrameEdge + 0.02f) || (uLocal < uLeftFrameEdge + 0.02f);
-                        bool bottomOrRight = (vLocal > vBottomFrameEdge - 0.02f) || (uLocal > uRightFrameEdge - 0.02f);
-                        color = goldMid;
-                        if (topOrLeft)
-                        {
-                            color = goldLight;
-                        }
-                        else if (bottomOrRight)
-                        {
-                            color = goldDark;
-                        }
-                    }
-                    else
-                    {
-                        bool inMat =
-                            (uLocal < uLeftMatEdge) || (uLocal > uRightMatEdge) ||
-                            (vLocal < vTopMatEdge) || (vLocal > vBottomMatEdge);
+                        float vLocal = (y - bandStart) / float(std::max(1, bandH - 1));
+                        float vTopFrameEdge = FRAME_V;
+                        float vBottomFrameEdge = 1.0f - FRAME_V;
+                        float vTopMatEdge = FRAME_V + MAT_V;
+                        float vBottomMatEdge = 1.0f - (FRAME_V + MAT_V);
 
-                        if (inMat)
+                        Uint32 color;
+
+                        bool inFrame =
+                            (uLocal < uLeftFrameEdge) || (uLocal > uRightFrameEdge) ||
+                            (vLocal < vTopFrameEdge) || (vLocal > vBottomFrameEdge);
+
+                        if (inFrame)
                         {
-                            color = matCol;
+                            bool topOrLeft = (vLocal < vTopFrameEdge + 0.02f) || (uLocal < uLeftFrameEdge + 0.02f);
+                            bool bottomOrRight = (vLocal > vBottomFrameEdge - 0.02f) || (uLocal > uRightFrameEdge - 0.02f);
+                            color = goldMid;
+                            if (topOrLeft)
+                            {
+                                color = goldLight;
+                            }
+                            else if (bottomOrRight)
+                            {
+                                color = goldDark;
+                            }
                         }
                         else
                         {
-                            float innerU0 = uLeftMatEdge, innerU1 = uRightMatEdge;
-                            float innerV0 = vTopMatEdge, innerV1 = vBottomMatEdge;
-                            float un = (uLocal - innerU0) / std::max( 0.0001f, (innerU1 - innerU0) );
-                            float vn = (vLocal - innerV0) / std::max( 0.0001f, (innerV1 - innerV0) );
-                            int texX = std::clamp( int( un * (texture.width - 1) ), 0, texture.width - 1 );
-                            int texY = std::clamp( int( vn * (texture.height - 1) ), 0, texture.height - 1 );
-                            color = texture.sample( texX, texY );
+                            bool inMat =
+                                (uLocal < uLeftMatEdge) || (uLocal > uRightMatEdge) ||
+                                (vLocal < vTopMatEdge) || (vLocal > vBottomMatEdge);
 
-                            // magenta transparent -> mat
-                            if (((color >> 16) & 255) == 255 && ((color >> 8) & 255) == 0 && (color & 255) == 255)
+                            if (inMat)
+                            {
                                 color = matCol;
+                            }
+                            else
+                            {
+                                float innerU0 = uLeftMatEdge, innerU1 = uRightMatEdge;
+                                float innerV0 = vTopMatEdge, innerV1 = vBottomMatEdge;
+                                float un = (uLocal - innerU0) / std::max(0.0001f, (innerU1 - innerU0));
+                                float vn = (vLocal - innerV0) / std::max(0.0001f, (innerV1 - innerV0));
+                                int texX = std::clamp(int(un * (texture.width - 1)), 0, texture.width - 1);
+                                int texY = std::clamp(int(vn * (texture.height - 1)), 0, texture.height - 1);
+                                color = texture.sample(texX, texY);
+
+                                // magenta transparent -> mat
+                                if (((color >> 16) & 255) == 255 && ((color >> 8) & 255) == 0 && (color & 255) == 255)
+                                    color = matCol;
+                            }
                         }
+                        putPix(engineContext, x, y, color);
                     }
-                    putPix( engineContext, x, y, color );
                 }
+            }
+            else if (engineContext.currentLevel == Levels::CAVE) {
+
             }
         }
 
@@ -785,7 +787,7 @@ int main( int argc, char **argv ) {
     {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 }
     };
 
-    int curLevel = 1;
+    int curLevel = engineContext.currentLevel;
     if (!loadLevel( engineContext, levels[ curLevel ] )) return 1;
 
     std::vector<float2> floors, doors, walls;
@@ -915,6 +917,10 @@ int main( int argc, char **argv ) {
         if (ks[ SDL_SCANCODE_LEFT ])
         {
             float ang = -ts;
+            engineContext.yaw += ang;
+            if (engineContext.yaw > 360) {
+                engineContext.yaw = 0;
+            }
             float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
             float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
             engineContext.directionX = ndx; engineContext.directionY = ndy;
@@ -925,6 +931,10 @@ int main( int argc, char **argv ) {
         if (ks[ SDL_SCANCODE_RIGHT ])
         {
             float ang = ts;
+            engineContext.yaw += ang;
+            if (engineContext.yaw < 0) {
+                engineContext.yaw = 360;
+            }
             float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
             float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
             engineContext.directionX = ndx; engineContext.directionY = ndy;
