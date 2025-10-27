@@ -156,12 +156,12 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         engineContext.hasFloorCracks = engineContext.hasFloorStains = engineContext.hasFloorPuddles = false;
         engineContext.hasWallCracks = engineContext.hasWallStains = false;
 
-        //tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
-        //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
+        tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
+        tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
         tryLoad( folder / "floor_puddles.bmp", engineContext.floorOverlayPuddles, engineContext.hasFloorPuddles );
 
         tryLoad( folder / "wall_cracks.bmp", engineContext.wallOverlayCracks, engineContext.hasWallCracks );
-        //tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
+        tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
 
 
     }
@@ -785,8 +785,9 @@ int main( int argc, char **argv ) {
     {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 }
     };
 
+    // LEVEL SELECTOR
     int curLevel = 1;
-    if (!loadLevel( engineContext, levels[ curLevel ] )) return 1;
+    if (!loadLevel(engineContext, levels[ curLevel ] )) return 1;
 
     std::vector<float2> floors, doors, walls;
     for (int ty = 0; ty < engineContext.map.height; ++ty)
