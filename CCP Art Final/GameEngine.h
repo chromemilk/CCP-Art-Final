@@ -119,6 +119,13 @@ struct Artwork
     float x = 1.5f, y = 1.5f;
 };
 
+struct CaveArt : Artwork {
+    float widthMultiplier;
+    float heightMultiplier;
+};
+
+
+
 struct Sprite
 {
     float x;
@@ -154,6 +161,7 @@ struct BoxProp
 };
 
 
+
 struct Engine
 {
     SDL_Window *window = nullptr;
@@ -182,6 +190,7 @@ struct Engine
     Uint32 lastPlacardTick = 0;
     bool placardOpen = false;
     int openArtId = -1;
+
 
     Image doorTexture;
 
@@ -221,6 +230,10 @@ struct Engine
     bool hasFloorMul = false;
     GrayTex wallMul;    
     bool hasWallMul = false;
+
+    int currentLevel = Levels::MUSEUM;
+
+    float yaw;
 };
 
 

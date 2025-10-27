@@ -14,4 +14,10 @@
 #include <SDL3/SDL_main.h>   
 #include <filesystem>
 
+enum Levels
+{
+    MUSEUM = 0,
+    CAVE = 1
+};
+
 
