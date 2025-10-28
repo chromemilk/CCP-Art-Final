@@ -28,7 +28,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.benches3D.clear();
 
 
-    fs::path folder = level .folder;
+    fs::path folder = level.folder;
     /*
     {
         BoxProp box;
@@ -704,35 +704,106 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-  
+    int lookingAtArt = pickArtworkUnderCrosshair( engineContext );
+
+    if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false)
+    {
+        drawString8x8( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
 
     if (engineContext.showHelp)
     {
-        //drawTextBox( engineContext, 4, 4, 250, 25, rgb( 10, 10, 16 ), rgb( 90, 90, 120 ) );
-        drawStringTinyScaled( engineContext, 10, RENDER_H - 50, "E: Interact, F: Open Door", rgb( 255, 0, 0), 3, 3, 3, true );
+        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.placardOpen && engineContext.openArtId >= 0)
+    const Artwork *art = nullptr;
+    if (engineContext.openArtId >= 0)
     {
-        const Artwork *art = nullptr;
         for (const auto &artWork : engineContext.artworks)
         {
             if (artWork.id == engineContext.openArtId)
             {
-                art = &artWork; break;
+                art = &artWork; 
+                break;
             }
         }
-        if (art)
+    }
+
+    if (art) 
+    {
+        const int fontW = 8;
+        const int fontH = 8;
+        const int letterSpace = 1;
+        const int lineSpace = 2;
+        const int advY = fontH + lineSpace;
+        const Uint32 shadowCol = rgb( 30, 30, 30 );
+
+
+        if (engineContext.placardOpen)
         {
-            int width = RENDER_W - 16, height = RENDER_H / 3;
-            int x = 8, y = RENDER_H - 130;
+            int width = RENDER_W - 16, height = RENDER_H / 4;
+            int x = 8, y = RENDER_H - 200;
             drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+
+            int textX = x + 8;
+            int textY = y + 8;
+            int textWidth = width - 16; // Wrap width
+
+            // Title (Date), Artist, Period
             std::string header = art->title + " (" + art->date + ")\n" +
-                art->artist + " ? " + art->period + "\n" +
-                art->medium + ", " + art->location + "\n";
-            drawStringTinyScaled( engineContext, x + 8, y + 8, header, rgb( 230, 230, 240 ), 3, 5, 5, false );
-            drawStringTinyScaled( engineContext, x + 8, y + 40, "Why it matters:\n" + art->rationale, rgb( 210, 210, 210 ), 3, 5, 55, false);
-            drawStringTinyScaled( engineContext, x + 8, y + 72, "My take:\n" + art->reflection, rgb( 200, 200, 200 ), 3, 5, 55, false );
+                art->artist + " | " + art->period + "\n";
+
+            drawString8x8( engineContext, textX, textY, header, rgb( 230, 230, 240 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+            textY += 2 * advY; // Advance 2 lines
+
+            // Medium, Location
+            std::string info = art->medium + ", " + art->location + "\n";
+
+            // Replaced drawStringTinyScaled
+            drawString8x8( engineContext, textX, textY, info, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+            textY += 1 * advY; // Advance 1 line
+
+            // Rationale
+            // Replaced drawStringTinyScaled
+            drawString8x8( engineContext, textX, textY, /*"Why it matters:\n" + */ art->placard + art->rationale, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+
+            // Add a hint to press E again
+        
+            std::string hint = "[E] Open Journal";
+            int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
+            int hintY = y + height - advY - 4;
+            drawString8x8( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
+
+        }
+        else if (engineContext.journalOpen)
+        {
+   
+            int width = RENDER_W / 2 + 80, height = RENDER_H - 120; // Made it wider
+            int x = (RENDER_W - width) / 2, y = 60;
+
+            drawTextBox( engineContext, x, y, width, height, rgb( 245, 245, 220 ), rgb( 101, 67, 33 ) );
+
+            int textX = x + 12; // More padding
+            int textY = y + 12;
+            int textWidth = width - 24; // Wrap width
+
+          
+            drawString8x8( engineContext, textX, textY, "Journal on \"" + art->title + "\"" + " (entry " + " #" + to_string(art->id) + ")", rgb(50, 50, 50), textWidth, letterSpace, lineSpace, false);
+            textY += advY + 4; // Extra space for title
+
+            for (int dx = 8; dx < width - 8; ++dx)
+            {
+                putPix( engineContext, x + dx, textY - 2, rgb( 101, 67, 33 ) );
+            }
+            textY += 2; // Space after divider
+
+       
+            drawString8x8( engineContext, textX, textY, art->reflection, rgb( 20, 20, 20 ), textWidth, letterSpace, lineSpace, false );
+
+            std::string hint = "[E] Close";
+            int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 25;
+            int hintY = y + height - advY - 4;
+            drawString8x8( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
         }
     }
 
@@ -804,20 +875,8 @@ int main( int argc, char **argv ) {
     }
 
 
-    // Load artwork images (ensure magenta background for transparency)
 
-    /*
-    engineContext.artImages.resize( engineContext.artworks.size() );
-    for (size_t i = 0; i < engineContext.artworks.size(); ++i)
-    {
-        if (!engineContext.artImages[ i ].loadBMP( engineContext.artworks[ i ].imagePath ))
-        {
-            // create placeholder (64x64 magenta frame)
-            engineContext.artImages[ i ].width = 64; engineContext.artImages[ i ].height = 64; engineContext.artImages[ i ].pixels.assign( 64 * 64, rgb( 255, 0, 255 ) );
-            for (int y = 8; y < 56; ++y)for (int x = 8; x < 56; ++x) engineContext.artImages[ i ].pixels[ y * 64 + x ] = rgb( 220, 220, 220 );
-        }
-    }
-    */
+  
 
 
     // Main loop
@@ -856,19 +915,37 @@ int main( int argc, char **argv ) {
                     int id = pickArtworkUnderCrosshair( engineContext );
                     if (id < 0) id = findNearestArtwork( engineContext ); // optional fallback
 
-                    if (id >= 0)
+                    if (id >= 0) // We are looking at a valid artwork
                     {
                         if (engineContext.placardOpen && engineContext.openArtId == id)
                         {
+                            // Placard is open -> close it, open journal
                             engineContext.placardOpen = false;
-                            engineContext.openArtId = -1;
+                            engineContext.journalOpen = true;
+                            engineContext.lastPlacardTick = SDL_GetTicks(); // Refresh timer
+                        }
+                        else if (engineContext.journalOpen && engineContext.openArtId == id)
+                        {
+                            // Journal is open -> close it
+                            engineContext.journalOpen = false;
+                            engineContext.openArtId = -1; // Fully close
                         }
                         else
                         {
+                            // Nothing is open, or we're looking at a *new* piece of art
+                            // Open the placard for this art
                             engineContext.openArtId = id;
                             engineContext.placardOpen = true;
+                            engineContext.journalOpen = false; // Ensure journal is closed
                             engineContext.lastPlacardTick = SDL_GetTicks();
                         }
+                    }
+                    else // Not looking at any art
+                    {
+                        // Close whatever is open
+                        engineContext.placardOpen = false;
+                        engineContext.journalOpen = false;
+                        engineContext.openArtId = -1;
                     }
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_F)

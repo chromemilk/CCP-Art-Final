@@ -15,8 +15,8 @@ struct Image
     int resolution = 1;
     bool loadBMP( const std::string &path ) {
         // Use the map to create a surface
-        SDL_Surface *BMPSurface = SDL_LoadBMP( path.c_str() );
 
+        SDL_Surface *BMPSurface = SDL_LoadBMP( path.c_str() );
         if (!BMPSurface)
         {
             std::fprintf( stderr, "SDL_LoadBMP failed for %s: %s\n", path.c_str(), SDL_GetError() );
@@ -40,6 +40,7 @@ struct Image
         SDL_DestroySurface( ColoredSurface );
         return true;
     }
+
     // Gets pixel color data at (x,y) snapping to nearest valid pixel if needed
     Uint32 sample( int x, int y ) const {
         x = std::clamp( x, 0, width - 1 );
@@ -189,6 +190,7 @@ struct Engine
     int nearestArt = -1;
     Uint32 lastPlacardTick = 0;
     bool placardOpen = false;
+    bool journalOpen = false;
     int openArtId = -1;
 
 
@@ -333,7 +335,8 @@ static bool loadArtworks( const std::string &path, std::vector<Artwork> &works )
 
         if (line.empty() || line[ 0 ] == '#') continue;
 
-        std::vector<std::string> v; splitLine( line, '|', v );
+        std::vector<std::string> v; 
+        splitLine( line, '|', v );
         if (v.size() < 13)
         {
             std::fprintf( stderr, "Bad line %d in %s (got %zu fields)\n", lineTrack, path.c_str(), v.size() ); continue;
@@ -368,6 +371,7 @@ static bool loadImageOrFallback( const std::string &path, Image &out, Uint32 fil
 }
 
 
+
 static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std::vector<Image> &outPropImages, std::vector<QuadProp> &outQuads ) {
     std::ifstream propsFileStream( path );
     if (!propsFileStream.is_open())
@@ -394,7 +398,8 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
         const std::string full = resolve( p );
         auto it = textureIndex.find( full );
         if (it != textureIndex.end()) return it->second;
-        Image img; loadImageOrFallback( full, img, rgb( 255, 0, 255 ) );
+        Image img; 
+        loadImageOrFallback( full, img, rgb( 255, 0, 255 ) );
         int idx = (int)outPropImages.size();
         outPropImages.push_back( std::move( img ) );
         textureIndex[ full ] = idx;
