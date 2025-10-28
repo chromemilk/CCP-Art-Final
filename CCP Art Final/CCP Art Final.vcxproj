@@ -142,6 +142,7 @@
     <ClInclude Include="MusicSystem.h" />
     <ClInclude Include="PhysicsHelpers.h" />
     <ClInclude Include="RendererHelpers.h" />
+    <ClInclude Include="Settings.h" />
     <ClInclude Include="WalkBot.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

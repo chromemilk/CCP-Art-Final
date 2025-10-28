@@ -102,9 +102,9 @@ struct Artwork
     int wy = -1;
     int side = -1;
     float uCenter = 0.5f;   // position along the wall face 
-    float uWidth = 1.5f;   // width along the wall face
-    float vCenter = 0.67f;   // vertical center
-    float vHeight = 1.5f;   // height on the wall
+    float uWidth = 0.65f;   // width along the wall face
+    float vCenter = 0.5f;   // vertical center
+    float vHeight = 0.65f;   // height on the wall
     bool onWall = false;
     int id = 0;
     std::string title;
@@ -666,3 +666,6 @@ static bool saveProps( const std::string &path, const std::vector<Prop> &props, 
 
     return true;
 }
+
+
+

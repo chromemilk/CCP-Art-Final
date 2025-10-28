@@ -6,4 +6,14 @@
 
 4|Temple of Ramses|Unknown|Placeholder|Prehistory|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|ramses.bmp|7.0|8.0
 
-5|Stonehenge|Unknown|Placeholder|Prehistory|Stone & Lentil|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|5.0|14.0
+5|Stonehenge|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|5.0|14.0
+
+6|Placeholder|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|5.0|12.0
+
+7|Placeholder|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|5.0|10.0
+
+8|Placeholder|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|5.0|8.0
+
+9|Placeholder|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|9.2|2.0
+
+10|Placeholder|Unknown|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|Placeholder|stonehenge.bmp|10.0|2.0

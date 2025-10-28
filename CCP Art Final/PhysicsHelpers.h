@@ -164,9 +164,9 @@ static void attachArtworksToWalls( Engine &engineContext ) {
             art.wy = f.wy;
             art.side = f.side;                     // 0 = vertical, 1 = horizontaal
             art.uCenter = std::clamp( bestU, 0.10f, 0.90f ); // avoid seam/edge clipping
-            art.uWidth = 0.55f;
-            art.vCenter = 0.55f;
-            art.vHeight = 0.60f;
+          //  art.uWidth = 0.55f;
+      //      art.vCenter = 0.55f;
+         //   art.vHeight = 0.60f;
             art.onWall = true;
         }
     }

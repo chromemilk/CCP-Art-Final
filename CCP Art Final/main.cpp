@@ -267,6 +267,12 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
 }
 
 
+void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, int desiredLevel ) {
+    engineContext.currentLevel = desiredLevel;
+    loadLevel( engineContext, levels[ desiredLevel ] );
+}
+
+
 
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
@@ -978,6 +984,10 @@ int main( int argc, char **argv ) {
                 {
                     saveProps( (levels[ curLevel ].folder + "/props.txt"),
                         engineContext.props, engineContext.propImages, engineContext.quads );
+                }
+                else if (ev.key.scancode == SDL_SCANCODE_N)
+                {
+					handleLevelChange( engineContext, levels, Levels::CAVE );
                 }
             }
         }
