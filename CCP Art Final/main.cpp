@@ -733,8 +733,8 @@ static void render( Engine &engineContext, float dt ) {
     {
         const int fontW = 8;
         const int fontH = 8;
-        const int letterSpace = 1;
-        const int lineSpace = 2;
+        const int letterSpace = 0;
+        const int lineSpace = 5;
         const int advY = fontH + lineSpace;
         const Uint32 shadowCol = rgb( 30, 30, 30 );
 
@@ -749,19 +749,12 @@ static void render( Engine &engineContext, float dt ) {
             int textY = y + 8;
             int textWidth = width - 16; // Wrap width
 
-            // Title (Date), Artist, Period
-            std::string header = art->title + " (" + art->date + ")\n" +
-                art->artist + " | " + art->period + "\n";
+			// Title (Date), Artist, Period, Medium, Location
+            std::string header = art->title + " (" + art->date + ")\n" + art->artist + " | " + art->period + "\n" + art->medium + ", " + art->location + "\n";
 
-            drawString8x8( engineContext, textX, textY, header, rgb( 230, 230, 240 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+            drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpace, lineSpace, true, shadowCol );
             textY += 2 * advY; // Advance 2 lines
 
-            // Medium, Location
-            std::string info = art->medium + ", " + art->location + "\n";
-
-            // Replaced drawStringTinyScaled
-            drawString8x8( engineContext, textX, textY, info, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
-            textY += 1 * advY; // Advance 1 line
 
             // Rationale
             // Replaced drawStringTinyScaled
@@ -1000,7 +993,8 @@ int main( int argc, char **argv ) {
             }
             float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
             float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
-            engineContext.directionX = ndx; engineContext.directionY = ndy;
+            engineContext.directionX = ndx; 
+            engineContext.directionY = ndy;
             // re-derive plane to stay perfectly perpendicular and correct FOV
             engineContext.planeX = -engineContext.directionY * FOV_TAN;
             engineContext.planeY = engineContext.directionX * FOV_TAN;
@@ -1014,7 +1008,8 @@ int main( int argc, char **argv ) {
             }
             float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
             float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
-            engineContext.directionX = ndx; engineContext.directionY = ndy;
+            engineContext.directionX = ndx;
+            engineContext.directionY = ndy;
             engineContext.planeX = -engineContext.directionY * FOV_TAN;
             engineContext.planeY = engineContext.directionX * FOV_TAN;
         }
