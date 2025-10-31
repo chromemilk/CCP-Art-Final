@@ -233,7 +233,7 @@ struct Engine
     GrayTex wallMul;    
     bool hasWallMul = false;
 
-    int currentLevel = Levels::MUSEUM;
+    Levels currentLevel = Levels::MUSEUM;
 
     float yaw;
 };

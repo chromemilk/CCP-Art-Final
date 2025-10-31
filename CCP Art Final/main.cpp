@@ -1,6 +1,7 @@
 #include "GameEngine.h"
 #include "RendererHelpers.h"
 #include "PhysicsHelpers.h"
+#include "MusicSystem.h"
 #include <iostream>
 #include <filesystem> 
 
@@ -153,11 +154,11 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         engineContext.hasWallCracks = engineContext.hasWallStains = false;
 
         tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
-        tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
+        //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
         tryLoad( folder / "floor_puddles.bmp", engineContext.floorOverlayPuddles, engineContext.hasFloorPuddles );
 
         tryLoad( folder / "wall_cracks.bmp", engineContext.wallOverlayCracks, engineContext.hasWallCracks );
-        tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
+        //tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
 
 
     }
@@ -171,6 +172,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.planeX = -engineContext.directionY * FOV_TAN;
     engineContext.planeY = engineContext.directionX * FOV_TAN;
     engineContext.yaw = level.spawnDirDeg;
+
+    // Load the current levels' music track
+    playMusicTrack( folder.string(), engineContext.currentLevel);
 
     return true;
 }
@@ -266,8 +270,13 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
     return -1;
 }
 
+static bool inRangeOfStatue( Engine const &engineContext ) {
+    
+    return false;
+}
 
-void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, int desiredLevel ) {
+
+void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Levels desiredLevel ) {
     engineContext.currentLevel = desiredLevel;
     loadLevel( engineContext, levels[ desiredLevel ] );
 }
@@ -945,6 +954,8 @@ int main( int argc, char **argv ) {
                         engineContext.placardOpen = false;
                         engineContext.journalOpen = false;
                         engineContext.openArtId = -1;
+
+                        
                     }
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_F)
@@ -953,7 +964,7 @@ int main( int argc, char **argv ) {
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)
                 {
-                    actualSpeed += 5.f;
+                    actualSpeed += 0.8f;
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_P)
                 {
