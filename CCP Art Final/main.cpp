@@ -281,6 +281,20 @@ void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Lev
     loadLevel( engineContext, levels[ desiredLevel ] );
 }
 
+void updateMusicStream() {
+    // Don't do anything if music was never started
+    if (!g_musicInitialized)
+    {
+        return;
+    }
+
+    // Check if the song has finished playing
+    if (music.getStatus() == sf::SoundStream::Status::Stopped)
+    {
+        // The song finished! Play the next one.
+        playNextTrack();
+    }
+}
 
 
 static void render( Engine &engineContext, float dt ) {
@@ -768,7 +782,7 @@ static void render( Engine &engineContext, float dt ) {
             std::string header = art->title + " (" + art->date + ")\n" + art->artist + " | " + art->period + "\n" + art->medium + ", " + art->location + "\n";
 
             drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpace, lineSpace, true, shadowCol );
-            textY += 2 * advY; // Advance 2 lines
+            textY += 3 * advY; // Advance 2 lines
 
 
             // Rationale
@@ -900,6 +914,8 @@ int main( int argc, char **argv ) {
         // Input
         SDL_Event ev;
         float actualSpeed;
+
+        updateMusicStream();
 
         while (SDL_PollEvent( &ev ))
         {

@@ -22,52 +22,61 @@ namespace MusicOptions
 
 }
 
-void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel) {
-	// Track path will just be the relative path then we will append to our base music directory
-	MusicTypes selectedType = currentLevel == Levels::MUSEUM ? MusicTypes::JAZZ : MusicTypes::AMBIENT;
+static sf::Music music;
+static int jazzIndex = 0;
+static int caveIndex = 0;
+static MusicTypes g_currentMusicType;     // Tracks the current playlist
+static std::string g_baseMusicDirectory;  // Stores the path for the update function
+static bool g_musicInitialized = false;   // Prevents update loop from running early
 
-	static sf::Music music;
-	static int jazzIndex = 0;
-	static int caveIndex = 0;
+
+
+
+void playNextTrack() {
+	if (g_baseMusicDirectory.empty())
+	{
+		return; 
+	}
 
 	std::string selectedFile;
-
-	if (selectedType == MusicTypes::JAZZ)
+	if (g_currentMusicType == MusicTypes::JAZZ)
 	{
-		if (MusicOptions::jazzTracks.empty())
-		{
-			return;
-		}
-
+		if (MusicOptions::jazzTracks.empty()) return; // No music to play
 		selectedFile = MusicOptions::jazzTracks[ jazzIndex ];
-		// Cycle
 		jazzIndex = (jazzIndex + 1) % MusicOptions::jazzTracks.size();
 	}
-	else if (selectedType == MusicTypes::AMBIENT)
+	else // AMBIENT
 	{
-		if (MusicOptions::caveSounds.empty())
-		{
-			return;
-		}
-
+		if (MusicOptions::caveSounds.empty()) return; // No music to play
 		selectedFile = MusicOptions::caveSounds[ caveIndex ];
-		// Cycle
 		caveIndex = (caveIndex + 1) % MusicOptions::caveSounds.size();
 	}
 
-	std::string finalPath = baseMusicDirectory + "\\" + selectedFile;
-	std::cout << "playing: " + finalPath;
+	std::string finalPath = g_baseMusicDirectory + "\\" + selectedFile;
+	std::cout << "Playing: " + finalPath << std::endl;
 
-	music.stop();
+	music.stop(); 
 
 	if (!music.openFromFile( finalPath ))
 	{
-		std::cout << "Failed to get music" << std::endl;
-
+		std::cout << "Failed to get music: " << finalPath << std::endl;
 		return;
 	}
 
-	music.setVolume(10.f);
-
+	music.setVolume( 10.f );
 	music.play();
+}
+
+void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel ) {
+	g_baseMusicDirectory = baseMusicDirectory;
+
+	MusicTypes selectedType = (currentLevel == Levels::MUSEUM) ? MusicTypes::JAZZ : MusicTypes::AMBIENT;
+
+	if (selectedType != g_currentMusicType || music.getStatus() == sf::SoundStream::Status::Stopped)
+	{
+		g_currentMusicType = selectedType; // Set the new type
+		g_musicInitialized = true;       // Allow the update loop to work
+
+		playNextTrack();
+	}
 }
