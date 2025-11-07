@@ -88,7 +88,7 @@ struct QuadProp
     float ux = 1.0f, uy = 0.0f;   // +U
     float vx = 0.0f, vy = 1.0f;   // +V
     // Ambient occlusion multiplier (1.0 = none) or shading factor
-    float AOMultiplier = 1.0f;
+    float AOMultiplier = 0.8f;
 
     std::string kind;
     std::string filename;
@@ -236,6 +236,10 @@ struct Engine
     Levels currentLevel = Levels::MUSEUM;
 
     float yaw;
+
+    bool inRangeOfStatue = false;     
+    bool statueChatActive = false;    
+    Uint32 statueChatStartTick = 0;   
 };
 
 

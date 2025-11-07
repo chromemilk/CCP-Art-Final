@@ -70,6 +70,8 @@ void playNextTrack() {
 void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel ) {
 	g_baseMusicDirectory = baseMusicDirectory;
 
+	if (currentLevel != Levels::MUSEUM && currentLevel != Levels::CAVE) return;
+
 	MusicTypes selectedType = (currentLevel == Levels::MUSEUM) ? MusicTypes::JAZZ : MusicTypes::AMBIENT;
 
 	if (selectedType != g_currentMusicType || music.getStatus() == sf::SoundStream::Status::Stopped)

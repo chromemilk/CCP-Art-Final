@@ -4,6 +4,7 @@
 #include "MusicSystem.h"
 #include <iostream>
 #include <filesystem> 
+#include <thread>
 
 using namespace std;
 
@@ -131,7 +132,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         }
     }
 
-    engineContext.caveMode = (level.levelId == Levels::CAVE);
+    engineContext.caveMode = (level.levelId == Levels::CAVE) || (level.levelId == Levels::TRANSITION);
     engineContext.hasWallOverlay = false;
     auto tryLoad = [&]( const std::filesystem::path &p, Image &dst, bool &flag ) {
         flag = dst.loadBMP( p.string() );
@@ -146,21 +147,31 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
      //       engineContext.hasWallOverlay = true;
      //   }
         // Defaults: tweak to taste
-        engineContext.lightRadius = 2.0f;
-        engineContext.lightFalloff = 2.0f;
-        engineContext.caveAmbient = 0.06f;
+      
 
         engineContext.hasFloorCracks = engineContext.hasFloorStains = engineContext.hasFloorPuddles = false;
         engineContext.hasWallCracks = engineContext.hasWallStains = false;
 
-        tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
-        //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
-        tryLoad( folder / "floor_puddles.bmp", engineContext.floorOverlayPuddles, engineContext.hasFloorPuddles );
+        if (level.levelId == Levels::CAVE)
+        {
+            engineContext.lightRadius = 2.0f;
+            engineContext.lightFalloff = 2.0f;
+            engineContext.caveAmbient = 0.06f;
 
-        tryLoad( folder / "wall_cracks.bmp", engineContext.wallOverlayCracks, engineContext.hasWallCracks );
-        //tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains );
+            tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
+            //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
+            tryLoad( folder / "floor_puddles.bmp", engineContext.floorOverlayPuddles, engineContext.hasFloorPuddles );
 
+            tryLoad( folder / "wall_cracks.bmp", engineContext.wallOverlayCracks, engineContext.hasWallCracks );
+            //tryLoad( folder / "wall_stain.bmp", engineContext.wallOverlayStains, engineContext.hasWallStains )
+        }
 
+        if (level.levelId == Levels::TRANSITION)
+        {
+            engineContext.lightRadius = 1.0f;
+            engineContext.lightFalloff = 1.5f;
+            engineContext.caveAmbient = 0.03f;
+        }
     }
 
     // Spawn & camera
@@ -270,16 +281,57 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
     return -1;
 }
 
-static bool inRangeOfStatue( Engine const &engineContext ) {
-    
-    return false;
-}
-
-
 void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Levels desiredLevel ) {
     engineContext.currentLevel = desiredLevel;
     loadLevel( engineContext, levels[ desiredLevel ] );
 }
+
+static bool isPlayerNearStatue( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::MUSEUM) return false;
+
+    float currentX = engineContext.positionX;
+    float currentY = engineContext.positionY;
+
+    // Location of statue
+    float statueX = 2.61414f;
+    float statueY = 2.00476;
+
+    float tolerance = 1.2f; // 1 meter
+    float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
+    return (distSq <= tolerance * tolerance);
+}
+
+void renderStatueChatbox( Engine &engineContext ) {
+    const int fontW = 8;
+    const int fontH = 8;
+    const int letterSpace = 0;
+    const int lineSpace = 5;
+    const int advY = fontH + lineSpace;
+
+    
+    int width = RENDER_W - 16, height = RENDER_H / 4;
+    int x = 7, y = RENDER_H / 2; // Was: RENDER_H - 500
+
+    drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+
+    int textX = x + 8;
+    int textY = y + 8;
+    int textWidth = width - 16; // Wrap width
+
+    std::string header = "ChatGPT Statue | OpenAI | Current | Relief Sculpture | MicroMuseum \n";
+
+    drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
+    textY += 3 * advY; // Advance 3 lines
+
+    drawString8x8( engineContext, textX, textY, "You will be transported to another realm --- open the door to open your mind", rgb( 210, 210, 210 ), textWidth, 1, 2, true );
+
+
+    std::string hint = "Wait a few seconds.....";
+    int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
+    int hintY = y + height - advY - 4;
+    drawString8x8( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
+}
+
 
 void updateMusicStream() {
     // Don't do anything if music was never started
@@ -742,7 +794,7 @@ static void render( Engine &engineContext, float dt ) {
 
     if (engineContext.showHelp)
     {
-        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door, [E] Talk To Statue", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     const Artwork *art = nullptr;
@@ -828,7 +880,10 @@ static void render( Engine &engineContext, float dt ) {
             drawString8x8( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
         }
     }
-
+    if (engineContext.statueChatActive)
+    {
+        renderStatueChatbox( engineContext );
+    }
     // Crosshair
     putPix( engineContext, RENDER_W / 2, RENDER_H / 2, rgb( 0, 0, 0 ) );
     putPix( engineContext, RENDER_W / 2 + 1, RENDER_H / 2, rgb( 0, 0, 0 ) );
@@ -877,7 +932,10 @@ int main( int argc, char **argv ) {
 
     std::vector<LevelDef> levels = {
     {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 16.5f, 270.f, 0 },
-    {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 }
+    {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 },
+    {"Transition", (cwd / "levels" / "transition").string(), 1.5, 4.5, 270.f, 2 }
+
+
     };
 
     int curLevel = engineContext.currentLevel;
@@ -915,6 +973,7 @@ int main( int argc, char **argv ) {
         SDL_Event ev;
         float actualSpeed;
 
+
         updateMusicStream();
 
         while (SDL_PollEvent( &ev ))
@@ -936,6 +995,7 @@ int main( int argc, char **argv ) {
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_E)
                 {
+
                     int id = pickArtworkUnderCrosshair( engineContext );
                     if (id < 0) id = findNearestArtwork( engineContext ); // optional fallback
 
@@ -962,6 +1022,8 @@ int main( int argc, char **argv ) {
                             engineContext.placardOpen = true;
                             engineContext.journalOpen = false; // Ensure journal is closed
                             engineContext.lastPlacardTick = SDL_GetTicks();
+
+                          
                         }
                     }
                     else // Not looking at any art
@@ -970,8 +1032,11 @@ int main( int argc, char **argv ) {
                         engineContext.placardOpen = false;
                         engineContext.journalOpen = false;
                         engineContext.openArtId = -1;
-
-                        
+                        if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
+                        {
+                            engineContext.statueChatActive = true;
+                            engineContext.statueChatStartTick = SDL_GetTicks();
+                        }
                     }
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_F)
@@ -1014,7 +1079,7 @@ int main( int argc, char **argv ) {
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_N)
                 {
-					handleLevelChange( engineContext, levels, Levels::CAVE );
+					handleLevelChange( engineContext, levels, Levels::TRANSITION );
                 }
             }
         }
@@ -1117,7 +1182,16 @@ int main( int argc, char **argv ) {
         float radius = 0.2f;
         if (pass( nx + radius, engineContext.positionY ) && pass( nx - radius, engineContext.positionY )) engineContext.positionX = nx;
         if (pass( engineContext.positionX, ny + radius ) && pass( engineContext.positionX, ny - radius )) engineContext.positionY = ny;
-
+        engineContext.inRangeOfStatue = isPlayerNearStatue( engineContext );
+        if (engineContext.statueChatActive)
+        {
+            Uint32 now = SDL_GetTicks();
+            if (now - engineContext.statueChatStartTick > 8000)
+            {
+                engineContext.statueChatActive = false; // Reset state
+                handleLevelChange( engineContext, levels, Levels::TRANSITION );
+            }
+        }
         {
             // Keep open while you keep looking at it; close after ~600ms of looking away
             static const Uint32 KEEP_MS = 600;

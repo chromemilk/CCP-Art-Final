@@ -18,7 +18,8 @@
 enum Levels
 {
     MUSEUM = 0,
-    CAVE = 1
+    CAVE = 1,
+    TRANSITION = 2
 };
 
 
