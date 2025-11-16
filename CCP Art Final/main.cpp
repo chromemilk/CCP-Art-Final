@@ -93,6 +93,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     if (level.levelId == Levels::MUSEUM)
     {
+
+		loadColumns( (folder / "columns.txt").string(), engineContext );
+
         if (loadArtworks( (folder / "artworks.txt").string(), engineContext.artworks ))
         {
             attachArtworksToWalls( engineContext );
@@ -168,7 +171,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
         if (level.levelId == Levels::TRANSITION)
         {
-            engineContext.lightRadius = 1.0f;
+            engineContext.lightRadius = 1.2f;
             engineContext.lightFalloff = 1.5f;
             engineContext.caveAmbient = 0.03f;
         }
@@ -296,7 +299,7 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float statueX = 2.61414f;
     float statueY = 2.00476;
 
-    float tolerance = 1.2f; // 1 meter
+    float tolerance = 2.0f; // 1 meter
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
 }
@@ -309,7 +312,7 @@ void renderStatueChatbox( Engine &engineContext ) {
     const int advY = fontH + lineSpace;
 
     
-    int width = RENDER_W - 16, height = RENDER_H / 4;
+    int width = RENDER_W - 30, height = (RENDER_H / 4) - 40;
     int x = 7, y = RENDER_H / 2; // Was: RENDER_H - 500
 
     drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
@@ -323,10 +326,10 @@ void renderStatueChatbox( Engine &engineContext ) {
     drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
     textY += 3 * advY; // Advance 3 lines
 
-    drawString8x8( engineContext, textX, textY, "You will be transported to another realm --- open the door to open your mind", rgb( 210, 210, 210 ), textWidth, 1, 2, true );
+    drawString8x8( engineContext, textX, textY, "You will be transported to the portal shortly", rgb( 210, 210, 210 ), textWidth, 1, 2, true );
 
 
-    std::string hint = "Wait a few seconds.....";
+    std::string hint = "Wait a few seconds...";
     int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
     int hintY = y + height - advY - 4;
     drawString8x8( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
@@ -785,6 +788,122 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
+    if (engineContext.benches3D.size() > 0)
+    {
+        for (const auto &box : engineContext.benches3D)
+        {
+            render_box( engineContext, box );
+            render_legs( engineContext, box );
+        }
+    }
+
+
+    /*
+    for (auto &col : engineContext.columns)
+    {
+        float dx = col.x - engineContext.positionX;
+        float dy = col.y - engineContext.positionY;
+        col.distance = dx * dx + dy * dy; // Use squared distance
+    }
+
+    std::sort( engineContext.columns.begin(), engineContext.columns.end(), []( const ColumnProp &a, const ColumnProp &b ) {
+        return a.distance > b.distance; // Farthest first
+        } );
+
+    for (const auto &col : engineContext.columns)
+    {
+        // Find the sprite set for this column
+        auto setIt = engineContext.columnSpriteSets.find( col.setName );
+        if (setIt == engineContext.columnSpriteSets.end() || setIt->second.numViews == 0)
+        {
+            continue; // This column has no valid sprite set, skip rendering
+        }
+        const SpriteSet &spriteSet = setIt->second;
+        const int numViews = spriteSet.numViews;
+
+        // Vector from player to column
+        float vecX = col.x - engineContext.positionX;
+        float vecY = col.y - engineContext.positionY;
+
+        float vecX_to_Player = engineContext.positionX - col.x;
+        float vecY_to_Player = engineContext.positionY - col.y;
+
+        // Angle from column's center to the player
+        float relativeAngle = std::atan2( vecY_to_Player, vecX_to_Player );
+
+        // Normalize angle to [0, 2*PI]
+        while (relativeAngle < 0) relativeAngle += 2.0f * 3.14159265f;
+        while (relativeAngle >= 2.0f * 3.14159265f) relativeAngle -= 2.0f * 3.14159265f;
+
+        // Map normalized angle to sprite index
+        // We add slice*0.5 to offset the start, so 0 degrees is centered on the "front" sprite
+        float slice = (2.0f * 3.14159265f) / numViews;
+        int viewIndex = static_cast<int>( (relativeAngle + slice * 0.5f) / slice ) % numViews;
+
+        const auto &texture = spriteSet.views[ viewIndex ];
+
+
+        // Camera space
+        float dx = col.x - engineContext.positionX;
+        float dy = col.y - engineContext.positionY;
+        float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
+        float transX = invDet * (engineContext.directionY * dx - engineContext.directionX * dy);
+        float transY = invDet * (-engineContext.planeY * dx + engineContext.planeX * dy);
+        if (transY <= 0) continue; // Behind player
+
+        int spriteScreenX = int( (RENDER_W / 2) * (1 + transX / transY) );
+        float baseH = (RENDER_H / transY);
+        int spriteH = std::max( 1, int( std::fabs( baseH * col.scale ) ) );
+
+        // Calculate width based on texture's aspect ratio
+        int spriteW = spriteH;
+        if (texture.height > 0)
+        {
+            spriteW = std::max( 1, int( spriteH * (float( texture.width ) / float( texture.height )) ) );
+        }
+
+        int bottomY = int( RENDER_H * 0.5f + baseH * 0.5f ); // Aligns bottom with floor
+
+        int y0 = bottomY - spriteH;
+        int y1 = bottomY - 1;
+        int x0 = -spriteW / 2 + spriteScreenX;
+        int x1 = spriteW / 2 + spriteScreenX - 1;
+
+        int cy0 = std::max( 0, y0 );
+        int cy1 = std::min( RENDER_H - 1, y1 );
+        int cx0 = std::max( 0, x0 );
+        int cx1 = std::min( RENDER_W - 1, x1 );
+        if (cy0 > cy1 || cx0 > cx1) continue;
+
+        float invSpriteH = 1.0f / std::max( 1, spriteH );
+        float invSpriteW = 1.0f / std::max( 1, spriteW );
+
+        for (int sx = cx0; sx <= cx1; ++sx)
+        {
+            if (!(transY > 0 && transY < engineContext.zbuffer[ sx ])) continue;
+
+            float u = float( sx - x0 ) * invSpriteW;
+            int texX = std::clamp( int( u * texture.width ), 0, texture.width - 1 );
+
+            for (int sy = cy0; sy <= cy1; ++sy)
+            {
+                float v = float( sy - y0 ) * invSpriteH;
+                int texY = std::clamp( int( v * texture.height ), 0, texture.height - 1 );
+
+                Uint32 color = texture.sample( texX, texY );
+                if (!boolIsNearBlack( color, 120 )) // Use existing transparency check
+                {
+                    // Apply cave lighting / distance fog
+                    float shade = caveLight( transY );
+                    color = shadeCol( color, shade );
+                    putPix( engineContext, sx, sy, color );
+                }
+            }
+        }
+    }
+    */
+
+
     int lookingAtArt = pickArtworkUnderCrosshair( engineContext );
 
     if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false)
@@ -792,9 +911,14 @@ static void render( Engine &engineContext, float dt ) {
         drawString8x8( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
+    if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
+    {
+		drawString8x8( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
     if (engineContext.showHelp)
     {
-        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door, [E] Talk To Statue", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     const Artwork *art = nullptr;
@@ -879,17 +1003,13 @@ static void render( Engine &engineContext, float dt ) {
             int hintY = y + height - advY - 4;
             drawString8x8( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
         }
+
     }
     if (engineContext.statueChatActive)
     {
         renderStatueChatbox( engineContext );
     }
-    // Crosshair
-    putPix( engineContext, RENDER_W / 2, RENDER_H / 2, rgb( 0, 0, 0 ) );
-    putPix( engineContext, RENDER_W / 2 + 1, RENDER_H / 2, rgb( 0, 0, 0 ) );
-    putPix( engineContext, RENDER_W / 2 - 1, RENDER_H / 2, rgb( 0, 0, 0 ) );
-    putPix( engineContext, RENDER_W / 2, RENDER_H / 2 + 1, rgb( 0, 0, 0 ) );
-    putPix( engineContext, RENDER_W / 2, RENDER_H / 2 - 1, rgb( 0, 0, 0 ) );
+    
 }
 
 
@@ -1041,7 +1161,9 @@ int main( int argc, char **argv ) {
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_F)
                 {
-                    (void)toggleDoorAhead( engineContext );
+                    bool toggled = toggleDoorAhead( engineContext );
+					handleLevelChange( engineContext, levels, Levels::CAVE );
+
                 }
                 else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)
                 {

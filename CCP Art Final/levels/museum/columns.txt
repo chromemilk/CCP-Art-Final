@@ -1,0 +1,5 @@
+# Format: BOX_COLUMN [x] [y] [halfWidth] [halfDepth] [angleDeg] [height] [texture_path.bmp]
+
+BOX_COLUMN 11 5.5 0.2 0.2 0.0 1.1 doric_surface.bmp
+BOX_COLUMN 11 6.5 0.2 0.2 0.0 1.0 ionic_surface.bmp
+BOX_COLUMN 11 7.5 0.2 0.2 0.0 1.1 corinthian_surface.bmp

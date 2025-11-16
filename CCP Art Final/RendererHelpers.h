@@ -648,6 +648,13 @@ inline bool isNearMagenta( Uint32 color, int tol = 12 ) {
     return (abs( int( r ) - 255 ) <= tol) && (g <= tol) && (abs( int( box ) - 255 ) <= tol);
 }
 
+inline bool boolIsNearBlack( Uint32 color, int tol = 12 ) {
+    Uint8 r = (color >> 16) & 255;
+    Uint8 g = (color >> 8) & 255;
+    Uint8 box = color & 255;
+	return (r <= tol) && (g <= tol) && (box <= tol);
+}
+
 // Sample using normalized UV in [0,1]. If you pass values outside, they clamp.
 // Again thanks stack overflow
 inline Uint32 sample_bilinear_uv_keyed( const Image &texture, float u, float v ) {
@@ -825,6 +832,11 @@ inline void draw_vertical_face( Engine &engineContext, float ax, float ay, float
             Uint32 c = texture.sample( textureX, textureY );
             // magenta transparent
             if (((c >> 16) & 255) == 255 && ((c >> 8) & 255) == 0 && (c & 255) == 255) continue;
+
+            if (boolIsNearBlack(c, 120))
+            {
+                continue;
+            }
 
             Uint8 rr = Uint8( ((c >> 16) & 255) * shade );
             Uint8 gg = Uint8( ((c >> 8) & 255) * shade );

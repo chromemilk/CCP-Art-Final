@@ -161,6 +161,21 @@ struct BoxProp
     float legInsetDepth = 0.08f;   // inset along depth
 };
 
+struct SpriteSet
+{
+    std::vector<Image> views;
+    int numViews = 0;
+    // Basically create a set of views to fake 3D rotation
+};
+
+struct ColumnProp
+{
+    float x;
+    float y;
+    std::string setName;
+    float scale = 1.0f;
+    float distance = 0.0f;
+};
 
 
 struct Engine
@@ -198,6 +213,9 @@ struct Engine
 
     std::vector<Prop> props;
     std::vector<Image> propImages;
+
+	std::vector<ColumnProp> columns;
+	std::unordered_map<std::string, SpriteSet> columnSpriteSets;
 
     std::vector<QuadProp> quads;
     std::vector<std::vector<int>> quadBuckets;
@@ -242,6 +260,141 @@ struct Engine
     Uint32 statueChatStartTick = 0;   
 };
 
+static bool loadImageOrFallback( const std::string &path, Image &out, Uint32 fillRgb = 0 ) {
+    if (out.loadBMP( path )) return true;
+    // simple 64x64 fallback if missing
+    out.width = 64;
+    out.height = 64;
+    out.pixels.assign( 64 * 64, fillRgb ? fillRgb : rgb( 255, 0, 255 ) );
+    return false;
+}
+
+
+static bool loadColumns( const std::string &path, Engine &engineContext ) {
+    std::ifstream colFileStream( path );
+    if (!colFileStream.is_open())
+    {
+        std::fprintf( stderr, "Could not open %s, no columns will be loaded.\n", path.c_str() );
+        return false; // Not a fatal error, just no columns
+    }
+
+    // Clear old data
+    engineContext.columns.clear();
+    engineContext.columnSpriteSets.clear();
+
+    const fs::path base = fs::path( path ).parent_path();
+    auto resolve = [&]( const std::string &p )->std::string {
+        fs::path q = p;
+        return q.is_absolute() ? q.string() : (base / q).string();
+        };
+
+    std::string line;
+    int lineTrack = 0;
+    while (std::getline( colFileStream, line ))
+    {
+        ++lineTrack;
+        if (line.empty() || line[ 0 ] == '#') continue;
+
+        std::istringstream ss( line );
+        std::string kind;
+        ss >> kind;
+
+        // Normalize to uppercase
+        for (auto &c : kind) c = char( std::toupper( unsigned char( c ) ) );
+
+        if (kind == "SET") // Defines a sprite set
+        {
+            std::string setName;
+            ss >> setName;
+            if (setName.empty())
+            {
+                std::fprintf( stderr, "Bad SET line %d in %s: No set name provided.\n", lineTrack, path.c_str() ); continue;
+            }
+
+            SpriteSet newSet;
+            std::string bmpFile;
+            while (ss >> bmpFile)
+            {
+                Image img;
+                std::string fullPath = resolve( bmpFile );
+                if (loadImageOrFallback( fullPath, img, rgb( 255, 0, 255 ) ))
+                {
+                    newSet.views.push_back( std::move( img ) );
+                }
+                else
+                {
+                    std::fprintf( stderr, "Warning: Failed to load column view %s for set %s\n", fullPath.c_str(), setName.c_str() );
+                }
+            }
+
+            if (newSet.views.empty())
+            {
+                std::fprintf( stderr, "Warning: SET %s defined with no valid views.\n", setName.c_str() );
+            }
+            else
+            {
+                newSet.numViews = (int)newSet.views.size();
+                engineContext.columnSpriteSets[ setName ] = std::move( newSet );
+                std::cout << "Loaded column set " << setName << " with " << newSet.numViews << " views." << std::endl;
+            }
+        }
+        else if (kind == "PLACE") // Places an instance of a set
+        {
+            std::string setName;
+            float x, y, scale;
+            if (!(ss >> setName >> x >> y >> scale))
+            {
+                std::fprintf( stderr, "Bad PLACE line %d in %s\n", lineTrack, path.c_str() ); continue;
+            }
+
+            ColumnProp prop;
+            prop.setName = setName;
+            prop.x = x;
+            prop.y = y;
+            prop.scale = scale;
+            engineContext.columns.push_back( prop );
+        }
+        else if (kind == "BOX_COLUMN") 
+        {
+            std::string texturePath;
+            float x, y, halfLength, halfDepth, angleDeg, height;
+
+            if (!(ss >> x >> y >> halfLength >> halfDepth >> angleDeg >> height >> texturePath))
+            {
+                std::fprintf( stderr, "Bad BOX_COLUMN line %d in %s\n", lineTrack, path.c_str() );
+                continue;
+            }
+
+            BoxProp box;
+            box.centerX = x;
+            box.centerY = y;
+            box.halfLength = halfLength;
+            box.halfDepth = halfDepth;
+            box.angle = angleDeg * 3.14159265f / 180.f; // Convert degrees to radians
+            box.height = height;
+
+            // Load the texture for the column
+            std::string fullPath = resolve( texturePath );
+            if (!box.sideTexure.loadBMP( fullPath ))
+            {
+                // Fallback to a solid color if texture fails
+                box.sideTexure.width = 64;
+                box.sideTexure.height = 64;
+                box.sideTexure.pixels.assign( 64 * 64, rgb( 100, 100, 100 ) );
+            }
+            box.legTexure = box.sideTexure; // Can reuse or load a different one
+
+            // Set leg parameters to 0 for a simple pillar
+            box.legHalf = 0.0f;
+            box.legInsetLength = 0.0f;
+            box.legInsetDepth = 0.0f;
+
+            // Add this box to the 3D object list (same as benches)
+            engineContext.benches3D.push_back( std::move( box ) );
+        }
+    }
+    return true;
+}
 
 static bool loadMap( const std::string &path, Map &mapToLoad ) {
     std::ifstream mapPathStream( path );
@@ -365,14 +518,6 @@ static bool loadArtworks( const std::string &path, std::vector<Artwork> &works )
     return true;
 }
 
-static bool loadImageOrFallback( const std::string &path, Image &out, Uint32 fillRgb = 0 ) {
-    if (out.loadBMP( path )) return true;
-    // simple 64x64 fallback if missing
-    out.width = 64;
-    out.height = 64;
-    out.pixels.assign( 64 * 64, fillRgb ? fillRgb : rgb( 255, 0, 255 ) );
-    return false;
-}
 
 
 
