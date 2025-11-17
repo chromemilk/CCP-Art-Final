@@ -16,7 +16,11 @@ struct LevelDef
     int levelId = 0;
 };
 
-
+enum GameState
+{
+    STATE_MENU,
+    STATE_GAME
+};
 
 static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     namespace fs = std::filesystem;
@@ -340,6 +344,14 @@ void updateMusicStream() {
     // Don't do anything if music was never started
     if (!g_musicInitialized)
     {
+        return;
+    }
+    if (config::useMusic == false)
+    {
+        if (music.getStatus() != sf::SoundStream::Status::Stopped)
+        {
+            music.stop();
+        }
         return;
     }
 
@@ -1013,7 +1025,38 @@ static void render( Engine &engineContext, float dt ) {
 }
 
 
+static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn ) {
+    const int fontW = 8;
+    const int fontH = 8;
+    const int lineSpace = 5;
+    const int advY = fontH + lineSpace + 10; // Spacing between items
 
+    int width = 220, height = 130;
+    int x = (RENDER_W - width) / 2;
+    int y = (RENDER_H - height) / 2;
+
+    drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+
+    int textX = x + 15;
+    int textY = y + 20;
+    int textWidth = width - 30;
+
+    std::string playText = "Play";
+    Uint32 playColor = (selection == 0) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 ); // Highlight if selected
+    drawString8x8( engineContext, textX, textY, playText, playColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
+    textY += advY;
+
+
+	std::string onOrOff = musicOn ? "[On]" : "[Off]";
+    std::string musicText = "Music: " + onOrOff;
+    Uint32 musicColor = (selection == 1) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 );
+    drawString8x8( engineContext, textX, textY, musicText, musicColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
+    textY += advY;
+
+    std::string volumeText = "Volume: < " + std::to_string( (int)volume ) + " >";
+    Uint32 volumeColor = (selection == 2) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 );
+    drawString8x8( engineContext, textX, textY, volumeText, volumeColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
+}
 
 
 int main( int argc, char **argv ) {
@@ -1075,7 +1118,11 @@ int main( int argc, char **argv ) {
     }
 
 
+    GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
 
+    int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume
+    const int numMenuOptions = 3;
+    float musicVolume = getMusicVolume(); 
   
 
 
@@ -1103,241 +1150,309 @@ int main( int argc, char **argv ) {
             {
                 running = false;
             }
-            else if (ev.type == SDL_EVENT_KEY_DOWN)
+
+            if (currentState == STATE_MENU)
             {
-                if (ev.key.key == SDLK_ESCAPE)
+                // --- MENU INPUT ---
+                if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
-                    running = false;
-                }
-                else if (ev.key.key == SDLK_F1)
-                {
-                    engineContext.showHelp = !engineContext.showHelp;
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_E)
-                {
-
-                    int id = pickArtworkUnderCrosshair( engineContext );
-                    if (id < 0) id = findNearestArtwork( engineContext ); // optional fallback
-
-                    if (id >= 0) // We are looking at a valid artwork
+                    switch (ev.key.key)
                     {
-                        if (engineContext.placardOpen && engineContext.openArtId == id)
+                    case SDLK_ESCAPE:
+                        running = false; // Quit from menu
+                        break;
+                    case SDLK_UP:
+                        currentMenuSelection = (currentMenuSelection - 1 + numMenuOptions) % numMenuOptions;
+                        break;
+                    case SDLK_DOWN:
+                        currentMenuSelection = (currentMenuSelection + 1) % numMenuOptions;
+                        break;
+                    case SDLK_RETURN:
+                    case SDLK_KP_ENTER:
+                        if (currentMenuSelection == 0) // "Play"
                         {
-                            // Placard is open -> close it, open journal
+                            currentState = STATE_GAME;
+                        }
+                        break;
+                    case SDLK_LEFT:
+                        if (currentMenuSelection == 1) // Music Toggle
+                        {
+                            config::useMusic = !config::useMusic;
+                        }
+                        else if (currentMenuSelection == 2) // Volume Down
+                        {
+                            musicVolume = std::max( 0.f, musicVolume - 10.f );
+                            setMusicVolume( musicVolume );
+                        }
+                        break;
+                    case SDLK_RIGHT:
+                        if (currentMenuSelection == 1) // Music Toggle
+                        {
+                            config::useMusic = !config::useMusic;
+                        }
+                        else if (currentMenuSelection == 2) // Volume Up
+                        {
+                            musicVolume = std::min( 100.f, musicVolume + 10.f );
+                            setMusicVolume( musicVolume );
+                        }
+                        break;
+                    }
+                }
+            }
+            else if (currentState == STATE_GAME)
+            {
+                if (ev.type == SDL_EVENT_KEY_DOWN)
+                {
+                    if (ev.key.key == SDLK_ESCAPE)
+                    {
+                        running = false;
+                    }
+                    else if (ev.key.key == SDLK_F1)
+                    {
+                        engineContext.showHelp = !engineContext.showHelp;
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_E)
+                    {
+
+                        int id = pickArtworkUnderCrosshair( engineContext );
+                        if (id < 0) id = findNearestArtwork( engineContext ); // optional fallback
+
+                        if (id >= 0) // We are looking at a valid artwork
+                        {
+                            if (engineContext.placardOpen && engineContext.openArtId == id)
+                            {
+                                // Placard is open -> close it, open journal
+                                engineContext.placardOpen = false;
+                                engineContext.journalOpen = true;
+                                engineContext.lastPlacardTick = SDL_GetTicks(); // Refresh timer
+                            }
+                            else if (engineContext.journalOpen && engineContext.openArtId == id)
+                            {
+                                // Journal is open -> close it
+                                engineContext.journalOpen = false;
+                                engineContext.openArtId = -1; // Fully close
+                            }
+                            else
+                            {
+                                // Nothing is open, or we're looking at a *new* piece of art
+                                // Open the placard for this art
+                                engineContext.openArtId = id;
+                                engineContext.placardOpen = true;
+                                engineContext.journalOpen = false; // Ensure journal is closed
+                                engineContext.lastPlacardTick = SDL_GetTicks();
+
+
+                            }
+                        }
+                        else // Not looking at any art
+                        {
+                            // Close whatever is open
                             engineContext.placardOpen = false;
-                            engineContext.journalOpen = true;
-                            engineContext.lastPlacardTick = SDL_GetTicks(); // Refresh timer
-                        }
-                        else if (engineContext.journalOpen && engineContext.openArtId == id)
-                        {
-                            // Journal is open -> close it
                             engineContext.journalOpen = false;
-                            engineContext.openArtId = -1; // Fully close
-                        }
-                        else
-                        {
-                            // Nothing is open, or we're looking at a *new* piece of art
-                            // Open the placard for this art
-                            engineContext.openArtId = id;
-                            engineContext.placardOpen = true;
-                            engineContext.journalOpen = false; // Ensure journal is closed
-                            engineContext.lastPlacardTick = SDL_GetTicks();
-
-                          
+                            engineContext.openArtId = -1;
+                            if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
+                            {
+                                engineContext.statueChatActive = true;
+                                engineContext.statueChatStartTick = SDL_GetTicks();
+                            }
                         }
                     }
-                    else // Not looking at any art
+                    else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
-                        // Close whatever is open
-                        engineContext.placardOpen = false;
-                        engineContext.journalOpen = false;
-                        engineContext.openArtId = -1;
-                        if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
+
+                        if (engineContext.currentLevel == Levels::TRANSITION)
                         {
-                            engineContext.statueChatActive = true;
-                            engineContext.statueChatStartTick = SDL_GetTicks();
+                            bool toggled = toggleDoorAhead( engineContext );
+                            if (toggled)
+                            {
+                                handleLevelChange( engineContext, levels, Levels::CAVE );
+                            }
                         }
                     }
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_F)
-                {
-                    bool toggled = toggleDoorAhead( engineContext );
-					handleLevelChange( engineContext, levels, Levels::CAVE );
-
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)
-                {
-                    actualSpeed += 0.8f;
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_P)
-                {
-                    float2 pos( engineContext.positionX, engineContext.positionY );
-                    placePlant( engineContext, pos, levels[ curLevel ].folder + "/plant.bmp" );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_R)
-                {
-                    float2 pos( engineContext.positionX, engineContext.positionY );
-                    placeRope( engineContext, pos, levels[ curLevel ].folder + "/rope.bmp" );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_T)
-                {
-                    float2 pos( engineContext.positionX, engineContext.positionY );
-                    placeStatue( engineContext, pos, levels[ curLevel ].folder + "/statue.bmp" );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_V)
-                {
-                    float2 pos( engineContext.positionX, engineContext.positionY );
-                    placeVase( engineContext, pos, levels[ curLevel ].folder );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_C)
-                {
-                    float2 pos( engineContext.positionX, engineContext.positionY );
-                    placeCan( engineContext, pos, levels[ curLevel ].folder + "/trashcan.bmp" );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_O)
-                {
-                    saveProps( (levels[ curLevel ].folder + "/props.txt"),
-                        engineContext.props, engineContext.propImages, engineContext.quads );
-                }
-                else if (ev.key.scancode == SDL_SCANCODE_N)
-                {
-					handleLevelChange( engineContext, levels, Levels::TRANSITION );
+                    else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)
+                    {
+                        actualSpeed += 0.8f;
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_P)
+                    {
+                        float2 pos( engineContext.positionX, engineContext.positionY );
+                        placePlant( engineContext, pos, levels[ curLevel ].folder + "/plant.bmp" );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_R)
+                    {
+                        float2 pos( engineContext.positionX, engineContext.positionY );
+                        placeRope( engineContext, pos, levels[ curLevel ].folder + "/rope.bmp" );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_T)
+                    {
+                        float2 pos( engineContext.positionX, engineContext.positionY );
+                        placeStatue( engineContext, pos, levels[ curLevel ].folder + "/statue.bmp" );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_V)
+                    {
+                        float2 pos( engineContext.positionX, engineContext.positionY );
+                        placeVase( engineContext, pos, levels[ curLevel ].folder );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_C)
+                    {
+                        float2 pos( engineContext.positionX, engineContext.positionY );
+                        placeCan( engineContext, pos, levels[ curLevel ].folder + "/trashcan.bmp" );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_O)
+                    {
+                        saveProps( (levels[ curLevel ].folder + "/props.txt"),
+                            engineContext.props, engineContext.propImages, engineContext.quads );
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_N)
+                    {
+                        handleLevelChange( engineContext, levels, Levels::TRANSITION );
+                    }
                 }
             }
         }
-        const bool *ks = SDL_GetKeyboardState( nullptr );
-        float ms = actualSpeed * dt;
-        float ts = TURN_SPEED * dt;
-        if (ks[ SDL_SCANCODE_LEFT ])
-        {
-            float ang = -ts;
-            engineContext.yaw += ang;
-            if (engineContext.yaw > 360) {
-                engineContext.yaw = 0;
-            }
-            float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
-            float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
-            engineContext.directionX = ndx; 
-            engineContext.directionY = ndy;
-            // re-derive plane to stay perfectly perpendicular and correct FOV
-            engineContext.planeX = -engineContext.directionY * FOV_TAN;
-            engineContext.planeY = engineContext.directionX * FOV_TAN;
-        }
-        if (ks[ SDL_SCANCODE_RIGHT ])
-        {
-            float ang = ts;
-            engineContext.yaw += ang;
-            if (engineContext.yaw < 0) {
-                engineContext.yaw = 360;
-            }
-            float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
-            float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
-            engineContext.directionX = ndx;
-            engineContext.directionY = ndy;
-            engineContext.planeX = -engineContext.directionY * FOV_TAN;
-            engineContext.planeY = engineContext.directionX * FOV_TAN;
-        }
-        // move: W/S
-        float nx = engineContext.positionX, ny = engineContext.positionY;
-        if (ks[ SDL_SCANCODE_W ])
-        {
-            nx += engineContext.directionX * ms;
-            ny += engineContext.directionY * ms;
-        }
-        if (ks[ SDL_SCANCODE_S ])
-        {
-            nx -= engineContext.directionX * ms;
-            ny -= engineContext.directionY * ms;
-        }
-        // strafe: A/D
-        if (ks[ SDL_SCANCODE_A ])
-        {
-            nx += engineContext.directionY * ms;
-            ny += -engineContext.directionX * ms;
-        }
-        if (ks[ SDL_SCANCODE_D ])
-        {
-            nx += -engineContext.directionY * ms;
-            ny += engineContext.directionX * ms;
-        }
-        auto pass = [&]( float x, float y ) {
-            int mx = int( x ), my = int( y );
-            if (mx < 0 || my < 0 || mx >= engineContext.map.width || my >= engineContext.map.height) return false;
-            int t = engineContext.map.tiles[ my * engineContext.map.width + mx ];
-            if (t != 0) return false;
 
-
-            /*
-            // Quad collisions: inflate bench art tiny bit
-            for (const auto &q : engineContext.quads)
+        if (currentState == STATE_GAME)
+        {
+            const bool *ks = SDL_GetKeyboardState( nullptr );
+            float ms = actualSpeed * dt;
+            float ts = TURN_SPEED * dt;
+            if (ks[ SDL_SCANCODE_LEFT ])
             {
-                // Project point into local space of q
-                float u, v;
-                if (quadprop_local_uv( q, x, y, u, v ))
+                float ang = -ts;
+                engineContext.yaw += ang;
+                if (engineContext.yaw > 360)
                 {
-                    // treat inside (u,v) as blocked; shrink bounds slightly for easier navigation
-                    const float pad = 0.02f;
-                    if (u > pad && u < 1.0f - pad && v > pad && v < 1.0f - pad) return false;
+                    engineContext.yaw = 0;
+                }
+                float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
+                float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
+                engineContext.directionX = ndx;
+                engineContext.directionY = ndy;
+                // re-derive plane to stay perfectly perpendicular and correct FOV
+                engineContext.planeX = -engineContext.directionY * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;
+            }
+            if (ks[ SDL_SCANCODE_RIGHT ])
+            {
+                float ang = ts;
+                engineContext.yaw += ang;
+                if (engineContext.yaw < 0)
+                {
+                    engineContext.yaw = 360;
+                }
+                float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
+                float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
+                engineContext.directionX = ndx;
+                engineContext.directionY = ndy;
+                engineContext.planeX = -engineContext.directionY * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;
+            }
+            // move: W/S
+            float nx = engineContext.positionX, ny = engineContext.positionY;
+            if (ks[ SDL_SCANCODE_W ])
+            {
+                nx += engineContext.directionX * ms;
+                ny += engineContext.directionY * ms;
+            }
+            if (ks[ SDL_SCANCODE_S ])
+            {
+                nx -= engineContext.directionX * ms;
+                ny -= engineContext.directionY * ms;
+            }
+            // strafe: A/D
+            if (ks[ SDL_SCANCODE_A ])
+            {
+                nx += engineContext.directionY * ms;
+                ny += -engineContext.directionX * ms;
+            }
+            if (ks[ SDL_SCANCODE_D ])
+            {
+                nx += -engineContext.directionY * ms;
+                ny += engineContext.directionX * ms;
+            }
+            auto pass = [&]( float x, float y ) {
+                int mx = int( x ), my = int( y );
+                if (mx < 0 || my < 0 || mx >= engineContext.map.width || my >= engineContext.map.height) return false;
+                int t = engineContext.map.tiles[ my * engineContext.map.width + mx ];
+                if (t != 0) return false;
+
+
+                /*
+                // Quad collisions: inflate bench art tiny bit
+                for (const auto &q : engineContext.quads)
+                {
+                    // Project point into local space of q
+                    float u, v;
+                    if (quadprop_local_uv( q, x, y, u, v ))
+                    {
+                        // treat inside (u,v) as blocked; shrink bounds slightly for easier navigation
+                        const float pad = 0.02f;
+                        if (u > pad && u < 1.0f - pad && v > pad && v < 1.0f - pad) return false;
+                    }
+                }
+                */
+                const float pad = 0.01f;
+                for (const auto &box : engineContext.benches3D)
+                {
+                    // world -> bench local (rotate by -angle)
+                    const float dx = x - box.centerX, dy = y - box.centerY;
+                    const float c = std::cos( -box.angle ), s = std::sin( -box.angle );
+                    const float u = dx * c - dy * s;  // along length
+                    const float v = dx * s + dy * c;  // along depth
+
+                    // Half extents, inflated for player radius
+                    if (std::fabs( u ) < (box.halfLength + 0.3 + pad) &&
+                        std::fabs( v ) < (box.halfDepth + 0.3 + pad))
+                    {
+                        return false; // blocked by bench body
+                    }
+                }
+
+                return true;
+                };
+            // Use art radius
+            float radius = 0.2f;
+            if (pass( nx + radius, engineContext.positionY ) && pass( nx - radius, engineContext.positionY )) engineContext.positionX = nx;
+            if (pass( engineContext.positionX, ny + radius ) && pass( engineContext.positionX, ny - radius )) engineContext.positionY = ny;
+            engineContext.inRangeOfStatue = isPlayerNearStatue( engineContext );
+            if (engineContext.statueChatActive)
+            {
+                Uint32 now = SDL_GetTicks();
+                if (now - engineContext.statueChatStartTick > 8000)
+                {
+                    engineContext.statueChatActive = false; // Reset state
+                    handleLevelChange( engineContext, levels, Levels::TRANSITION );
                 }
             }
-            */
-            const float pad = 0.02f;
-            for (const auto &box : engineContext.benches3D)
             {
-                // world -> bench local (rotate by -angle)
-                const float dx = x - box.centerX, dy = y - box.centerY;
-                const float c = std::cos( -box.angle ), s = std::sin( -box.angle );
-                const float u = dx * c - dy * s;  // along length
-                const float v = dx * s + dy * c;  // along depth
+                // Keep open while you keep looking at it; close after ~600ms of looking away
+                static const Uint32 KEEP_MS = 600;
 
-                // Half extents, inflated for player radius
-                if (std::fabs( u ) < (box.halfLength + 0.3 + pad) &&
-                    std::fabs( v ) < (box.halfDepth + 0.3 + pad))
+                int under = pickArtworkUnderCrosshair( engineContext );
+                Uint32 now = SDL_GetTicks();
+
+                if (engineContext.placardOpen)
                 {
-                    return false; // blocked by bench body
-                }
-            }
-
-            return true;
-            };
-        // Use art radius
-        float radius = 0.2f;
-        if (pass( nx + radius, engineContext.positionY ) && pass( nx - radius, engineContext.positionY )) engineContext.positionX = nx;
-        if (pass( engineContext.positionX, ny + radius ) && pass( engineContext.positionX, ny - radius )) engineContext.positionY = ny;
-        engineContext.inRangeOfStatue = isPlayerNearStatue( engineContext );
-        if (engineContext.statueChatActive)
-        {
-            Uint32 now = SDL_GetTicks();
-            if (now - engineContext.statueChatStartTick > 8000)
-            {
-                engineContext.statueChatActive = false; // Reset state
-                handleLevelChange( engineContext, levels, Levels::TRANSITION );
-            }
-        }
-        {
-            // Keep open while you keep looking at it; close after ~600ms of looking away
-            static const Uint32 KEEP_MS = 600;
-
-            int under = pickArtworkUnderCrosshair( engineContext );
-            Uint32 now = SDL_GetTicks();
-
-            if (engineContext.placardOpen)
-            {
-                if (under == engineContext.openArtId)
-                {
-                    engineContext.lastPlacardTick = now; // still looking at it: refresh timer
-                }
-                else if (now - engineContext.lastPlacardTick > KEEP_MS)
-                {
-                    engineContext.placardOpen = false;
-                    engineContext.openArtId = -1;
+                    if (under == engineContext.openArtId)
+                    {
+                        engineContext.lastPlacardTick = now; // still looking at it: refresh timer
+                    }
+                    else if (now - engineContext.lastPlacardTick > KEEP_MS)
+                    {
+                        engineContext.placardOpen = false;
+                        engineContext.openArtId = -1;
+                    }
                 }
             }
         }
         render( engineContext, dt );
 
+        if (currentState == STATE_MENU)
+        {
+            renderMenu( engineContext, currentMenuSelection, musicVolume, config::useMusic );
+        }
         // Present to window (nearest-neighbor scale)
-        SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4 );
+        SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
         SDL_RenderClear( engineContext.renderer );
         SDL_RenderTexture( engineContext.renderer, engineContext.backtexure, nullptr, nullptr );
         SDL_RenderPresent( engineContext.renderer );

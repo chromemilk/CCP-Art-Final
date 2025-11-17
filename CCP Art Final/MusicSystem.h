@@ -1,4 +1,5 @@
 #include <SFML\Audio.hpp>
+#include "Settings.h"
 
 enum MusicTypes
 {
@@ -28,11 +29,25 @@ static int caveIndex = 0;
 static MusicTypes g_currentMusicType;     // Tracks the current playlist
 static std::string g_baseMusicDirectory;  // Stores the path for the update function
 static bool g_musicInitialized = false;   // Prevents update loop from running early
+static float g_musicVolume = 10.f;
 
 
+void setMusicVolume( float volume ) {
+	g_musicVolume = std::clamp( volume, 0.f, 100.f );
+	music.setVolume( g_musicVolume );
+}
 
+float getMusicVolume() {
+	return g_musicVolume;
+}
 
 void playNextTrack() {
+	if (config::useMusic == false)
+	{
+		music.stop();
+		return;
+	}
+
 	if (g_baseMusicDirectory.empty())
 	{
 		return; 
@@ -63,11 +78,18 @@ void playNextTrack() {
 		return;
 	}
 
-	music.setVolume( 10.f );
+	music.setVolume( g_musicVolume );
 	music.play();
 }
 
 void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel ) {
+
+	if (config::useMusic == false)
+	{
+		music.stop();
+		return;
+	}
+
 	g_baseMusicDirectory = baseMusicDirectory;
 
 	if (currentLevel != Levels::MUSEUM && currentLevel != Levels::CAVE) return;
