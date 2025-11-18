@@ -490,7 +490,7 @@ static void render( Engine &engineContext, float dt ) {
         const Image &wallTexture = (hitTile == 2) ? engineContext.doorTexture : engineContext.wallTex;
 
         // Draw wall column (uses fixed-step in RendererHelpers)
-        drawTexturedColumn( engineContext, wallTexture, x, drawStart, drawEnd, perpWallDist, wallX );
+        drawTexturedColumn( engineContext, wallTexture, x, drawStart, drawEnd, perpWallDist, wallX, side );
 
         if (hitTile == 1)
         {
@@ -660,8 +660,18 @@ static void render( Engine &engineContext, float dt ) {
 
                     color = applyMul( color, m );
 
-                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.30f, 1.0f );
-                    shade *= caveLight( rowDist );  // keep your cave torch falloff
+                    float shade = 1.0f;
+                    if (engineContext.caveMode)
+                    {
+                        shade = std::clamp( 1.0f / (0.02f * rowDist), 0.30f, 1.0f );
+                        shade *= caveLight( rowDist );
+                    }
+                    else
+                    {
+                        // Museum Mode: Match the wall formula for consistency
+                        shade = 1.0f / (1.0f + 0.025f * rowDist + 0.005f * rowDist * rowDist);
+                        shade = std::clamp( shade, 0.1f, 1.0f );
+                    }
                     putPix( engineContext, x, y, shadeCol( color, shade ) );
 
                     if (rowDist < engineContext.zbuffer[ x ] && !engineContext.quadBuckets.empty())
@@ -718,8 +728,18 @@ static void render( Engine &engineContext, float dt ) {
                     int tx = int( fx * engineContext.ceilTex.width );
                     int ty = int( fy * engineContext.ceilTex.height );
                     Uint32 color = engineContext.ceilTex.sample( tx, ty );
-                    float shade = std::clamp( 1.0f / (0.02f * rowDist), 0.35f, 1.0f );
-                    shade *= caveLight( rowDist );             
+                    float shade = 1.0f;
+                    if (engineContext.caveMode)
+                    {
+                        shade = std::clamp( 1.0f / (0.02f * rowDist), 0.30f, 1.0f );
+                        shade *= caveLight( rowDist );
+                    }
+                    else
+                    {
+                        // Museum Mode: Match the wall formula for consistency
+                        shade = 1.0f / (1.0f + 0.025f * rowDist + 0.005f * rowDist * rowDist);
+                        shade = std::clamp( shade, 0.1f, 1.0f );
+                    }
 
                     putPix( engineContext, x, y, shadeCol( color, shade ) );
                 }
@@ -1024,38 +1044,70 @@ static void render( Engine &engineContext, float dt ) {
     
 }
 
-
 static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn ) {
-    const int fontW = 8;
-    const int fontH = 8;
-    const int lineSpace = 5;
-    const int advY = fontH + lineSpace + 10; // Spacing between items
-
-    int width = 220, height = 130;
+    // Dimensions
+    int width = 320, height = 200;
     int x = (RENDER_W - width) / 2;
     int y = (RENDER_H - height) / 2;
 
-    drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+    // Colors
+    Uint32 bgCol = rgb( 25, 25, 30 );       // Dark slate
+    Uint32 borderCol = rgb( 180, 150, 50 ); // Dull Gold
+    Uint32 textCol = rgb( 160, 160, 170 );  // Soft Grey
+    Uint32 selCol = rgb( 255, 230, 100 );   // Bright Gold
 
-    int textX = x + 15;
-    int textY = y + 20;
-    int textWidth = width - 30;
+    drawTextBox( engineContext, x, y, width, height, bgCol, borderCol );
+    drawTextBox( engineContext, x + 4, y + 4, width - 8, height - 8, bgCol, borderCol );
 
-    std::string playText = "Play";
-    Uint32 playColor = (selection == 0) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 ); // Highlight if selected
-    drawString8x8( engineContext, textX, textY, playText, playColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
-    textY += advY;
+    std::string title = "MICRO MUSEUM";
+    int scale = 3;
+    // Approx centering calc: (char width * scale + spacing) * length
+    int titleW = (int)title.length() * (3 * scale + 2);
+    int titleX = x + (width - titleW) / 2;
+    int titleY = y + 25;
+
+    drawStringTinyScaled( engineContext, titleX, titleY, title, borderCol, scale, 2, 2, true );
+
+    // Subtitle
+    std::string sub = "INTERACTIVE GALLERY";
+    int subX = x + (width - (int)sub.length() * 6) / 2; // approx centering for scale 1
+    drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 1, 3, 1, false );
 
 
-	std::string onOrOff = musicOn ? "[On]" : "[Off]";
-    std::string musicText = "Music: " + onOrOff;
-    Uint32 musicColor = (selection == 1) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 );
-    drawString8x8( engineContext, textX, textY, musicText, musicColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
-    textY += advY;
+    int optY = y + 80;
+    int lineH = 25; // Spacing between lines
 
-    std::string volumeText = "Volume: < " + std::to_string( (int)volume ) + " >";
-    Uint32 volumeColor = (selection == 2) ? rgb( 255, 255, 0 ) : rgb( 220, 220, 220 );
-    drawString8x8( engineContext, textX, textY, volumeText, volumeColor, textWidth, 1, 2, true, rgb( 20, 20, 20 ) );
+    bool showCursor = (SDL_GetTicks() / 350) % 2 == 0;
+
+    auto drawItem = [&]( int index, std::string label ) {
+        bool isSel = (selection == index);
+        Uint32 col = isSel ? selCol : textCol;
+
+        std::string prefix = (isSel && showCursor) ? "> " : "  ";
+        std::string suffix = (isSel && showCursor) ? " <" : "  ";
+        std::string fullText = prefix + label + suffix;
+
+        int charW = 10;
+        int spacing = 1;
+        int advX8x8 = charW + spacing;
+
+        int textW = (int)fullText.length() * advX8x8;
+        int textX = x + (width - textW) / 2;
+
+        drawString8x8( engineContext, textX, optY + (index * lineH), fullText, col, width, spacing, 2, true, rgb( 10, 10, 10 ) );
+     };
+
+    drawItem( 0, "Begin Tour" );
+
+    std::string musicState = musicOn ? "ON" : "OFF";
+    drawItem( 1, "Enable Audio: " + musicState );
+
+    std::string volStr = std::to_string( (int)volume ) + "%";
+    drawItem( 2, "Music Volume: " + volStr );
+
+    std::string footer = "UP/DOWN Select    ENTER Confirm";
+    int footW = (int)footer.length() * 4; // Scale 1 tiny font
+    drawStringTinyScaled( engineContext, x + (width - footW) / 2, y + height - 20, footer, rgb( 80, 80, 90 ), 1, 1, 1, false );
 }
 
 
@@ -1205,7 +1257,7 @@ int main( int argc, char **argv ) {
                 {
                     if (ev.key.key == SDLK_ESCAPE)
                     {
-                        running = false;
+                        currentState = STATE_MENU;
                     }
                     else if (ev.key.key == SDLK_F1)
                     {

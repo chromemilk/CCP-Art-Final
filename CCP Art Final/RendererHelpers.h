@@ -12,17 +12,47 @@ static void clear( Engine &engineContext, Uint32 top, Uint32 bottom ) {
         std::fill_n( &engineContext.backbuffer[ y * RENDER_W ], RENDER_W, choice );
     }
 }
-static void drawTexturedColumn( Engine &engineContext, const Image &texture, int x, int drawStart, int drawEnd, float perpDist, float wallX ) {
+static void drawTexturedColumn( Engine &engineContext, const Image &texture, int x, int drawStart, int drawEnd, float perpDist, float wallX, int side ) {
     int textureW = texture.width;
     int textureH = texture.height;
     int textureX = int( wallX * float( textureW ) );
     textureX = std::clamp( textureX, 0, textureW - 1 );
 
     const int lineH = int( RENDER_H / std::max( perpDist, 1e-3f ) );
-
     const int wallTopY = -lineH / 2 + RENDER_H / 2;
 
-    
+    float shade = 1.0f;
+
+    if (engineContext.caveMode)
+    {
+        // Old Cave Logic
+        shade = std::clamp( 1.0f / (0.4f * perpDist), 0.15f, 1.0f );
+        float R = engineContext.lightRadius;
+        float t = std::clamp( 1.0f - std::pow( perpDist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+        float l = std::max( engineContext.caveAmbient, t );
+        shade *= l;
+    }
+    else
+    {
+		// Use quadratic falloff for museum mode
+        shade = 1.0f / (1.0f + 0.025f * perpDist + 0.005f * perpDist * perpDist);
+        shade = std::clamp( shade, 0.1f, 1.0f ); // Never go fully pitch black, keep a little ambient
+
+        // Makes walls facing one axis darker than the other to show geometry depth
+        if (side == 1) shade *= 0.75f;
+
+        // If texture coordinate (wallX) is near 0 or 1, we are in a corner. Darken it.
+        float edgeDist = std::min( wallX, 1.0f - wallX );
+        float aoThreshold = 0.15f; 
+        if (edgeDist < aoThreshold)
+        {
+            // Smoothstep interpolation for soft shadows
+            float t = edgeDist / aoThreshold;
+            float ao = t * t * (3.0f - 2.0f * t);
+            shade *= (0.6f + 0.4f * ao); // Darken up to 40%
+        }
+    }
+
 
     for (int y = drawStart; y <= drawEnd; ++y)
     {
