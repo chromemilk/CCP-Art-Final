@@ -1,5 +1,9 @@
 # Format: BOX_COLUMN [x] [y] [halfWidth] [halfDepth] [angleDeg] [height] [texture_path.bmp]
 
-BOX_COLUMN 11 5.5 0.2 0.2 0.0 1.1 doric_surface.bmp
-BOX_COLUMN 11 6.5 0.2 0.2 0.0 1.0 ionic_surface.bmp
-BOX_COLUMN 11 7.5 0.2 0.2 0.0 1.1 corinthian_surface.bmp
+# A Grand Colonnade running North-South
+# Left Row (X=5)
+BOX_COLUMN 3.5 17.0 0.25 0.25 0.0 1.0 corinthian_surface.bmp
+BOX_COLUMN 5.5 17.0 0.25 0.25 0.0 1.0 ionic_surface.bmp
+BOX_COLUMN 8.5 17.0 0.25 0.25 0.0 1.0 doric_surface.bmp
+BOX_COLUMN 11.5 17.0 0.25 0.25 0.0 1.0 corinthian_surface.bmp
+

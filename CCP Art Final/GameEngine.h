@@ -197,8 +197,10 @@ struct Engine
 
     float positionX = 3.5f, positionY = 3.5f; // player pos
     float directionX = 1.0f, directionY = 0.0f;
+	bool isMoving = false;
     float planeX = -directionY * FOV_TAN;
     float planeY = directionX * FOV_TAN;
+	float pitchOffset = 0.0f;
     std::vector<float> zbuffer; // SSAO
 
     bool showHelp = true;

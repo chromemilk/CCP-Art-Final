@@ -19,7 +19,9 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
     textureX = std::clamp( textureX, 0, textureW - 1 );
 
     const int lineH = int( RENDER_H / std::max( perpDist, 1e-3f ) );
-    const int wallTopY = -lineH / 2 + RENDER_H / 2;
+
+    int bob = (RENDER_H / 2) + (int)engineContext.pitchOffset;
+    const int wallTopY = -lineH / 2 + bob;
 
     float shade = 1.0f;
 

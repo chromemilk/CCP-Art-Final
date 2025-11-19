@@ -300,10 +300,10 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float currentY = engineContext.positionY;
 
     // Location of statue
-    float statueX = 2.61414f;
-    float statueY = 2.00476;
+    float statueX = 7.4;
+    float statueY = 1.7;
 
-    float tolerance = 2.0f; // 1 meter
+    float tolerance = 1.5f; // 1 meter
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
 }
@@ -476,8 +476,10 @@ static void render( Engine &engineContext, float dt ) {
 
         // Column geometry
         int lineH = int( RENDER_H / std::max( perpWallDist, 1e-3f ) );
-        int drawStart = std::max( 0, -lineH / 2 + half );
-        int drawEnd = std::min( RENDER_H - 1, lineH / 2 + half );
+
+        int bob = half + (int)engineContext.pitchOffset;
+        int drawStart = std::max( 0, -lineH / 2 + bob );
+        int drawEnd = std::min( RENDER_H - 1, lineH / 2 + bob );
         clipTop[ x ] = std::min( clipTop[ x ], drawStart );
         clipBot[ x ] = std::max( clipBot[ x ], drawEnd );
         // Wall X coordinate (for texture)
@@ -601,10 +603,11 @@ static void render( Engine &engineContext, float dt ) {
     float rayDirY1 = engineContext.directionY + engineContext.planeY;
 
     const float posZ = 0.5f * RENDER_H;
+    int bob = half + (int)engineContext.pitchOffset; 
 
     for (int y = 0; y < RENDER_H; ++y)
     {
-        const int prop = y - half;
+        const int prop = y - bob;
         if (prop == 0) continue;
 
         float rowDist = std::fabs( posZ / float( prop ) );
@@ -1044,7 +1047,7 @@ static void render( Engine &engineContext, float dt ) {
     
 }
 
-static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn ) {
+static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob ) {
     // Dimensions
     int width = 320, height = 200;
     int x = (RENDER_W - width) / 2;
@@ -1097,13 +1100,17 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
         drawString8x8( engineContext, textX, optY + (index * lineH), fullText, col, width, spacing, 2, true, rgb( 10, 10, 10 ) );
      };
 
-    drawItem( 0, "Begin Tour" );
+    drawItem( 0, "Play" );
 
     std::string musicState = musicOn ? "ON" : "OFF";
     drawItem( 1, "Enable Audio: " + musicState );
 
     std::string volStr = std::to_string( (int)volume ) + "%";
     drawItem( 2, "Music Volume: " + volStr );
+
+	std::string viewBobEnabler = viewBob ? "ON" : "OFF";
+
+	drawItem( 3, "View Bobbing: " + viewBobEnabler );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
     int footW = (int)footer.length() * 4; // Scale 1 tiny font
@@ -1146,7 +1153,7 @@ int main( int argc, char **argv ) {
     std::filesystem::path cwd = std::filesystem::current_path();
 
     std::vector<LevelDef> levels = {
-    {"Museum", (cwd / "levels" / "museum").string(), 5.5f, 16.5f, 270.f, 0 },
+    {"Museum", (cwd / "levels" / "museum").string(), 7.5f, 4.5f, 90.f, 0},
     {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 },
     {"Transition", (cwd / "levels" / "transition").string(), 1.5, 4.5, 270.f, 2 }
 
@@ -1173,7 +1180,7 @@ int main( int argc, char **argv ) {
     GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
 
     int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume
-    const int numMenuOptions = 3;
+    const int numMenuOptions = 4;
     float musicVolume = getMusicVolume(); 
   
 
@@ -1192,6 +1199,24 @@ int main( int argc, char **argv ) {
         SDL_Event ev;
         float actualSpeed;
 
+        static float walkTime = 0.f;
+
+        if (!engineContext.isMoving)
+        {
+            engineContext.pitchOffset = engineContext.pitchOffset * 0.9f;
+            if (std::abs( engineContext.pitchOffset ) < 0.5f) engineContext.pitchOffset = 0.0f;
+        }
+        else
+        {
+            walkTime += dt * 15.0f; 
+            engineContext.isMoving = false; 
+
+            if (config::viewBobbing)
+            {
+                engineContext.pitchOffset = std::sin( walkTime ) * 3.0f;
+            }
+        }
+
 
         updateMusicStream();
 
@@ -1205,7 +1230,6 @@ int main( int argc, char **argv ) {
 
             if (currentState == STATE_MENU)
             {
-                // --- MENU INPUT ---
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
                     switch (ev.key.key)
@@ -1236,6 +1260,10 @@ int main( int argc, char **argv ) {
                             musicVolume = std::max( 0.f, musicVolume - 10.f );
                             setMusicVolume( musicVolume );
                         }
+                        else if (currentMenuSelection == 3)
+                        {
+							config::viewBobbing = !config::viewBobbing;
+                        }
                         break;
                     case SDLK_RIGHT:
                         if (currentMenuSelection == 1) // Music Toggle
@@ -1247,6 +1275,10 @@ int main( int argc, char **argv ) {
                             musicVolume = std::min( 100.f, musicVolume + 10.f );
                             setMusicVolume( musicVolume );
                         }
+                        else if (currentMenuSelection == 3)
+						{
+							config::viewBobbing = !config::viewBobbing;
+						}
                         break;
                     }
                 }
@@ -1405,22 +1437,26 @@ int main( int argc, char **argv ) {
             {
                 nx += engineContext.directionX * ms;
                 ny += engineContext.directionY * ms;
+                engineContext.isMoving = true;
             }
             if (ks[ SDL_SCANCODE_S ])
             {
                 nx -= engineContext.directionX * ms;
                 ny -= engineContext.directionY * ms;
+                engineContext.isMoving = true;
             }
             // strafe: A/D
             if (ks[ SDL_SCANCODE_A ])
             {
                 nx += engineContext.directionY * ms;
                 ny += -engineContext.directionX * ms;
+                engineContext.isMoving = true;
             }
             if (ks[ SDL_SCANCODE_D ])
             {
                 nx += -engineContext.directionY * ms;
                 ny += engineContext.directionX * ms;
+                engineContext.isMoving = true;
             }
             auto pass = [&]( float x, float y ) {
                 int mx = int( x ), my = int( y );
@@ -1501,7 +1537,7 @@ int main( int argc, char **argv ) {
 
         if (currentState == STATE_MENU)
         {
-            renderMenu( engineContext, currentMenuSelection, musicVolume, config::useMusic );
+            renderMenu( engineContext, currentMenuSelection, musicVolume, config::useMusic, config::viewBobbing );
         }
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
