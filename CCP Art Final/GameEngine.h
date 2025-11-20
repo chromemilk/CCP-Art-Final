@@ -178,6 +178,8 @@ struct ColumnProp
 };
 
 
+
+
 struct Engine
 {
     SDL_Window *window = nullptr;
@@ -261,6 +263,9 @@ struct Engine
     bool statueChatActive = false;    
     Uint32 statueChatStartTick = 0;   
 };
+
+
+
 
 static bool loadImageOrFallback( const std::string &path, Image &out, Uint32 fillRgb = 0 ) {
     if (out.loadBMP( path )) return true;
@@ -818,5 +823,32 @@ static bool saveProps( const std::string &path, const std::vector<Prop> &props, 
     return true;
 }
 
+struct Objectives
+{
+    std::string mainObjective;
+    std::vector<std::string> objectives;
+
+    int currentObjective = 0;
+
+    void addObjective( const std::string &objective ) {
+        objectives.push_back( objective );
+    }
+
+    void setMainObjective( const std::string &objective ) {
+        mainObjective = objective;
+    }
+
+    void completeCurrentObjective() {
+        if (currentObjective < objectives.size())
+        {
+            currentObjective++;
+        }
+    }
+
+    bool allCompleted() const {
+        return currentObjective >= objectives.size();
+	}
+
+};
 
 

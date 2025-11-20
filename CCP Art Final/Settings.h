@@ -1,8 +1,10 @@
 namespace config
 {
+	// Set back to true later
 	bool useMusic = true;
 	//bool showMainMenu = false;
-	float musicVolume = 10.0f;
+	float musicVolume = 100.0f;
+	// Set back to true later
 	bool viewBobbing = true;
 }
 

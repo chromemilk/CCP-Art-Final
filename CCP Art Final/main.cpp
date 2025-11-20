@@ -8,6 +8,8 @@
 
 using namespace std;
 
+Objectives mesuemObjectives;
+
 struct LevelDef
 {
     string name;
@@ -61,7 +63,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     }
     */
-
+  
 
     // Map (1=wall, D=door)
     if (!loadMap( (folder / "map.txt").string(), engineContext.map )) return false;
@@ -190,6 +192,16 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.planeX = -engineContext.directionY * FOV_TAN;
     engineContext.planeY = engineContext.directionX * FOV_TAN;
     engineContext.yaw = level.spawnDirDeg;
+
+
+    // Init objectives
+    mesuemObjectives.setMainObjective( "View (10) Artworks" );
+
+    for (int i = 0; i < 10; ++i)
+    {
+        mesuemObjectives.addObjective( "View " + engineContext.artworks[ i ].title );
+    }
+
 
     // Load the current levels' music track
     playMusicTrack( folder.string(), engineContext.currentLevel);
@@ -330,7 +342,18 @@ void renderStatueChatbox( Engine &engineContext ) {
     drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
     textY += 3 * advY; // Advance 3 lines
 
-    drawString8x8( engineContext, textX, textY, "You will be transported to the portal shortly", rgb( 210, 210, 210 ), textWidth, 1, 2, true );
+    std::string actualText = "";
+
+    if (mesuemObjectives.allCompleted() == false)
+    {
+        actualText = "Thank you for exploring the museum! Please view all works, then come back!";
+    }
+    else
+    {
+        actualText = "The next level is loading.... be patient";
+	}
+
+    drawString8x8( engineContext, textX, textY, actualText, rgb( 210, 210, 210 ), textWidth, 1, 2, true );
 
 
     std::string hint = "Wait a few seconds...";
@@ -361,6 +384,44 @@ void updateMusicStream() {
         // The song finished! Play the next one.
         playNextTrack();
     }
+}
+
+void renderObjectives( Engine &engineContext ) {
+    const int fontW = 8;
+    const int fontH = 8;
+    const int letterSpace = 0;
+    const int lineSpace = 5;
+    const int advY = fontH + lineSpace;
+
+
+    int width = RENDER_W / 3, height = (RENDER_H / 4) - 80;
+    int x = 5, y = 5; // Was: RENDER_H - 500
+
+    int textX = x + 8;
+    int textY = y + 8;
+    int textWidth = width - 16; // Wrap width
+
+    // Draw the background 
+
+    drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+
+
+    drawString8x8( engineContext, textX, textY, mesuemObjectives.mainObjective, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
+    textY += 2 * advY; // Advance 1 line
+
+    std::string current = "";
+
+    if (mesuemObjectives.allCompleted() == false)
+    {
+        current = mesuemObjectives.objectives[ mesuemObjectives.currentObjective ];
+    }
+    else
+    {
+		current = "Talk to the statue!";
+    }
+
+	drawString8x8( engineContext, textX, textY, current, rgb( 200, 200, 255 ), textWidth, 1, 2, true );
+	textY += advY;
 }
 
 
@@ -1044,6 +1105,12 @@ static void render( Engine &engineContext, float dt ) {
     {
         renderStatueChatbox( engineContext );
     }
+
+    if (engineContext.currentLevel == Levels::MUSEUM)
+    {
+        renderObjectives( engineContext );
+    }
+
     
 }
 
@@ -1324,6 +1391,7 @@ int main( int argc, char **argv ) {
                                 engineContext.placardOpen = true;
                                 engineContext.journalOpen = false; // Ensure journal is closed
                                 engineContext.lastPlacardTick = SDL_GetTicks();
+								mesuemObjectives.completeCurrentObjective();
 
 
                             }
@@ -1509,7 +1577,10 @@ int main( int argc, char **argv ) {
                 if (now - engineContext.statueChatStartTick > 8000)
                 {
                     engineContext.statueChatActive = false; // Reset state
-                    handleLevelChange( engineContext, levels, Levels::TRANSITION );
+                    if (mesuemObjectives.allCompleted() == true)
+                    {
+                        handleLevelChange( engineContext, levels, Levels::TRANSITION );
+                    }
                 }
             }
             {

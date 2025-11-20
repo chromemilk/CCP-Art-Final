@@ -29,7 +29,7 @@ static int caveIndex = 0;
 static MusicTypes g_currentMusicType;     // Tracks the current playlist
 static std::string g_baseMusicDirectory;  // Stores the path for the update function
 static bool g_musicInitialized = false;   // Prevents update loop from running early
-static float g_musicVolume = 10.f;
+static float g_musicVolume = 100.f;
 
 
 void setMusicVolume( float volume ) {
