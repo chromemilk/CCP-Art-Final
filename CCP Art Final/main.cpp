@@ -403,24 +403,24 @@ void renderObjectives( Engine &engineContext ) {
 
     // Draw the background 
 
-    drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
+    drawTextBox( engineContext, x, y, width, height, rgb( 255, 255, 255 ), rgb( 212, 175, 55 ) );
 
 
-    drawString8x8( engineContext, textX, textY, mesuemObjectives.mainObjective, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
+    drawString8x8( engineContext, textX, textY, mesuemObjectives.mainObjective, rgb( 255, 0, 0 ), textWidth, 1, 2, false );
     textY += 2 * advY; // Advance 1 line
 
     std::string current = "";
 
     if (mesuemObjectives.allCompleted() == false)
     {
-        current = mesuemObjectives.objectives[ mesuemObjectives.currentObjective ];
+        current = "To Do:" + mesuemObjectives.objectives[mesuemObjectives.currentObjective];
     }
     else
     {
 		current = "Talk to the statue!";
     }
 
-	drawString8x8( engineContext, textX, textY, current, rgb( 200, 200, 255 ), textWidth, 1, 2, true );
+	drawString8x8( engineContext, textX, textY, current, rgb( 0, 0, 0 ), textWidth, 1, 2, false );
 	textY += advY;
 }
 
@@ -562,7 +562,36 @@ static void render( Engine &engineContext, float dt ) {
                 {
                     const auto& art = engineContext.artworks[artIndex];
                     if (!art.onWall) continue;
+
+
                     if (art.wx != mapX || art.wy != mapY || art.side != side) continue;
+
+                    
+                    bool visible = true;
+
+                    if (side == 0)
+                    { // Vertical Wall (X-Axis)
+                        float frac = art.x - std::floor( art.x ); // e.g., 3.1 -> 0.1
+
+                        // Ray moving Right (>0) hits West Face. Ray moving Left (<0) hits East Face.
+                        bool hittingWestFace = (rayDirX > 0);
+
+                        if (frac < 0.45f && !hittingWestFace) visible = false; // Art is on West, but we hit East
+                        if (frac > 0.55f && hittingWestFace)  visible = false; // Art is on East, but we hit West
+                    }
+                    else
+                    { // Horizontal Wall (Y-Axis)
+                        float frac = art.y - std::floor( art.y );
+
+                        // Ray moving Down (>0) hits North Face. Ray moving Up (<0) hits South Face.
+                        bool hittingNorthFace = (rayDirY > 0);
+
+                        if (frac < 0.45f && !hittingNorthFace) visible = false; // Art is on North, but we hit South
+                        if (frac > 0.55f && hittingNorthFace)  visible = false; // Art is on South, but we hit North
+                    }
+
+                    if (!visible) continue;
+                    
 
                     float u0 = std::clamp(art.uCenter - art.uWidth * 0.5f, 0.0f, 1.0f);
                     float u1 = std::clamp(art.uCenter + art.uWidth * 0.5f, 0.0f, 1.0f);
@@ -818,17 +847,6 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    // 3D benches
-    if (engineContext.benches3D.size() > 0)
-    {
-        for (const auto &box : engineContext.benches3D)
-        {
-            render_box( engineContext, box );
-            render_legs( engineContext, box );
-            // render_box_top( engineContext, box, (box.sideTexure.width > 0 ? box.sideTexure : engineContext.floorTex) );
-        }
-    }
-
 
 	// Props (billboarded)
     for (size_t i = 0; i < engineContext.props.size(); ++i)
@@ -889,7 +907,7 @@ static void render( Engine &engineContext, float dt ) {
         for (const auto &box : engineContext.benches3D)
         {
             render_box( engineContext, box );
-            render_legs( engineContext, box );
+            //render_legs( engineContext, box );
         }
     }
 
@@ -1002,7 +1020,31 @@ static void render( Engine &engineContext, float dt ) {
 
     int lookingAtArt = pickArtworkUnderCrosshair( engineContext );
 
-    if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false)
+    // Get distance to artwork that were looking at 
+
+	float distanceToArt = 0.0f; 
+    if (lookingAtArt != -1)
+    {
+        const Artwork* art = nullptr;
+        for (const auto &artWork : engineContext.artworks)
+        {
+            if (artWork.id == lookingAtArt)
+            {
+                art = &artWork; 
+                break;
+            }
+        }
+        if (art)
+        {
+            float dx = (art->wx + 0.5f) - engineContext.positionX;
+            float dy = (art->wy + 0.5f) - engineContext.positionY;
+            distanceToArt = std::sqrt( dx * dx + dy * dy );
+        }
+	}
+
+
+
+    if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5)
     {
         drawString8x8( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
@@ -1246,7 +1288,7 @@ int main( int argc, char **argv ) {
 
     GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
 
-    int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume
+	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing
     const int numMenuOptions = 4;
     float musicVolume = getMusicVolume(); 
   
