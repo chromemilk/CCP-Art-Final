@@ -1,5 +1,7 @@
 #include <SFML\Audio.hpp>
 #include "Settings.h"
+#include <windows.h>
+#include <mmsystem.h>
 
 enum MusicTypes
 {
@@ -103,4 +105,14 @@ void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel 
 
 		playNextTrack();
 	}
+}
+
+void playFootstep( const std::string &baseMusicDirectory ) {
+
+    std::string soundPath = baseMusicDirectory + "\\Sound 01.wav";
+
+	std::cout << "Trying to play footstep sound: " << soundPath << std::endl;
+
+
+	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME | SND_NOSTOP );
 }

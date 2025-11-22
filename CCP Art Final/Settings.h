@@ -1,7 +1,7 @@
 namespace config
 {
 	// Set back to true later
-	bool useMusic = false;
+	bool useMusic = true;
 	//bool showMainMenu = false;
 	float musicVolume = 100.0f;
 	// Set back to true later

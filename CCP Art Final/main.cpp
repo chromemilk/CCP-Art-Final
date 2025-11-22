@@ -394,7 +394,7 @@ void renderObjectives( Engine &engineContext ) {
     const int advY = fontH + lineSpace;
 
 
-    int width = RENDER_W / 3, height = (RENDER_H / 4) - 80;
+    int width = RENDER_W / 3, height = (RENDER_H / 4) - 100;
     int x = 5, y = 5; // Was: RENDER_H - 500
 
     int textX = x + 8;
@@ -403,11 +403,7 @@ void renderObjectives( Engine &engineContext ) {
 
     // Draw the background 
 
-    drawTextBox( engineContext, x, y, width, height, rgb( 255, 255, 255 ), rgb( 212, 175, 55 ) );
-
-
-    drawString8x8( engineContext, textX, textY, mesuemObjectives.mainObjective, rgb( 255, 0, 0 ), textWidth, 1, 2, false );
-    textY += 2 * advY; // Advance 1 line
+    drawTextBox( engineContext, x, y, width, height, rgb( 30, 30, 40 ), rgb( 60, 60, 70 ) );
 
     std::string current = "";
 
@@ -420,7 +416,7 @@ void renderObjectives( Engine &engineContext ) {
 		current = "Talk to the statue!";
     }
 
-	drawString8x8( engineContext, textX, textY, current, rgb( 0, 0, 0 ), textWidth, 1, 2, false );
+	drawString8x8( engineContext, textX, textY, current, rgb( 220, 220, 220 ), textWidth, 1, 2, false );
 	textY += advY;
 }
 
@@ -1054,7 +1050,7 @@ static void render( Engine &engineContext, float dt ) {
 		drawString8x8( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.showHelp)
+    if (engineContext.showHelp && engineContext.currentLevel == Levels::TRANSITION)
     {
         drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
@@ -1309,7 +1305,7 @@ int main( int argc, char **argv ) {
         float actualSpeed;
 
         static float walkTime = 0.f;
-
+        bool stepTriggered = false;
         if (!engineContext.isMoving)
         {
             engineContext.pitchOffset = engineContext.pitchOffset * 0.9f;
@@ -1317,15 +1313,34 @@ int main( int argc, char **argv ) {
         }
         else
         {
-            walkTime += dt * 15.0f; 
+            walkTime += dt * MOVE_SPEED * 5.0f;
             engineContext.isMoving = false; 
+
+            float sinValue = std::sin( walkTime );
 
             if (config::viewBobbing)
             {
-                engineContext.pitchOffset = std::sin( walkTime ) * 3.0f;
+                engineContext.pitchOffset = sinValue * 8.0f;
+            }
+
+            if (config::useMusic)
+            {
+   
+                if (std::abs( sinValue ) > 0.999f)
+                {
+                    if (!stepTriggered)
+                    {
+                        std::cout << "Footstep Triggered at peak/trough: " << sinValue << "\n";
+                        playFootstep( levels[ engineContext.currentLevel ].folder );
+                        stepTriggered = true; 
+                    }
+                }
+                else 
+                {
+                    stepTriggered = false;
+                }
             }
         }
-
 
         updateMusicStream();
 
