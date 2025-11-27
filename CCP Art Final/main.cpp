@@ -199,7 +199,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     for (int i = 0; i < 10; ++i)
     {
-        mesuemObjectives.addObjective( "View " + engineContext.artworks[ i ].title );
+        mesuemObjectives.addObjective( engineContext.artworks[ i ].title );
     }
 
 
@@ -319,47 +319,52 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
 }
-
 void renderStatueChatbox( Engine &engineContext ) {
-    const int fontW = 8;
-    const int fontH = 8;
-    const int letterSpace = 0;
-    const int lineSpace = 5;
-    const int advY = fontH + lineSpace;
+    const int fontW = 11;
+    const int fontH = 16;
+    const int letterSpacing = 1; // Used for header/main text
+    const int lineSpacing = 2;   // Used for header/main text
+    const int advY = fontH + lineSpacing; // Vertical advance for regular text
 
-    
     int width = RENDER_W - 30, height = (RENDER_H / 4) - 40;
-    int x = 7, y = RENDER_H / 2; // Was: RENDER_H - 500
+    int x = 7, y = RENDER_H / 2;
 
     drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
 
     int textX = x + 8;
     int textY = y + 8;
-    int textWidth = width - 16; // Wrap width
+    int textWidth = width - 16;
 
     std::string header = "ChatGPT Statue | OpenAI | Current | Relief Sculpture | MicroMuseum \n";
 
-    drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, 1, 2, true );
-    textY += 3 * advY; // Advance 3 lines
+    drawString16x16( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpacing, lineSpacing, true );
+
+    textY += 2 * advY;
 
     std::string actualText = "";
-
     if (mesuemObjectives.allCompleted() == false)
     {
         actualText = "Thank you for exploring the museum! Please view all works, then come back!";
     }
     else
     {
-        actualText = "The next level is loading.... be patient";
-	}
+        actualText = "The next level is loading... please be patient";
+    }
 
-    drawString8x8( engineContext, textX, textY, actualText, rgb( 210, 210, 210 ), textWidth, 1, 2, true );
+    drawString16x16( engineContext, textX, textY, actualText, rgb( 210, 210, 210 ), textWidth, letterSpacing, lineSpacing, true );
 
+
+    const int hintLetterSpacing = 0;
+    const int hintLineSpacing = 5;
+    const int hintAdvX = fontW + hintLetterSpacing; 
 
     std::string hint = "Wait a few seconds...";
-    int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
-    int hintY = y + height - advY - 4;
-    drawString8x8( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
+
+    int hintX = x + width - (hint.length() * hintAdvX) - 40;
+
+    int hintY = y + height - fontH - 4; // fontH = 16 (height of the text)
+
+    drawString16x16( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, hintLetterSpacing, hintLineSpacing, true, rgb( 20, 20, 50 ) );
 }
 
 
@@ -387,14 +392,14 @@ void updateMusicStream() {
 }
 
 void renderObjectives( Engine &engineContext ) {
-    const int fontW = 8;
-    const int fontH = 8;
+    const int fontW = 11;
+    const int fontH = 16;
     const int letterSpace = 0;
     const int lineSpace = 5;
     const int advY = fontH + lineSpace;
 
 
-    int width = RENDER_W / 3, height = (RENDER_H / 4) - 100;
+    int width = (RENDER_W / 3) + 80, height = (RENDER_H / 4) - 108;
     int x = 5, y = 5; // Was: RENDER_H - 500
 
     int textX = x + 8;
@@ -403,20 +408,20 @@ void renderObjectives( Engine &engineContext ) {
 
     // Draw the background 
 
-    drawTextBox( engineContext, x, y, width, height, rgb( 30, 30, 40 ), rgb( 60, 60, 70 ) );
+    drawTextBox( engineContext, x, y, width, height, rgb( 30, 30, 40 ), rgb( 212, 175, 55 ) );
 
     std::string current = "";
 
     if (mesuemObjectives.allCompleted() == false)
     {
-        current = "To Do:" + mesuemObjectives.objectives[mesuemObjectives.currentObjective];
+        current = "View: " + mesuemObjectives.objectives[mesuemObjectives.currentObjective];
     }
     else
     {
 		current = "Talk to the statue!";
     }
 
-	drawString8x8( engineContext, textX, textY, current, rgb( 220, 220, 220 ), textWidth, 1, 2, false );
+	drawString16x16( engineContext, textX, textY, current, rgb( 220, 220, 220 ), textWidth, 1, 2, false );
 	textY += advY;
 }
 
@@ -1042,17 +1047,17 @@ static void render( Engine &engineContext, float dt ) {
 
     if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5)
     {
-        drawString8x8( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
     {
-		drawString8x8( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+		drawString16x16( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (engineContext.showHelp && engineContext.currentLevel == Levels::TRANSITION)
     {
-        drawString8x8( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     const Artwork *art = nullptr;
@@ -1070,8 +1075,8 @@ static void render( Engine &engineContext, float dt ) {
 
     if (art) 
     {
-        const int fontW = 8;
-        const int fontH = 8;
+        const int fontW = 11;
+        const int fontH = 16;
         const int letterSpace = 0;
         const int lineSpace = 5;
         const int advY = fontH + lineSpace;
@@ -1080,7 +1085,7 @@ static void render( Engine &engineContext, float dt ) {
 
         if (engineContext.placardOpen)
         {
-            int width = RENDER_W - 16, height = RENDER_H / 4;
+            int width = RENDER_W - 16, height = (RENDER_H / 3) + 18;
             int x = 8, y = RENDER_H - 200;
             drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
 
@@ -1091,20 +1096,20 @@ static void render( Engine &engineContext, float dt ) {
 			// Title (Date), Artist, Period, Medium, Location
             std::string header = art->title + " (" + art->date + ")\n" + art->artist + " | " + art->period + "\n" + art->medium + ", " + art->location + "\n";
 
-            drawString8x8( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+            drawString16x16( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpace, lineSpace, true, shadowCol );
             textY += 3 * advY; // Advance 2 lines
 
 
             // Rationale
             // Replaced drawStringTinyScaled
-            drawString8x8( engineContext, textX, textY, /*"Why it matters:\n" + */ art->placard + art->rationale, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
+            drawString16x16( engineContext, textX, textY, /*"Why it matters:\n" + */ art->placard + art->rationale, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
 
             // Add a hint to press E again
         
             std::string hint = "[E] Open Journal";
             int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
             int hintY = y + height - advY - 4;
-            drawString8x8( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
+            drawString16x16( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
 
         }
         else if (engineContext.journalOpen)
@@ -1120,7 +1125,7 @@ static void render( Engine &engineContext, float dt ) {
             int textWidth = width - 24; // Wrap width
 
           
-            drawString8x8( engineContext, textX, textY, "Journal on \"" + art->title + "\"" + " (entry " + " #" + to_string(art->id) + ")", rgb(50, 50, 50), textWidth, letterSpace, lineSpace, false);
+            drawString16x16( engineContext, textX, textY, "Journal on \"" + art->title + "\"" + " (entry " + " #" + to_string(art->id) + ")", rgb(50, 50, 50), textWidth, letterSpace, lineSpace, false);
             textY += advY + 4; // Extra space for title
 
             for (int dx = 8; dx < width - 8; ++dx)
@@ -1130,12 +1135,12 @@ static void render( Engine &engineContext, float dt ) {
             textY += 2; // Space after divider
 
        
-            drawString8x8( engineContext, textX, textY, art->reflection, rgb( 20, 20, 20 ), textWidth, letterSpace, lineSpace, false );
+            drawString16x16( engineContext, textX, textY, art->reflection, rgb( 20, 20, 20 ), textWidth, letterSpace, lineSpace, false );
 
             std::string hint = "[E] Close";
             int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 25;
             int hintY = y + height - advY - 4;
-            drawString8x8( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
+            drawString16x16( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
         }
 
     }
@@ -1151,7 +1156,6 @@ static void render( Engine &engineContext, float dt ) {
 
     
 }
-
 static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob ) {
     // Dimensions
     int width = 320, height = 200;
@@ -1159,17 +1163,18 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     int y = (RENDER_H - height) / 2;
 
     // Colors
-    Uint32 bgCol = rgb( 25, 25, 30 );       // Dark slate
-    Uint32 borderCol = rgb( 180, 150, 50 ); // Dull Gold
-    Uint32 textCol = rgb( 160, 160, 170 );  // Soft Grey
-    Uint32 selCol = rgb( 255, 230, 100 );   // Bright Gold
+    Uint32 bgCol = rgb( 25, 25, 30 );
+    Uint32 borderCol = rgb( 180, 150, 50 );
+    Uint32 textCol = rgb( 160, 160, 170 );
+    Uint32 selCol = rgb( 255, 230, 100 );
 
     drawTextBox( engineContext, x, y, width, height, bgCol, borderCol );
     drawTextBox( engineContext, x + 4, y + 4, width - 8, height - 8, bgCol, borderCol );
 
+    // Title Scaling
     std::string title = "MICRO MUSEUM";
     int scale = 3;
-    // Approx centering calc: (char width * scale + spacing) * length
+    // Tiny font is 3px wide * scale + 2px spacing
     int titleW = (int)title.length() * (3 * scale + 2);
     int titleX = x + (width - titleW) / 2;
     int titleY = y + 25;
@@ -1178,12 +1183,12 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
 
     // Subtitle
     std::string sub = "INTERACTIVE GALLERY";
-    int subX = x + (width - (int)sub.length() * 6) / 2; // approx centering for scale 1
+    int subX = x + (width - (int)sub.length() * 6) / 2;
     drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 1, 3, 1, false );
 
 
     int optY = y + 80;
-    int lineH = 25; // Spacing between lines
+    int lineH = 25;
 
     bool showCursor = (SDL_GetTicks() / 350) % 2 == 0;
 
@@ -1195,15 +1200,14 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
         std::string suffix = (isSel && showCursor) ? " <" : "  ";
         std::string fullText = prefix + label + suffix;
 
-        int charW = 10;
-        int spacing = 1;
-        int advX8x8 = charW + spacing;
+    
+        int charAdv = 12;
 
-        int textW = (int)fullText.length() * advX8x8;
+        int textW = (int)fullText.length() * charAdv;
         int textX = x + (width - textW) / 2;
 
-        drawString8x8( engineContext, textX, optY + (index * lineH), fullText, col, width, spacing, 2, true, rgb( 10, 10, 10 ) );
-     };
+        drawString16x16( engineContext, textX, optY + (index * lineH), fullText, col, width, 1, 2, true, rgb( 10, 10, 10 ) );
+        };
 
     drawItem( 0, "Play" );
 
@@ -1213,15 +1217,13 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     std::string volStr = std::to_string( (int)volume ) + "%";
     drawItem( 2, "Music Volume: " + volStr );
 
-	std::string viewBobEnabler = viewBob ? "ON" : "OFF";
-
-	drawItem( 3, "View Bobbing: " + viewBobEnabler );
+    std::string viewBobEnabler = viewBob ? "ON" : "OFF";
+    drawItem( 3, "View Bobbing: " + viewBobEnabler );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
-    int footW = (int)footer.length() * 4; // Scale 1 tiny font
+    int footW = (int)footer.length() * 4;
     drawStringTinyScaled( engineContext, x + (width - footW) / 2, y + height - 20, footer, rgb( 80, 80, 90 ), 1, 1, 1, false );
 }
-
 
 int main( int argc, char **argv ) {
     (void)argc; (void)argv;
@@ -1359,7 +1361,7 @@ int main( int argc, char **argv ) {
                     switch (ev.key.key)
                     {
                     case SDLK_ESCAPE:
-                        running = false; // Quit from menu
+                        currentState = STATE_GAME;
                         break;
                     case SDLK_UP:
                         currentMenuSelection = (currentMenuSelection - 1 + numMenuOptions) % numMenuOptions;
