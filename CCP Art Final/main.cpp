@@ -1077,8 +1077,8 @@ static void render( Engine &engineContext, float dt ) {
     {
         const int fontW = 11;
         const int fontH = 16;
-        const int letterSpace = 0;
-        const int lineSpace = 5;
+        const int letterSpace = -2;
+        const int lineSpace = 4;
         const int advY = fontH + lineSpace;
         const Uint32 shadowCol = rgb( 30, 30, 30 );
 
