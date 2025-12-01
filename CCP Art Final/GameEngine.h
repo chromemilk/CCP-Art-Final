@@ -224,7 +224,7 @@ struct Engine
     std::vector<QuadProp> quads;
     std::vector<std::vector<int>> quadBuckets;
 
-    std::vector<BoxProp> benches3D;   // NEW: true 3D benches (box + legs)
+    std::vector<BoxProp> benches3D;   
 
     bool caveMode = false;
     bool hasWallOverlay = false;
@@ -342,7 +342,7 @@ static bool loadColumns( const std::string &path, Engine &engineContext ) {
             {
                 newSet.numViews = (int)newSet.views.size();
                 engineContext.columnSpriteSets[ setName ] = std::move( newSet );
-                std::cout << "Loaded column set " << setName << " with " << newSet.numViews << " views." << std::endl;
+              //  std::cout << "Loaded column set " << setName << " with " << newSet.numViews << " views." << std::endl;
             }
         }
         else if (kind == "PLACE") // Places an instance of a set

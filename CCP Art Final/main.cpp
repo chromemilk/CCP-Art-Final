@@ -319,6 +319,7 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
 }
+
 void renderStatueChatbox( Engine &engineContext ) {
     const int fontW = 11;
     const int fontH = 16;
@@ -390,41 +391,58 @@ void updateMusicStream() {
         playNextTrack();
     }
 }
-
 void renderObjectives( Engine &engineContext ) {
-    const int fontW = 11;
-    const int fontH = 16;
-    const int letterSpace = 0;
-    const int lineSpace = 5;
-    const int advY = fontH + lineSpace;
+    int width = (RENDER_W / 3) + 60;
+    int height = 45;
+    int x = 10, y = 10;
+
+    Uint32 colBg = rgb( 20, 20, 25 );       
+    Uint32 colBorder = rgb( 212, 175, 55 );     
+    Uint32 colHeader = rgb( 212, 175, 55 );     
+    Uint32 colText = rgb( 220, 220, 230 );    
+    Uint32 colShadow = rgb( 0, 0, 0 );          
+    Uint32 colSuccess = rgb( 100, 255, 120 );    
 
 
-    int width = (RENDER_W / 3) + 80, height = (RENDER_H / 4) - 108;
-    int x = 5, y = 5; // Was: RENDER_H - 500
+    drawTextBox( engineContext, x + 4, y + 4, width, height, colShadow, colShadow );
 
-    int textX = x + 8;
-    int textY = y + 8;
-    int textWidth = width - 16; // Wrap width
+    drawTextBox( engineContext, x, y, width, height, colBg, colBorder );
 
-    // Draw the background 
 
-    drawTextBox( engineContext, x, y, width, height, rgb( 30, 30, 40 ), rgb( 212, 175, 55 ) );
+    std::string header = "CURRENT OBJECTIVE";
+    int headerScale = 1;
+    int headerW = (int)header.length() * 4;
+    int headerX = x + (width - headerW) / 2;
+    int headerY = y + 6;
+
+    drawStringTinyScaled( engineContext, headerX, headerY, header, colHeader, headerScale, 1, 1, false );
+
+    int lineY = headerY + 9;
+    for (int i = x + 15; i < x + width - 15; ++i)
+    {
+        putPix( engineContext, i, lineY, rgb( 60, 60, 70 ) ); // Subtle grey line
+    }
+
+    int textX = x + 12;
+    int textY = lineY + 8;
+    int textWidth = width - 24;
 
     std::string current = "";
+    Uint32 textColor = colText;
 
     if (mesuemObjectives.allCompleted() == false)
     {
-        current = "View: " + mesuemObjectives.objectives[mesuemObjectives.currentObjective];
+        // Add a bullet point > for style
+        current = ">Find " + mesuemObjectives.objectives[ mesuemObjectives.currentObjective ];
     }
     else
     {
-		current = "Talk to the statue!";
+        current = "COMPLETE: Talk to Statue";
+        textColor = colSuccess; 
     }
 
-	drawString16x16( engineContext, textX, textY, current, rgb( 220, 220, 220 ), textWidth, 1, 2, false );
-	textY += advY;
+    drawString16x16( engineContext, textX, textY, current, textColor, textWidth, 1, 2, true, colShadow );
 }
-
 
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
@@ -496,19 +514,23 @@ static void render( Engine &engineContext, float dt ) {
 
         if (rayDirX < 0)
         {
-            stepX = -1; sideDistX = (engineContext.positionX - mapX) * deltaDistX;
+            stepX = -1; 
+            sideDistX = (engineContext.positionX - mapX) * deltaDistX;
         }
         else
         {
-            stepX = 1; sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
+            stepX = 1; 
+            sideDistX = (mapX + 1.0f - engineContext.positionX) * deltaDistX;
         }
         if (rayDirY < 0)
         {
-            stepY = -1; sideDistY = (engineContext.positionY - mapY) * deltaDistY;
+            stepY = -1; 
+            sideDistY = (engineContext.positionY - mapY) * deltaDistY;
         }
         else
         {
-            stepY = 1; sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
+            stepY = 1; 
+            sideDistY = (mapY + 1.0f - engineContext.positionY) * deltaDistY;
         }
 
         // DDA
@@ -517,11 +539,15 @@ static void render( Engine &engineContext, float dt ) {
         {
             if (sideDistX < sideDistY)
             {
-                sideDistX += deltaDistX; mapX += stepX; side = 0;
+                sideDistX += deltaDistX; 
+                mapX += stepX; 
+                side = 0;
             }
             else
             {
-                sideDistY += deltaDistY; mapY += stepY; side = 1;
+                sideDistY += deltaDistY; 
+                mapY += stepY; 
+                side = 1;
             }
 
             if (mapX < 0 || mapY < 0 || mapX >= engineContext.map.width || mapY >= engineContext.map.height) break;
@@ -1158,7 +1184,7 @@ static void render( Engine &engineContext, float dt ) {
 }
 static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob ) {
     // Dimensions
-    int width = 320, height = 200;
+    int width = 320, height = 225;
     int x = (RENDER_W - width) / 2;
     int y = (RENDER_H - height) / 2;
 
@@ -1219,6 +1245,8 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
 
     std::string viewBobEnabler = viewBob ? "ON" : "OFF";
     drawItem( 3, "View Bobbing: " + viewBobEnabler );
+
+    drawItem( 4, "Quit" );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
     int footW = (int)footer.length() * 4;
@@ -1286,8 +1314,8 @@ int main( int argc, char **argv ) {
 
     GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
 
-	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing
-    const int numMenuOptions = 4;
+	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=quit
+    const int numMenuOptions = 5;
     float musicVolume = getMusicVolume(); 
   
 
@@ -1322,7 +1350,7 @@ int main( int argc, char **argv ) {
 
             if (config::viewBobbing)
             {
-                engineContext.pitchOffset = sinValue * 8.0f;
+                engineContext.pitchOffset = sinValue * 3.0f;
             }
 
             if (config::useMusic)
@@ -1374,6 +1402,10 @@ int main( int argc, char **argv ) {
                         if (currentMenuSelection == 0) // "Play"
                         {
                             currentState = STATE_GAME;
+                        }
+						else if (currentMenuSelection == 4) // "Quit"
+                        {
+                            exit( 0 );
                         }
                         break;
                     case SDLK_LEFT:
