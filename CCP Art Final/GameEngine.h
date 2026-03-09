@@ -1,5 +1,6 @@
 #pragma once
 #include "Includes.h"
+#include <unordered_set>
 namespace fs = std::filesystem;
 
 static inline Uint32 rgb( Uint8 r, Uint8 g, Uint8 b ) {
@@ -826,29 +827,23 @@ static bool saveProps( const std::string &path, const std::vector<Prop> &props, 
 struct Objectives
 {
     std::string mainObjective;
-    std::vector<std::string> objectives;
-
-    int currentObjective = 0;
-
-    void addObjective( const std::string &objective ) {
-        objectives.push_back( objective );
-    }
+    std::unordered_set<int> viewedArtworks; 
+    int totalArtworksToFind = 20;           
 
     void setMainObjective( const std::string &objective ) {
         mainObjective = objective;
     }
 
-    void completeCurrentObjective() {
-        if (currentObjective < objectives.size())
-        {
-            currentObjective++;
-        }
+    void markViewed( int id ) {
+        viewedArtworks.insert( id );
     }
 
     bool allCompleted() const {
-        return currentObjective >= objectives.size();
-	}
+        return viewedArtworks.size() >= totalArtworksToFind;
+    }
 
+    float getProgress() const {
+        return (float)viewedArtworks.size() / (float)totalArtworksToFind;
+    }
 };
-
 

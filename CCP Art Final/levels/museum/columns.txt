@@ -1,9 +1,12 @@
+# Central Hub Pillars - 23x19 Map
 # Format: BOX_COLUMN [x] [y] [halfWidth] [halfDepth] [angleDeg] [height] [texture_path.bmp]
 
-# A Grand Colonnade running North-South
-# Left Row (X=5)
-BOX_COLUMN 3.5 17.0 0.25 0.25 0.0 1.0 corinthian_surface.bmp
-BOX_COLUMN 5.5 17.0 0.25 0.25 0.0 1.0 ionic_surface.bmp
-BOX_COLUMN 8.5 17.0 0.25 0.25 0.0 1.0 doric_surface.bmp
-BOX_COLUMN 11.5 17.0 0.25 0.25 0.0 1.0 corinthian_surface.bmp
+# North-West Corner
+BOX_COLUMN 8.5 8.5 0.25 0.25 0.0 1.0 corinthian_surface.bmp
+# North-East Corner
+BOX_COLUMN 13.5 8.5 0.25 0.25 0.0 1.0 ionic_surface.bmp
 
+# South-West Corner
+BOX_COLUMN 8.5 10.5 0.25 0.25 0.0 1.0 doric_surface.bmp
+# South-East Corner
+BOX_COLUMN 13.5 10.5 0.25 0.25 0.0 1.0 corinthian_surface.bmp

@@ -195,13 +195,12 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
 
     // Init objectives
-    mesuemObjectives.setMainObjective( "View (10) Artworks" );
+    mesuemObjectives.setMainObjective( "View All Artworks" );
 
-    for (int i = 0; i < 10; ++i)
-    {
-        mesuemObjectives.addObjective( engineContext.artworks[ i ].title );
-    }
+    // Dynamically set the total to find based on the loaded artworks
+    mesuemObjectives.totalArtworksToFind = engineContext.artworks.size();
 
+    mesuemObjectives.viewedArtworks.clear();
 
     // Load the current levels' music track
     playMusicTrack( folder.string(), engineContext.currentLevel);
@@ -267,7 +266,7 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
         ? ((mapX - engineContext.positionX) + (1 - stepX) * 0.5f) / (rayDirX == 0 ? 1e-6f : rayDirX)
         : ((mapY - engineContext.positionY) + (1 - stepY) * 0.5f) / (rayDirY == 0 ? 1e-6f : rayDirY);
     perpWallDist = std::max( std::fabs( perpWallDist ), 0.05f );
-
+   
     float wallX = (side == 0) ? (engineContext.positionY + perpWallDist * rayDirY)
         : (engineContext.positionX + perpWallDist * rayDirX);
     wallX -= std::floor( wallX );
@@ -312,10 +311,10 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float currentY = engineContext.positionY;
 
     // Location of statue
-    float statueX = 7.4;
-    float statueY = 1.7;
+    float statueX = 11.1;
+    float statueY = 9.5;
 
-    float tolerance = 1.5f; // 1 meter
+    float tolerance = 1.0f; // 1 meter
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
 }
@@ -391,57 +390,233 @@ void updateMusicStream() {
         playNextTrack();
     }
 }
+
+
+void renderPolishedPlacard( Engine &engineContext ) {
+    if (!engineContext.placardOpen || engineContext.openArtId < 0) return;
+    if (engineContext.openArtId >= (int)engineContext.artworks.size()) return;
+
+    int artIndex = -1;
+    for (size_t i = 0; i < engineContext.artworks.size(); ++i)
+    {
+        if (engineContext.artworks[ i ].id == engineContext.openArtId)
+        {
+            artIndex = (int)i;
+            break;
+        }
+    }
+
+    // If we somehow didn't find it, bail out
+    if (artIndex < 0) return;
+
+    const auto &art = engineContext.artworks[ artIndex ];
+
+    int panelW = (int)(RENDER_W * 0.40f);
+    int textMargin = 25;
+    int maxTextW = panelW - (textMargin * 2);
+
+    int estimatedHeight = 40; // Top padding
+    estimatedHeight += 30;    // Title space
+    estimatedHeight += 40;    // Meta/Location space
+    estimatedHeight += 20;    // Divider
+
+    auto calcH = [&]( const std::string &t ) {
+        int lines = ((int)t.length() * 5 / maxTextW) + 1; // 5px per char approx
+        return lines * 12;
+        };
+
+    estimatedHeight += calcH( art.placard );
+    estimatedHeight += calcH( art.rationale );
+    estimatedHeight += calcH( art.reflection );
+
+    int panelH = std::min( estimatedHeight, RENDER_H - 40 );
+    int panelX = 20; // 20px gap from left edge
+    int panelY = (RENDER_H - panelH) / 2; 
+
+    Uint32 bgCol = rgb( 12, 12, 15 );
+    Uint32 borderCol = rgb( 190, 160, 60 ); 
+
+    drawTranslucentBox( engineContext, panelX, panelY, panelW, panelH, bgCol, 0.90f );
+
+    for (int x = panelX; x < panelX + panelW; ++x)
+    {
+        putPix( engineContext, x, panelY, borderCol );
+        putPix( engineContext, x, panelY + panelH - 1, borderCol );
+    }
+    for (int y = panelY; y < panelY + panelH; ++y)
+    {
+        putPix( engineContext, panelX, y, borderCol );
+        putPix( engineContext, panelX + panelW - 1, y, borderCol );
+    }
+
+    int currentY = panelY + textMargin;
+    int textX = panelX + textMargin;
+
+    drawString16x16( engineContext, textX, currentY, art.title, rgb( 255, 255, 255 ), maxTextW, 1, 1, false );
+    currentY += 25;
+
+    std::string meta = art.artist + ", " + art.date;
+    currentY = drawWrappedText( engineContext, textX, currentY, meta, borderCol, maxTextW );
+    currentY += 3;
+
+    currentY = drawWrappedText( engineContext, textX, currentY, art.location, rgb( 150, 150, 150 ), maxTextW );
+    currentY += 10;
+
+    for (int x = textX; x < textX + maxTextW; ++x) putPix( engineContext, x, currentY, rgb( 70, 70, 70 ) );
+    currentY += 15;
+
+    currentY = drawWrappedText( engineContext, textX, currentY, art.placard, rgb( 220, 220, 220 ), maxTextW );
+    currentY += 20;
+
+    drawStringTinyScaled( engineContext, textX, currentY, "HISTORICAL CONTEXT", borderCol, 1 );
+    currentY += 12;
+    currentY = drawWrappedText( engineContext, textX, currentY, art.rationale, rgb( 200, 200, 200 ), maxTextW );
+    currentY += 20;
+
+    drawStringTinyScaled( engineContext, textX, currentY, "ANALYSIS", borderCol, 1 );
+    currentY += 12;
+    currentY = drawWrappedText( engineContext, textX, currentY, art.reflection, rgb( 170, 190, 220 ), maxTextW );
+
+    const Image &artImg = engineContext.artImages[ artIndex ];
+    if (artImg.width > 0 && artImg.height > 0)
+    {
+        int availX = panelX + panelW + 20;   
+        int availW = RENDER_W - availX - 20; 
+        int availH = RENDER_H - 40;       
+        int availY = 20;
+
+        float imgAspect = (float)artImg.width / (float)artImg.height;
+        int drawW = availW;
+        int drawH = (int)(drawW / imgAspect);
+
+        if (drawH > availH)
+        {
+            drawH = availH;
+            drawW = (int)(drawH * imgAspect);
+        }
+
+        int drawX = availX + (availW - drawW) / 2;
+        int drawY = availY + (availH - drawH) / 2;
+
+        for (int x = drawX - 1; x <= drawX + drawW; ++x)
+        {
+            putPix( engineContext, x, drawY - 1, borderCol );
+            putPix( engineContext, x, drawY + drawH, borderCol );
+        }
+        for (int y = drawY - 1; y <= drawY + drawH; ++y)
+        {
+            putPix( engineContext, drawX - 1, y, borderCol );
+            putPix( engineContext, drawX + drawW, y, borderCol );
+        }
+
+        for (int y = 0; y < drawH; ++y)
+        {
+            float v = (float)y / std::max( 1.0f, (float)(drawH - 1) );
+            int texY = std::clamp( (int)(v * artImg.height), 0, artImg.height - 1 );
+
+            for (int x = 0; x < drawW; ++x)
+            {
+                float u = (float)x / std::max( 1.0f, (float)(drawW - 1) );
+                int texX = std::clamp( (int)(u * artImg.width), 0, artImg.width - 1 );
+
+                Uint32 color = artImg.sample( texX, texY );
+
+                if (((color >> 16) & 255) == 255 && ((color >> 8) & 255) == 0 && (color & 255) == 255) continue;
+
+                putPix( engineContext, drawX + x, drawY + y, color );
+            }
+        }
+    }
+
+}
+
+
+void renderGalleryCard( Engine &engineContext ) {
+    float px = engineContext.positionX;
+    float py = engineContext.positionY;
+
+    std::string wingName = "Central Atrium";
+    std::string wingDesc = "Hub & Information";
+
+    // Detect wings based on the 23x19 grid layout
+    // North Wing: Y < 7, X between 7 and 15
+    if (py < 7.0f && px >= 7.0f && px <= 15.0f)
+    {
+        wingName = "North Wing";
+        wingDesc = "Baroque & Dutch Golden Age";
+    }
+    // South Wing: Y > 12, X between 7 and 15
+    else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
+    {
+        wingName = "South Wing";
+        wingDesc = "Prehistoric & Egyptian";
+    }
+    // West Wing: X < 7, Y between 7 and 12
+    else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
+    {
+        wingName = "West Wing";
+        wingDesc = "Antiquity & Roman Empire";
+    }
+    // East Wing: X > 15, Y between 7 and 12
+    else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
+    {
+        wingName = "East Wing";
+        wingDesc = "Northern Renaissance";
+    }
+
+    int titleW = (int)wingName.length() * 11;
+    int titleX = (RENDER_W - titleW) / 2;
+
+    int descW = (int)wingDesc.length() * 4;
+    int descX = (RENDER_W - descW) / 2;
+
+    int boxW = std::max( titleW + 40, descW + 40 );
+    int boxX = (RENDER_W - boxW) / 2;
+
+    // Draw the card at the top center
+    drawTextBox( engineContext, boxX, 10, boxW, 40, rgb( 15, 15, 18 ), rgb( 180, 150, 50 ) );
+    drawString16x16( engineContext, titleX, 15, wingName, rgb( 255, 230, 100 ), RENDER_W, 1, 1, true, rgb( 0, 0, 0 ) );
+    drawStringTinyScaled( engineContext, descX, 35, wingDesc, rgb( 200, 200, 200 ), 1, 1, 1, false );
+}
+
+
 void renderObjectives( Engine &engineContext ) {
-    int width = (RENDER_W / 3) + 60;
-    int height = 45;
-    int x = 10, y = 10;
+    int width = (RENDER_W / 3) + 20;
+    int height = 55;
+    int x = RENDER_W - width - 10; // Anchor to top right
+    int y = 10;
 
-    Uint32 colBg = rgb( 20, 20, 25 );       
-    Uint32 colBorder = rgb( 212, 175, 55 );     
-    Uint32 colHeader = rgb( 212, 175, 55 );     
-    Uint32 colText = rgb( 220, 220, 230 );    
-    Uint32 colShadow = rgb( 0, 0, 0 );          
-    Uint32 colSuccess = rgb( 100, 255, 120 );    
+    Uint32 colBg = rgb( 15, 15, 18 );
+    Uint32 colBorder = rgb( 180, 150, 50 ); // Museum Gold
+    Uint32 colText = rgb( 220, 220, 230 );
 
-
-    drawTextBox( engineContext, x + 4, y + 4, width, height, colShadow, colShadow );
-
+    // Draw main box
     drawTextBox( engineContext, x, y, width, height, colBg, colBorder );
 
+    std::string header = "GALLERY TOUR";
+    drawString16x16( engineContext, x + 10, y + 8, header, colBorder, width, 1, 1, false );
 
-    std::string header = "CURRENT OBJECTIVE";
-    int headerScale = 1;
-    int headerW = (int)header.length() * 4;
-    int headerX = x + (width - headerW) / 2;
-    int headerY = y + 6;
+    // Draw Progress Bar outline
+    int barX = x + 10;
+    int barY = y + 30;
+    int barWidth = width - 20;
+    int barHeight = 12;
+    drawTextBox( engineContext, barX, barY, barWidth, barHeight, rgb( 10, 10, 10 ), rgb( 100, 100, 100 ) );
 
-    drawStringTinyScaled( engineContext, headerX, headerY, header, colHeader, headerScale, 1, 1, false );
-
-    int lineY = headerY + 9;
-    for (int i = x + 15; i < x + width - 15; ++i)
+    // Fill Progress Bar
+    float progress = mesuemObjectives.getProgress();
+    int fillWidth = (int)((barWidth - 2) * progress);
+    for (int by = barY + 1; by < barY + barHeight - 1; ++by)
     {
-        putPix( engineContext, i, lineY, rgb( 60, 60, 70 ) ); // Subtle grey line
+        for (int bx = barX + 1; bx < barX + 1 + fillWidth; ++bx)
+        {
+            putPix( engineContext, bx, by, rgb( 180, 150, 50 ) ); // Gold fill
+        }
     }
 
-    int textX = x + 12;
-    int textY = lineY + 8;
-    int textWidth = width - 24;
-
-    std::string current = "";
-    Uint32 textColor = colText;
-
-    if (mesuemObjectives.allCompleted() == false)
-    {
-        // Add a bullet point > for style
-        current = ">Find " + mesuemObjectives.objectives[ mesuemObjectives.currentObjective ];
-    }
-    else
-    {
-        current = "COMPLETE: Talk to Statue";
-        textColor = colSuccess; 
-    }
-
-    drawString16x16( engineContext, textX, textY, current, textColor, textWidth, 1, 2, true, colShadow );
+    // Progress Text
+    std::string progText = std::to_string( mesuemObjectives.viewedArtworks.size() ) + "/" + std::to_string( mesuemObjectives.totalArtworksToFind );
+    drawStringTinyScaled( engineContext, barX + barWidth - 30, barY - 12, progText, colText, 1 );
 }
 
 static void render( Engine &engineContext, float dt ) {
@@ -789,8 +964,8 @@ static void render( Engine &engineContext, float dt ) {
                     else
                     {
                         // Museum Mode: Match the wall formula for consistency
-                        shade = 1.0f / (1.0f + 0.025f * rowDist + 0.005f * rowDist * rowDist);
-                        shade = std::clamp( shade, 0.1f, 1.0f );
+                        shade = 1.0f / (1.0f + 0.08f * rowDist + 0.02f * rowDist * rowDist);
+                        shade = std::clamp( shade, 0.02f, 1.0f );
                     }
                     putPix( engineContext, x, y, shadeCol( color, shade ) );
 
@@ -857,8 +1032,8 @@ static void render( Engine &engineContext, float dt ) {
                     else
                     {
                         // Museum Mode: Match the wall formula for consistency
-                        shade = 1.0f / (1.0f + 0.025f * rowDist + 0.005f * rowDist * rowDist);
-                        shade = std::clamp( shade, 0.1f, 1.0f );
+                        shade = 1.0f / (1.0f + 0.08f * rowDist + 0.02f * rowDist * rowDist);
+                        shade = std::clamp( shade, 0.02f, 1.0f );
                     }
 
                     putPix( engineContext, x, y, shadeCol( color, shade ) );
@@ -873,6 +1048,16 @@ static void render( Engine &engineContext, float dt ) {
             worldY += stepY;
         }
     }
+
+    if (engineContext.benches3D.size() > 0)
+    {
+        for (const auto &box : engineContext.benches3D)
+        {
+            render_box( engineContext, box );
+            //render_legs( engineContext, box );
+        }
+    }
+
 
 
 	// Props (billboarded)
@@ -929,15 +1114,7 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    if (engineContext.benches3D.size() > 0)
-    {
-        for (const auto &box : engineContext.benches3D)
-        {
-            render_box( engineContext, box );
-            //render_legs( engineContext, box );
-        }
-    }
-
+  
 
     /*
     for (auto &col : engineContext.columns)
@@ -1081,7 +1258,7 @@ static void render( Engine &engineContext, float dt ) {
 		drawString16x16( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.showHelp && engineContext.currentLevel == Levels::TRANSITION)
+    if (engineContext.showHelp)
     {
         drawString16x16( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
@@ -1101,73 +1278,8 @@ static void render( Engine &engineContext, float dt ) {
 
     if (art) 
     {
-        const int fontW = 11;
-        const int fontH = 16;
-        const int letterSpace = -2;
-        const int lineSpace = 4;
-        const int advY = fontH + lineSpace;
-        const Uint32 shadowCol = rgb( 30, 30, 30 );
-
-
-        if (engineContext.placardOpen)
-        {
-            int width = RENDER_W - 16, height = (RENDER_H / 3) + 18;
-            int x = 8, y = RENDER_H - 200;
-            drawTextBox( engineContext, x, y, width, height, rgb( 18, 18, 24 ), rgb( 90, 90, 120 ) );
-
-            int textX = x + 8;
-            int textY = y + 8;
-            int textWidth = width - 16; // Wrap width
-
-			// Title (Date), Artist, Period, Medium, Location
-            std::string header = art->title + " (" + art->date + ")\n" + art->artist + " | " + art->period + "\n" + art->medium + ", " + art->location + "\n";
-
-            drawString16x16( engineContext, textX, textY, header, rgb( 255, 255, 0 ), textWidth, letterSpace, lineSpace, true, shadowCol );
-            textY += 3 * advY; // Advance 2 lines
-
-
-            // Rationale
-            // Replaced drawStringTinyScaled
-            drawString16x16( engineContext, textX, textY, /*"Why it matters:\n" + */ art->placard + art->rationale, rgb( 210, 210, 210 ), textWidth, letterSpace, lineSpace, true, shadowCol );
-
-            // Add a hint to press E again
         
-            std::string hint = "[E] Open Journal";
-            int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 40;
-            int hintY = y + height - advY - 4;
-            drawString16x16( engineContext, hintX, hintY, hint, rgb( 150, 200, 255 ), textWidth, letterSpace, lineSpace, true, rgb( 20, 20, 50 ) );
-
-        }
-        else if (engineContext.journalOpen)
-        {
-   
-            int width = RENDER_W / 2 + 80, height = RENDER_H - 120; // Made it wider
-            int x = (RENDER_W - width) / 2, y = 60;
-
-            drawTextBox( engineContext, x, y, width, height, rgb( 245, 245, 220 ), rgb( 101, 67, 33 ) );
-
-            int textX = x + 12; // More padding
-            int textY = y + 12;
-            int textWidth = width - 24; // Wrap width
-
-          
-            drawString16x16( engineContext, textX, textY, "Journal on \"" + art->title + "\"" + " (entry " + " #" + to_string(art->id) + ")", rgb(50, 50, 50), textWidth, letterSpace, lineSpace, false);
-            textY += advY + 4; // Extra space for title
-
-            for (int dx = 8; dx < width - 8; ++dx)
-            {
-                putPix( engineContext, x + dx, textY - 2, rgb( 101, 67, 33 ) );
-            }
-            textY += 2; // Space after divider
-
-       
-            drawString16x16( engineContext, textX, textY, art->reflection, rgb( 20, 20, 20 ), textWidth, letterSpace, lineSpace, false );
-
-            std::string hint = "[E] Close";
-            int hintX = x + width - (hint.length() * (fontW + letterSpace)) - 25;
-            int hintY = y + height - advY - 4;
-            drawString16x16( engineContext, hintX, hintY, hint, rgb( 100, 100, 100 ), textWidth, letterSpace, lineSpace, false );
-        }
+        renderPolishedPlacard( engineContext );
 
     }
     if (engineContext.statueChatActive)
@@ -1178,6 +1290,7 @@ static void render( Engine &engineContext, float dt ) {
     if (engineContext.currentLevel == Levels::MUSEUM)
     {
         renderObjectives( engineContext );
+        renderGalleryCard( engineContext ); 
     }
 
     
@@ -1288,7 +1401,7 @@ int main( int argc, char **argv ) {
     std::filesystem::path cwd = std::filesystem::current_path();
 
     std::vector<LevelDef> levels = {
-    {"Museum", (cwd / "levels" / "museum").string(), 7.5f, 4.5f, 90.f, 0},
+    {"Museum", (cwd / "levels" / "museum").string(), 10.0f, 9.0f, 90.f, 0},
     {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 },
     {"Transition", (cwd / "levels" / "transition").string(), 1.5, 4.5, 270.f, 2 }
 
@@ -1465,24 +1578,15 @@ int main( int argc, char **argv ) {
                             {
                                 // Placard is open -> close it, open journal
                                 engineContext.placardOpen = false;
-                                engineContext.journalOpen = true;
                                 engineContext.lastPlacardTick = SDL_GetTicks(); // Refresh timer
-                            }
-                            else if (engineContext.journalOpen && engineContext.openArtId == id)
-                            {
-                                // Journal is open -> close it
-                                engineContext.journalOpen = false;
-                                engineContext.openArtId = -1; // Fully close
                             }
                             else
                             {
-                                // Nothing is open, or we're looking at a *new* piece of art
-                                // Open the placard for this art
+         
                                 engineContext.openArtId = id;
                                 engineContext.placardOpen = true;
-                                engineContext.journalOpen = false; // Ensure journal is closed
                                 engineContext.lastPlacardTick = SDL_GetTicks();
-								mesuemObjectives.completeCurrentObjective();
+								mesuemObjectives.markViewed(id);
 
 
                             }
@@ -1491,7 +1595,6 @@ int main( int argc, char **argv ) {
                         {
                             // Close whatever is open
                             engineContext.placardOpen = false;
-                            engineContext.journalOpen = false;
                             engineContext.openArtId = -1;
                             if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
                             {
@@ -1503,13 +1606,12 @@ int main( int argc, char **argv ) {
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
 
-                        if (engineContext.currentLevel == Levels::TRANSITION)
+                        bool toggled = toggleDoorAhead( engineContext );
+
+   
+                        if (toggled && engineContext.currentLevel == Levels::TRANSITION)
                         {
-                            bool toggled = toggleDoorAhead( engineContext );
-                            if (toggled)
-                            {
-                                handleLevelChange( engineContext, levels, Levels::CAVE );
-                            }
+                            handleLevelChange( engineContext, levels, Levels::CAVE );
                         }
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)

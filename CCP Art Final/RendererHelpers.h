@@ -37,8 +37,8 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
     else
     {
 		// Use quadratic falloff for museum mode
-        shade = 1.0f / (1.0f + 0.025f * perpDist + 0.005f * perpDist * perpDist);
-        shade = std::clamp( shade, 0.1f, 1.0f ); // Never go fully pitch black, keep a little ambient
+        shade = 1.0f / (1.0f + 0.08f * perpDist + 0.02f * perpDist * perpDist);
+        shade = std::clamp( shade, 0.02f, 1.0f );
 
         // Makes walls facing one axis darker than the other to show geometry depth
         if (side == 1) shade *= 0.75f;
@@ -1038,18 +1038,20 @@ inline void draw_vertical_face( Engine &engineContext, float ax, float ay, float
 
         // Simple distance shading
         float shade = std::clamp( 1.0f / (0.35f * z), 0.25f, 1.0f );
-
         // Draw column
         int span = std::max( 1, bottom - top );
+        bool wroteOpaquePixel = false;
+
         for (int y = top; y <= bottom; ++y)
         {
             float v = (y - top) / float( span );
             int textureY = std::clamp( int( v * (texture.height - 1) ), 0, texture.height - 1 );
             Uint32 c = texture.sample( textureX, textureY );
+
             // magenta transparent
             if (((c >> 16) & 255) == 255 && ((c >> 8) & 255) == 0 && (c & 255) == 255) continue;
 
-            if (boolIsNearBlack(c, 120))
+            if (boolIsNearBlack( c, 120 ))
             {
                 continue;
             }
@@ -1058,6 +1060,15 @@ inline void draw_vertical_face( Engine &engineContext, float ax, float ay, float
             Uint8 gg = Uint8( ((c >> 8) & 255) * shade );
             Uint8 bb = Uint8( (c & 255) * shade );
             putPix( engineContext, x, y, rgb( rr, gg, bb ) );
+
+            // Flag that we rendered a visible part of the pillar
+            wroteOpaquePixel = true;
+        }
+
+        // Write to the Z-buffer so this column occludes geometry drawn later
+        if (wroteOpaquePixel)
+        {
+            engineContext.zbuffer[ x ] = z;
         }
     }
 }
@@ -1204,4 +1215,68 @@ inline void render_box_top( Engine &engineContext, const BoxProp &box, const Ima
             worldY += stepY;
         }
     }
+}
+
+
+static void drawTranslucentBox( Engine &engineContext, int x, int y, int w, int h, Uint32 color, float alpha ) {
+    Uint8 r = (color >> 16) & 255;
+    Uint8 g = (color >> 8) & 255;
+    Uint8 b = color & 255;
+
+    for (int iy = std::max( 0, y ); iy < std::min( RENDER_H, y + h ); ++iy)
+    {
+        for (int ix = std::max( 0, x ); ix < std::min( RENDER_W, x + w ); ++ix)
+        {
+            Uint32 bg = engineContext.backbuffer[ iy * RENDER_W + ix ];
+            Uint8 bgr = (bg >> 16) & 255;
+            Uint8 bgg = (bg >> 8) & 255;
+            Uint8 bgb = bg & 255;
+
+            // Blend the UI color with the 3D world behind it
+            Uint8 finalR = (Uint8)(r * alpha + bgr * (1.0f - alpha));
+            Uint8 finalG = (Uint8)(g * alpha + bgg * (1.0f - alpha));
+            Uint8 finalB = (Uint8)(b * alpha + bgb * (1.0f - alpha));
+
+            engineContext.backbuffer[ iy * RENDER_W + ix ] = rgb( finalR, finalG, finalB );
+        }
+    }
+}
+
+int drawWrappedText( Engine &engineContext, int x, int y, const std::string &text, Uint32 color, int maxWidth ) {
+    std::string word = "";
+    std::string line = "";
+    int currentY = y;
+    int charW = 4; // Width of your tiny font characters
+    int lineH = 10; // Spacing between lines
+
+    for (size_t i = 0; i <= text.length(); ++i)
+    {
+        char c = (i < text.length()) ? text[ i ] : ' ';
+
+        if (c == ' ' || i == text.length())
+        {
+            int lineWidth = (int)(line.length() + word.length() + 1) * charW;
+            if (lineWidth > maxWidth && !line.empty())
+            {
+                drawStringTinyScaled( engineContext, x, currentY, line, color, 1 );
+                currentY += lineH;
+                line = word + " ";
+            }
+            else
+            {
+                line += word + " ";
+            }
+            word = "";
+        }
+        else
+        {
+            word += c;
+        }
+    }
+    if (!line.empty())
+    {
+        drawStringTinyScaled( engineContext, x, currentY, line, color, 1 );
+        currentY += lineH;
+    }
+    return currentY; // Returns the Y position for the next block of text
 }
