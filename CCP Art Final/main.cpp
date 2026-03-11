@@ -1203,9 +1203,9 @@ static void render( Engine &engineContext, float dt ) {
                     float uLocal = (wallX - u0) / std::max(0.0001f, (u1 - u0));
 
                     int bandH = std::max(1, int(lineH * art.vHeight));
-                    int bandCenter = RENDER_H / 2 + int((art.vCenter - 0.5f) * lineH);
-                    int bandStart = std::clamp(bandCenter - bandH / 2, 0, RENDER_H - 1);
-                    int bandEnd = std::clamp(bandStart + bandH - 1, 0, RENDER_H - 1);
+                    int bandCenter = RENDER_H / 2 + int( (art.vCenter - 0.5f) * lineH );
+                    int bandStart = std::clamp( bandCenter - bandH / 2, 0, RENDER_H - 1 );
+                    int bandEnd = std::clamp( bandStart + bandH - 1, 0, RENDER_H - 1 );
 
                     float uLeftFrameEdge = FRAME_U;
                     float uRightFrameEdge = 1.0f - FRAME_U;
@@ -2076,6 +2076,7 @@ int main( int argc, char **argv ) {
                                 engineContext.props[ n.propIndex ].scale = 0.0f;
                             }
                             showAccessPopup( "Collected note: " + n.title, 2200 );
+							playPaperRustle( levels[ engineContext.currentLevel ].folder );
 
                             if (engineContext.currentLevel == Levels::CAVE)
                             {
@@ -2154,6 +2155,10 @@ int main( int argc, char **argv ) {
                         }
 
                         bool toggled = toggleDoorAhead( engineContext );
+                        if (toggled)
+                        {
+                            playDoorCreak( levels[ engineContext.currentLevel ].folder );
+                        }
 
    
                         if (toggled && engineContext.currentLevel == Levels::TRANSITION)

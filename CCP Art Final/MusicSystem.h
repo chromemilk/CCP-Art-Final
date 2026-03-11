@@ -31,7 +31,7 @@ static int caveIndex = 0;
 static MusicTypes g_currentMusicType;     // Tracks the current playlist
 static std::string g_baseMusicDirectory;  // Stores the path for the update function
 static bool g_musicInitialized = false;   // Prevents update loop from running early
-static float g_musicVolume = 100.f;
+static float g_musicVolume = 20.f;
 
 
 void setMusicVolume( float volume ) {
@@ -115,4 +115,34 @@ void playFootstep( const std::string &baseMusicDirectory ) {
 
 
 	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME | SND_NOSTOP );
+}
+
+void playDoorCreak( const std::string &baseMusicDirectory ) {
+	std::vector<std::string> candidates = {
+		"door_creak.wav"
+	};
+
+	int start = int( GetTickCount() % candidates.size() );
+	for (int i = 0; i < (int)candidates.size(); ++i)
+	{
+		int idx = (start + i) % candidates.size();
+		std::string soundPath = baseMusicDirectory + "\\" + candidates[ idx ];
+		if (PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME )) return;
+	}
+}
+
+void playPaperRustle( const std::string &baseMusicDirectory ) {
+	std::vector<std::string> candidates = {
+		"Paper_Rustle_01.wav",
+		"Paper_Rustle_02.wav",
+		"paper_rustle.wav"
+	};
+
+	int start = int( GetTickCount() % candidates.size() );
+	for (int i = 0; i < (int)candidates.size(); ++i)
+	{
+		int idx = (start + i) % candidates.size();
+		std::string soundPath = baseMusicDirectory + "\\" + candidates[ idx ];
+		if (PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME )) return;
+	}
 }
