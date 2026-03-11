@@ -10,6 +10,58 @@ using namespace std;
 
 Objectives mesuemObjectives;
 
+enum class LockType
+{
+    KEY,
+    CODE
+};
+
+struct RoomLock
+{
+    int tx = 0;
+    int ty = 0;
+    std::string roomName;
+    LockType type = LockType::KEY;
+    std::string requirement;
+    bool unlocked = false;
+};
+
+struct KeyPickup
+{
+    std::string keyName;
+    float x = 0.f;
+    float y = 0.f;
+    bool collected = false;
+    int propIndex = -1;
+};
+
+struct ClueNote
+{
+    std::string title;
+    std::string body;
+    float x = 0.f;
+    float y = 0.f;
+    bool collected = false;
+    int propIndex = -1;
+};
+
+static std::vector<RoomLock> g_roomLocks;
+static std::vector<KeyPickup> g_keyPickups;
+static std::vector<ClueNote> g_clueNotes;
+static std::unordered_set<std::string> g_playerKeys;
+static std::vector<int> g_foundNotes;
+
+static std::string g_accessPopup;
+static Uint32 g_accessPopupUntil = 0;
+
+static bool g_codeEntryActive = false;
+static int g_codeEntryLockIndex = -1;
+static std::string g_codeEntryBuffer;
+static bool g_notesOpen = false;
+static bool g_caveFinalNoteCollected = false;
+static int g_notesCollectedRun = 0;
+static float g_runElapsedSeconds = 0.0f;
+
 struct LevelDef
 {
     string name;
@@ -21,8 +73,213 @@ struct LevelDef
 enum GameState
 {
     STATE_MENU,
-    STATE_GAME
+    STATE_GAME,
+    STATE_ENDING
 };
+
+static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) {
+    g_accessPopup = msg;
+    g_accessPopupUntil = SDL_GetTicks() + durationMs;
+}
+
+static void buildSimpleKeySprite( Image &img, Uint32 keyColor ) {
+    img.width = 24;
+    img.height = 24;
+    img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
+
+    auto p = [&]( int x, int y, Uint32 c ) {
+        if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height)
+        {
+            img.pixels[ y * img.width + x ] = c;
+        }
+        };
+
+    for (int y = 6; y <= 14; ++y)
+    {
+        for (int x = 4; x <= 12; ++x)
+        {
+            int dx = x - 8;
+            int dy = y - 10;
+            if (dx * dx + dy * dy <= 14) p( x, y, keyColor );
+        }
+    }
+    for (int x = 12; x <= 20; ++x) p( x, 10, keyColor );
+    for (int x = 16; x <= 18; ++x)
+    {
+        p( x, 11, keyColor );
+        p( x, 12, keyColor );
+    }
+    p( 19, 9, keyColor );
+    p( 20, 9, keyColor );
+}
+
+static int addKeyPickupSprite( Engine &engineContext, float x, float y, const std::string &keyName, Uint32 keyColor ) {
+    Image img;
+    buildSimpleKeySprite( img, keyColor );
+    int texId = (int)engineContext.propImages.size();
+    engineContext.propImages.push_back( std::move( img ) );
+
+    Prop prop;
+    prop.x = x;
+    prop.y = y;
+    prop.kind = "PUZZLE_KEY";
+    prop.filename = keyName;
+    prop.textureID = texId;
+    prop.scale = 0.45f;
+    int propIndex = (int)engineContext.props.size();
+    engineContext.props.push_back( std::move( prop ) );
+    return propIndex;
+}
+
+static void buildSimpleNoteSprite( Image &img ) {
+    img.width = 24;
+    img.height = 24;
+    img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
+
+    Uint32 paper = rgb( 225, 214, 180 );
+    Uint32 ink = rgb( 60, 50, 35 );
+
+    auto p = [&]( int x, int y, Uint32 c ) {
+        if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height)
+        {
+            img.pixels[ y * img.width + x ] = c;
+        }
+        };
+
+    for (int y = 4; y <= 19; ++y)
+    {
+        for (int x = 5; x <= 18; ++x)
+        {
+            p( x, y, paper );
+        }
+    }
+    for (int x = 7; x <= 16; ++x)
+    {
+        p( x, 8, ink );
+        p( x, 11, ink );
+        p( x, 14, ink );
+    }
+}
+
+static int addNotePickupSprite( Engine &engineContext, float x, float y, const std::string &noteName ) {
+    Image img;
+    buildSimpleNoteSprite( img );
+    int texId = (int)engineContext.propImages.size();
+    engineContext.propImages.push_back( std::move( img ) );
+
+    Prop prop;
+    prop.x = x;
+    prop.y = y;
+    prop.kind = "CLUE_NOTE";
+    prop.filename = noteName;
+    prop.textureID = texId;
+    prop.scale = 0.38f;
+    int propIndex = (int)engineContext.props.size();
+    engineContext.props.push_back( std::move( prop ) );
+    return propIndex;
+}
+
+static void initMuseumPuzzle( Engine &engineContext ) {
+    g_roomLocks = {
+        {6, 9, "West Wing", LockType::KEY, "BRONZE KEY", false},
+        {10, 6, "North Wing", LockType::CODE, "0300", false},
+        {16, 9, "East Wing", LockType::KEY, "SILVER KEY", false},
+        {10, 12, "South Wing", LockType::CODE, "1642", false}
+    };
+
+    g_playerKeys.clear();
+    g_foundNotes.clear();
+    g_accessPopup.clear();
+    g_accessPopupUntil = 0;
+    g_codeEntryActive = false;
+    g_codeEntryLockIndex = -1;
+    g_codeEntryBuffer.clear();
+    g_notesOpen = false;
+    g_caveFinalNoteCollected = false;
+
+    g_keyPickups.clear();
+    g_keyPickups.push_back( {"BRONZE KEY", 12.6f, 9.6f, false, addKeyPickupSprite( engineContext, 12.6f, 9.6f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
+    g_keyPickups.push_back( {"SILVER KEY", 10.3f, 3.2f, false, addKeyPickupSprite( engineContext, 10.3f, 3.2f, "SILVER KEY", rgb( 190, 190, 205 ) )} );
+
+    g_clueNotes.clear();
+    g_clueNotes.push_back( {
+        "West Wing Curator Note",
+        "The Roman gallery clue points to the North lock code. The rule of four guides the access",
+        4.5f, 9.1f, false, addNotePickupSprite( engineContext, 4.5f, 9.1f, "West Wing Curator Note" )
+        } );
+    g_clueNotes.push_back( {
+        "East Wing Archivist Note",
+        "The final South lock code is the year of the militia",
+        18.5f, 9.0f, false, addNotePickupSprite( engineContext, 18.5f, 9.0f, "East Wing Archivist Note" )
+        } );
+}
+
+static void initCaveFinalObjective( Engine &engineContext ) {
+    g_clueNotes.clear();
+    g_foundNotes.clear();
+    g_clueNotes.push_back( {
+        "Last Journal Fragment",
+        "You are beneath the museum in buried foundation tunnels.\nThe gallery was built over a much older site.",
+        8.5f, 5.2f, false, addNotePickupSprite( engineContext, 8.5f, 5.2f, "Last Journal Fragment" )
+        } );
+    g_caveFinalNoteCollected = false;
+}
+
+static void clearPuzzleState() {
+    g_roomLocks.clear();
+    g_keyPickups.clear();
+    g_clueNotes.clear();
+    g_playerKeys.clear();
+    g_foundNotes.clear();
+    g_accessPopup.clear();
+    g_accessPopupUntil = 0;
+    g_codeEntryActive = false;
+    g_codeEntryLockIndex = -1;
+    g_codeEntryBuffer.clear();
+    g_notesOpen = false;
+}
+
+static int findDoorLockIndex( int tx, int ty ) {
+    for (int i = 0; i < (int)g_roomLocks.size(); ++i)
+    {
+        if (g_roomLocks[ i ].tx == tx && g_roomLocks[ i ].ty == ty) return i;
+    }
+    return -1;
+}
+
+static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty ) {
+    float reach = 1.5f;
+    tx = int( engineContext.positionX + engineContext.directionX * reach );
+    ty = int( engineContext.positionY + engineContext.directionY * reach );
+    if (tx < 0 || ty < 0 || tx >= engineContext.map.width || ty >= engineContext.map.height) return false;
+    return engineContext.map.tiles[ ty * engineContext.map.width + tx ] == 2;
+}
+
+static int getNearbyKeyPickup( Engine const &engineContext, float radius = 0.9f ) {
+    float radiusSq = radius * radius;
+    for (int i = 0; i < (int)g_keyPickups.size(); ++i)
+    {
+        const auto &k = g_keyPickups[ i ];
+        if (k.collected) continue;
+        float dx = engineContext.positionX - k.x;
+        float dy = engineContext.positionY - k.y;
+        if (dx * dx + dy * dy <= radiusSq) return i;
+    }
+    return -1;
+}
+
+static int getNearbyClueNote( Engine const &engineContext, float radius = 0.9f ) {
+    float radiusSq = radius * radius;
+    for (int i = 0; i < (int)g_clueNotes.size(); ++i)
+    {
+        const auto &n = g_clueNotes[ i ];
+        if (n.collected) continue;
+        float dx = engineContext.positionX - n.x;
+        float dy = engineContext.positionY - n.y;
+        if (dx * dx + dy * dy <= radiusSq) return i;
+    }
+    return -1;
+}
 
 static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     namespace fs = std::filesystem;
@@ -138,6 +395,15 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
             engineContext.benches3D.push_back( std::move( box ) );
 
+        }
+        initMuseumPuzzle( engineContext );
+    }
+    else
+    {
+        clearPuzzleState();
+        if (level.levelId == Levels::CAVE)
+        {
+            initCaveFinalObjective( engineContext );
         }
     }
 
@@ -617,6 +883,130 @@ void renderObjectives( Engine &engineContext ) {
     // Progress Text
     std::string progText = std::to_string( mesuemObjectives.viewedArtworks.size() ) + "/" + std::to_string( mesuemObjectives.totalArtworksToFind );
     drawStringTinyScaled( engineContext, barX + barWidth - 30, barY - 12, progText, colText, 1 );
+}
+
+static void renderAccessPopup( Engine &engineContext ) {
+    if (g_accessPopup.empty() || SDL_GetTicks() > g_accessPopupUntil) return;
+
+    int w = 500;
+    int h = 70;
+    int x = (RENDER_W - w) / 2;
+    int y = RENDER_H - h - 20;
+    bool denied = (g_accessPopup.find( "denied" ) != std::string::npos) ||
+        (g_accessPopup.find( "Denied" ) != std::string::npos) ||
+        (g_accessPopup.find( "required" ) != std::string::npos);
+    Uint32 border = denied ? rgb( 200, 40, 40 ) : rgb( 120, 170, 70 );
+    Uint32 head = denied ? rgb( 255, 80, 80 ) : rgb( 180, 230, 120 );
+    std::string title = denied ? "ACCESS DENIED" : "LOG UPDATED";
+    drawTextBox( engineContext, x, y, w, h, rgb( 12, 12, 16 ), border );
+    drawString16x16( engineContext, x + 12, y + 10, title, head, w - 24, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 38, g_accessPopup, rgb( 230, 230, 230 ), 2, 1, 1, false );
+}
+
+static void renderCodeEntry( Engine &engineContext ) {
+    if (!g_codeEntryActive || g_codeEntryLockIndex < 0 || g_codeEntryLockIndex >= (int)g_roomLocks.size()) return;
+
+    const RoomLock &lock = g_roomLocks[ g_codeEntryLockIndex ];
+    int w = 420;
+    int h = 150;
+    int x = (RENDER_W - w) / 2;
+    int y = (RENDER_H - h) / 2;
+    drawTextBox( engineContext, x, y, w, h, rgb( 10, 10, 14 ), rgb( 180, 150, 50 ) );
+
+    drawString16x16( engineContext, x + 16, y + 14, "ENTER ACCESS CODE", rgb( 255, 220, 120 ), w - 32, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 42, lock.roomName, rgb( 170, 170, 185 ), 2, 1, 1, false );
+    drawTextBox( engineContext, x + 16, y + 65, w - 32, 34, rgb( 0, 0, 0 ), rgb( 90, 90, 110 ) );
+    drawString16x16( engineContext, x + 30, y + 74, g_codeEntryBuffer.empty() ? "----" : g_codeEntryBuffer, rgb( 220, 220, 230 ), w - 60, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 112, "TYPE 4 DIGITS, ENTER TO CONFIRM, ESC TO CANCEL", rgb( 120, 120, 140 ), 1, 1, 1, false );
+}
+
+static void renderNotesScreen( Engine &engineContext ) {
+    if (!g_notesOpen) return;
+
+    int panelW = RENDER_W - 120;
+    int panelH = RENDER_H - 100;
+    int x = (RENDER_W - panelW) / 2;
+    int y = (RENDER_H - panelH) / 2;
+
+    drawTextBox( engineContext, x, y, panelW, panelH, rgb( 14, 12, 10 ), rgb( 170, 145, 95 ) );
+    drawString16x16( engineContext, x + 18, y + 16, "FIELD NOTES", rgb( 240, 210, 140 ), panelW - 36, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + panelW - 170, y + 22, "N/ESC CLOSE", rgb( 145, 135, 110 ), 2, 1, 1, false );
+
+    int cy = y + 52;
+    if (g_foundNotes.empty())
+    {
+        drawString16x16( engineContext, x + 18, cy + 12, "No clues collected yet.", rgb( 210, 210, 210 ), panelW - 36, 1, 1, false );
+        return;
+    }
+
+    for (int noteIdx : g_foundNotes)
+    {
+        if (noteIdx < 0 || noteIdx >= (int)g_clueNotes.size()) continue;
+        const auto &note = g_clueNotes[ noteIdx ];
+
+        drawString16x16( engineContext, x + 18, cy, note.title, rgb( 255, 232, 170 ), panelW - 36, 1, 1, false );
+        cy += 20;
+        cy = drawWrappedText( engineContext, x + 24, cy, note.body, rgb( 220, 220, 215 ), panelW - 48 );
+        cy += 14;
+        if (cy > y + panelH - 30) break;
+    }
+}
+
+static void renderCompass( Engine &engineContext ) {
+    const int boxX = 10;
+    const int boxY = 10;
+    const int boxW = 120;
+    const int boxH = 120;
+    const int cx = boxX + boxW / 2;
+    const int cy = boxY + boxH / 2;
+    const int r = 42;
+
+    drawTextBox( engineContext, boxX, boxY, boxW, boxH, rgb( 14, 14, 18 ), rgb( 160, 140, 80 ) );
+    for (int y = -r - 1; y <= r + 1; ++y)
+    {
+        for (int x = -r - 1; x <= r + 1; ++x)
+        {
+            int d2 = x * x + y * y;
+            if (d2 >= (r - 1) * (r - 1) && d2 <= (r + 1) * (r + 1)) putPix( engineContext, cx + x, cy + y, rgb( 170, 150, 90 ) );
+        }
+    }
+    drawStringTinyScaled( engineContext, cx - 2, cy - r - 10, "N", rgb( 235, 220, 170 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, cx - 2, cy + r + 4, "S", rgb( 180, 180, 180 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, cx + r + 5, cy - 2, "E", rgb( 180, 180, 180 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, cx - r - 8, cy - 2, "W", rgb( 180, 180, 180 ), 1, 1, 1, false );
+
+    float ang = std::atan2( engineContext.directionY, engineContext.directionX );
+    int nx = cx + int( std::cos( ang ) * (r - 6) );
+    int ny = cy + int( std::sin( ang ) * (r - 6) );
+    int x0 = cx, y0 = cy, x1 = nx, y1 = ny;
+    int dx = std::abs( x1 - x0 ), sx = (x0 < x1) ? 1 : -1;
+    int dy = -std::abs( y1 - y0 ), sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+    while (true)
+    {
+        putPix( engineContext, x0, y0, rgb( 230, 60, 60 ) );
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void renderEndingScreen( Engine &engineContext ) {
+    int w = RENDER_W - 120;
+    int h = RENDER_H - 80;
+    int x = (RENDER_W - w) / 2;
+    int y = (RENDER_H - h) / 2;
+    drawTextBox( engineContext, x, y, w, h, rgb( 10, 10, 14 ), rgb( 190, 160, 80 ) );
+    drawString16x16( engineContext, x + 20, y + 20, "THE EXHIBIT IS COMPLETE", rgb( 255, 230, 120 ), w - 40, 1, 1, false );
+    int cy = y + 60;
+    cy = drawWrappedText( engineContext, x + 20, cy, "Final note decoded: You are beneath the museum in buried foundation tunnels.", rgb( 220, 220, 220 ), w - 40 );
+    cy += 14;
+    std::string stats = "Art Viewed: " + std::to_string( mesuemObjectives.viewedArtworks.size() ) +
+        "   Notes Found: " + std::to_string( g_notesCollectedRun ) +
+        "   Time: " + std::to_string( int( g_runElapsedSeconds ) ) + "s";
+    drawStringTinyScaled( engineContext, x + 20, cy, stats, rgb( 170, 190, 220 ), 2, 1, 1, false );
+    drawString16x16( engineContext, x + 20, y + h - 34, "[R] Restart   [ESC] Menu", rgb( 210, 210, 210 ), w - 40, 1, 1, false );
 }
 
 static void render( Engine &engineContext, float dt ) {
@@ -1261,6 +1651,31 @@ static void render( Engine &engineContext, float dt ) {
     if (engineContext.showHelp)
     {
         drawString16x16( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, 10, RENDER_H - 40, "[N] Notes", rgb( 200, 200, 120 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    int nearbyKey = getNearbyKeyPickup( engineContext );
+    if (nearbyKey >= 0 && !g_codeEntryActive)
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 45, "[E] PICK UP KEY ITEM", rgb( 255, 240, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    int nearbyNote = getNearbyClueNote( engineContext );
+    if (nearbyNote >= 0 && !g_codeEntryActive)
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] COLLECT NOTE", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    int doorTx = 0, doorTy = 0;
+    if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, doorTx, doorTy ))
+    {
+        int lockIndex = findDoorLockIndex( doorTx, doorTy );
+        if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked && !g_codeEntryActive)
+        {
+            const auto &lock = g_roomLocks[ lockIndex ];
+            std::string req = (lock.type == LockType::KEY) ? ("[F] Use " + lock.requirement) : "[F] Enter 4-Digit Code";
+            drawString16x16( engineContext, (RENDER_W / 2) - 110, (RENDER_H / 2) + 65, req, rgb( 255, 210, 100 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        }
     }
 
     const Artwork *art = nullptr;
@@ -1292,6 +1707,11 @@ static void render( Engine &engineContext, float dt ) {
         renderObjectives( engineContext );
         renderGalleryCard( engineContext ); 
     }
+
+    renderCompass( engineContext );
+    renderAccessPopup( engineContext );
+    renderNotesScreen( engineContext );
+    renderCodeEntry( engineContext );
 
     
 }
@@ -1430,6 +1850,8 @@ int main( int argc, char **argv ) {
 	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=quit
     const int numMenuOptions = 5;
     float musicVolume = getMusicVolume(); 
+    g_notesCollectedRun = 0;
+    g_runElapsedSeconds = 0.0f;
   
 
 
@@ -1443,6 +1865,7 @@ int main( int argc, char **argv ) {
         float dt = (now - prev) / 1000.0f;
         prev = now;
         if (dt > 0.05f) dt = 0.05f;
+        if (currentState == STATE_GAME) g_runElapsedSeconds += dt;
         // Input
         SDL_Event ev;
         float actualSpeed;
@@ -1558,9 +1981,66 @@ int main( int argc, char **argv ) {
             {
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
+                    if (g_notesOpen)
+                    {
+                        if (ev.key.key == SDLK_N || ev.key.key == SDLK_ESCAPE)
+                        {
+                            g_notesOpen = false;
+                        }
+                        continue;
+                    }
+
+                    if (g_codeEntryActive)
+                    {
+                        if (ev.key.key >= SDLK_0 && ev.key.key <= SDLK_9 && g_codeEntryBuffer.size() < 4)
+                        {
+                            g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_0) ) );
+                        }
+                        else if (ev.key.key >= SDLK_KP_0 && ev.key.key <= SDLK_KP_9 && g_codeEntryBuffer.size() < 4)
+                        {
+                            g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_KP_0) ) );
+                        }
+                        else if (ev.key.key == SDLK_BACKSPACE && !g_codeEntryBuffer.empty())
+                        {
+                            g_codeEntryBuffer.pop_back();
+                        }
+                        else if (ev.key.key == SDLK_ESCAPE)
+                        {
+                            g_codeEntryActive = false;
+                            g_codeEntryBuffer.clear();
+                            g_codeEntryLockIndex = -1;
+                        }
+                        else if ((ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER) && g_codeEntryLockIndex >= 0 && g_codeEntryLockIndex < (int)g_roomLocks.size())
+                        {
+                            auto &lock = g_roomLocks[ g_codeEntryLockIndex ];
+                            if (g_codeEntryBuffer == lock.requirement)
+                            {
+                                lock.unlocked = true;
+                                int idx = lock.ty * engineContext.map.width + lock.tx;
+                                if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2)
+                                {
+                                    engineContext.map.tiles[ idx ] = 0;
+                                }
+                                showAccessPopup( lock.roomName + " unlocked.", 1800 );
+                            }
+                            else
+                            {
+                                showAccessPopup( "Wrong code. Access denied." );
+                            }
+                            g_codeEntryActive = false;
+                            g_codeEntryBuffer.clear();
+                            g_codeEntryLockIndex = -1;
+                        }
+                        continue;
+                    }
+
                     if (ev.key.key == SDLK_ESCAPE)
                     {
                         currentState = STATE_MENU;
+                    }
+                    else if (ev.key.key == SDLK_N)
+                    {
+                        g_notesOpen = !g_notesOpen;
                     }
                     else if (ev.key.key == SDLK_F1)
                     {
@@ -1568,6 +2048,41 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
+                        int nearbyKey = getNearbyKeyPickup( engineContext );
+                        if (nearbyKey >= 0)
+                        {
+                            auto &k = g_keyPickups[ nearbyKey ];
+                            k.collected = true;
+                            g_playerKeys.insert( k.keyName );
+                            if (k.propIndex >= 0 && k.propIndex < (int)engineContext.props.size())
+                            {
+                                engineContext.props[ k.propIndex ].scale = 0.0f;
+                            }
+                            showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
+                            continue;
+                        }
+
+                        int nearbyNote = getNearbyClueNote( engineContext );
+                        if (nearbyNote >= 0)
+                        {
+                            auto &n = g_clueNotes[ nearbyNote ];
+                            n.collected = true;
+                            g_foundNotes.push_back( nearbyNote );
+                            g_notesCollectedRun++;
+                            if (n.propIndex >= 0 && n.propIndex < (int)engineContext.props.size())
+                            {
+                                engineContext.props[ n.propIndex ].scale = 0.0f;
+                            }
+                            showAccessPopup( "Collected note: " + n.title, 2200 );
+
+                            if (engineContext.currentLevel == Levels::CAVE)
+                            {
+                                g_caveFinalNoteCollected = true;
+                                currentState = STATE_ENDING;
+                            }
+                            continue;
+                        }
+
 
                         int id = pickArtworkUnderCrosshair( engineContext );
                         if (id < 0) id = findNearestArtwork( engineContext ); // optional fallback
@@ -1605,6 +2120,36 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
+                        int tx = 0;
+                        int ty = 0;
+                        if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, tx, ty ))
+                        {
+                            int lockIndex = findDoorLockIndex( tx, ty );
+                            if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked)
+                            {
+                                auto &lock = g_roomLocks[ lockIndex ];
+                                if (lock.type == LockType::KEY)
+                                {
+                                    if (g_playerKeys.contains( lock.requirement ))
+                                    {
+                                        lock.unlocked = true;
+                                        showAccessPopup( lock.requirement + " used.", 1600 );
+                                    }
+                                    else
+                                    {
+                                        showAccessPopup( lock.requirement + " required." );
+                                        continue;
+                                    }
+                                }
+                                else
+                                {
+                                    g_codeEntryActive = true;
+                                    g_codeEntryLockIndex = lockIndex;
+                                    g_codeEntryBuffer.clear();
+                                    continue;
+                                }
+                            }
+                        }
 
                         bool toggled = toggleDoorAhead( engineContext );
 
@@ -1654,12 +2199,30 @@ int main( int argc, char **argv ) {
                     }
                 }
             }
+            else if (currentState == STATE_ENDING)
+            {
+                if (ev.type == SDL_EVENT_KEY_DOWN)
+                {
+                    if (ev.key.key == SDLK_R)
+                    {
+                        handleLevelChange( engineContext, levels, Levels::MUSEUM );
+                        g_notesCollectedRun = 0;
+                        g_runElapsedSeconds = 0.0f;
+                        currentState = STATE_GAME;
+                    }
+                    else if (ev.key.key == SDLK_ESCAPE)
+                    {
+                        currentState = STATE_MENU;
+                    }
+                }
+            }
         }
 
         if (currentState == STATE_GAME)
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
+            if (g_codeEntryActive || g_notesOpen) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
@@ -1802,6 +2365,10 @@ int main( int argc, char **argv ) {
         if (currentState == STATE_MENU)
         {
             renderMenu( engineContext, currentMenuSelection, musicVolume, config::useMusic, config::viewBobbing );
+        }
+        else if (currentState == STATE_ENDING)
+        {
+            renderEndingScreen( engineContext );
         }
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
