@@ -1691,6 +1691,9 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
+    renderCompass(engineContext);
+
+
     if (art) 
     {
         
@@ -1708,7 +1711,6 @@ static void render( Engine &engineContext, float dt ) {
         renderGalleryCard( engineContext ); 
     }
 
-    renderCompass( engineContext );
     renderAccessPopup( engineContext );
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
