@@ -901,6 +901,7 @@ static void renderAccessPopup( Engine &engineContext ) {
     drawTextBox( engineContext, x, y, w, h, rgb( 12, 12, 16 ), border );
     drawString16x16( engineContext, x + 12, y + 10, title, head, w - 24, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 38, g_accessPopup, rgb( 230, 230, 230 ), 2, 1, 1, false );
+ 
 }
 
 static void renderCodeEntry( Engine &engineContext ) {
@@ -1650,7 +1651,6 @@ static void render( Engine &engineContext, float dt ) {
 
     if (engineContext.showHelp)
     {
-        drawString16x16( engineContext, 10, RENDER_H - 20, "[F] Open Door", rgb( 220, 0, 0 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
         drawString16x16( engineContext, 10, RENDER_H - 40, "[N] Notes", rgb( 200, 200, 120 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
@@ -1775,7 +1775,16 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     std::string musicState = musicOn ? "ON" : "OFF";
     drawItem( 1, "Enable Audio: " + musicState );
 
-    std::string volStr = std::to_string( (int)volume ) + "%";
+    std::string volStr;
+	static bool resetToDetect = false;
+    if ((int)volume > 0 && volume != config::calibratedVolume) {
+        volStr = std::to_string((int)volume) + "%";
+    }
+    else {
+		volStr = "DETECT";
+    }
+
+
     drawItem( 2, "Music Volume: " + volStr );
 
     std::string viewBobEnabler = viewBob ? "ON" : "OFF";
@@ -1829,6 +1838,8 @@ int main( int argc, char **argv ) {
 
 
     };
+
+    calibrateMusicVolumeFromMic();
 
     int curLevel = engineContext.currentLevel;
     if (!loadLevel( engineContext, levels[ curLevel ] )) return 1;
@@ -1898,7 +1909,6 @@ int main( int argc, char **argv ) {
                 {
                     if (!stepTriggered)
                     {
-                        std::cout << "Footstep Triggered at peak/trough: " << sinValue << "\n";
                         playFootstep( levels[ engineContext.currentLevel ].folder );
                         stepTriggered = true; 
                     }
@@ -2024,9 +2034,11 @@ int main( int argc, char **argv ) {
                                     engineContext.map.tiles[ idx ] = 0;
                                 }
                                 showAccessPopup( lock.roomName + " unlocked.", 1800 );
+                                playDoorCreak(levels[engineContext.currentLevel].folder);
                             }
                             else
                             {
+                                playFailedDoorOpen(levels[engineContext.currentLevel].folder);
                                 showAccessPopup( "Wrong code. Access denied." );
                             }
                             g_codeEntryActive = false;
@@ -2061,6 +2073,7 @@ int main( int argc, char **argv ) {
                                 engineContext.props[ k.propIndex ].scale = 0.0f;
                             }
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
+                            playPickup(levels[engineContext.currentLevel].folder);
                             continue;
                         }
 
