@@ -1,7 +1,13 @@
 #include <SFML\Audio.hpp>
+#include <SFML\System.hpp>
 #include "Settings.h"
 #include <windows.h>
 #include <mmsystem.h>
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <cmath>
+#include <algorithm>
 
 enum MusicTypes
 {
@@ -31,7 +37,8 @@ static int caveIndex = 0;
 static MusicTypes g_currentMusicType;     // Tracks the current playlist
 static std::string g_baseMusicDirectory;  // Stores the path for the update function
 static bool g_musicInitialized = false;   // Prevents update loop from running early
-static float g_musicVolume = 20.f;
+static float g_musicVolume = 0.f;
+static bool g_autoVolumeCalibrated = false;
 
 
 void setMusicVolume( float volume ) {
@@ -41,6 +48,67 @@ void setMusicVolume( float volume ) {
 
 float getMusicVolume() {
 	return g_musicVolume;
+}
+
+bool calibrateMusicVolumeFromMic(int captureMs = 1200, bool userReset = false ) {
+	if (g_autoVolumeCalibrated && userReset == false) return true;
+
+	if (!config::autoMusicVolume)
+	{
+		setMusicVolume( config::musicVolume );
+		g_autoVolumeCalibrated = true;
+		return true;
+	}
+
+	if (!sf::SoundBufferRecorder::isAvailable())
+	{
+		std::cout << "Mic recorder not available, using fallback volume." << std::endl;
+		setMusicVolume( config::musicVolume );
+		g_autoVolumeCalibrated = true;
+		return false;
+	}
+
+	sf::SoundBufferRecorder recorder;
+	if (!recorder.start( 22050 ))
+	{
+		std::cout << "Mic recorder failed to start, using fallback volume." << std::endl;
+		setMusicVolume( config::musicVolume );
+		g_autoVolumeCalibrated = true;
+		return false;
+	}
+
+	std::this_thread::sleep_for( std::chrono::milliseconds( captureMs ) );
+	recorder.stop();
+
+	const sf::SoundBuffer &buf = recorder.getBuffer();
+	const auto *samples = buf.getSamples();
+	size_t count = buf.getSampleCount();
+	if (!samples || count == 0)
+	{
+		std::cout << "No mic samples captured, using fallback volume." << std::endl;
+		setMusicVolume( config::musicVolume );
+		g_autoVolumeCalibrated = true;
+		return false;
+	}
+
+	double sumSq = 0.0;
+	for (size_t i = 0; i < count; ++i)
+	{
+		double s = double( samples[ i ] ) / 32768.0;
+		sumSq += s * s;
+	}
+	double rms = std::sqrt( sumSq / double( count ) );
+	float ambient = float( std::clamp( rms, 0.0, 0.18 ) );
+	float norm = ambient / 0.18f;
+	float target = 26.0f + norm * 44.0f; // 26..70
+
+	setMusicVolume( target );
+	config::musicVolume = target;
+	std::cout << "Auto music volume calibrated to " << int( target ) << "% (ambient=" << ambient << ")" << std::endl;
+	config::calibratedVolume = target;
+
+	g_autoVolumeCalibrated = true;
+	return true;
 }
 
 void playNextTrack() {
@@ -107,28 +175,30 @@ void playMusicTrack( const std::string &baseMusicDirectory, Levels currentLevel 
 	}
 }
 
+void playPickup(const std::string& baseMusicDirectory) {
+
+	std::string soundPath = baseMusicDirectory + "\\pickup.wav";
+
+	PlaySoundA(soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME);
+}
 void playFootstep( const std::string &baseMusicDirectory ) {
 
     std::string soundPath = baseMusicDirectory + "\\Sound 01.wav";
 
-	std::cout << "Trying to play footstep sound: " << soundPath << std::endl;
+	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME | SND_NOSTOP );
+}
 
-	// Replace with SND_NOSTOP if no work
-	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME );
+void playFailedDoorOpen(const std::string& baseMusicDirectory) {
+	std::string soundPath = baseMusicDirectory + "\\" + "failed_door_open.wav";
+
+	if (PlaySoundA(soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME)) return;
 }
 
 void playDoorCreak( const std::string &baseMusicDirectory ) {
-	std::vector<std::string> candidates = {
-		"door_creak.wav"
-	};
+	std::string soundPath = baseMusicDirectory + "\\" + "door_creak.wav";
 
-	int start = int( GetTickCount() % candidates.size() );
-	for (int i = 0; i < (int)candidates.size(); ++i)
-	{
-		int idx = (start + i) % candidates.size();
-		std::string soundPath = baseMusicDirectory + "\\" + candidates[ idx ];
-		if (PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME )) return;
-	}
+	if (PlaySoundA(soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME)) return;
+
 }
 
 void playPaperRustle( const std::string &baseMusicDirectory ) {
@@ -138,7 +208,7 @@ void playPaperRustle( const std::string &baseMusicDirectory ) {
 		"paper_rustle.wav"
 	};
 
-	int start = int( GetTickCount() % candidates.size() );
+	int start = int( GetTickCount64() % candidates.size() );
 	for (int i = 0; i < (int)candidates.size(); ++i)
 	{
 		int idx = (start + i) % candidates.size();
