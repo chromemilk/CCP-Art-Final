@@ -5,6 +5,7 @@
 #include <iostream>
 #include <filesystem> 
 #include <thread>
+#include <array>
 
 using namespace std;
 
@@ -35,6 +36,13 @@ struct KeyPickup
     int propIndex = -1;
 };
 
+struct CaveQuizQuestion
+{
+    std::string question;
+    std::array<std::string, 4> options;
+    int correctOption = 0;
+};
+
 struct ClueNote
 {
     std::string title;
@@ -61,6 +69,10 @@ static bool g_notesOpen = false;
 static bool g_caveFinalNoteCollected = false;
 static int g_notesCollectedRun = 0;
 static float g_runElapsedSeconds = 0.0f;
+static bool g_caveQuizActive = false;
+static bool g_caveQuizPassed = false;
+static int g_caveQuizQuestionIndex = 0;
+static std::vector<CaveQuizQuestion> g_caveQuiz;
 
 struct LevelDef
 {
@@ -80,6 +92,35 @@ enum GameState
 static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) {
     g_accessPopup = msg;
     g_accessPopupUntil = SDL_GetTicks() + durationMs;
+}
+
+static void renderCaveQuiz( Engine &engineContext ) {
+    if (!g_caveQuizActive || g_caveQuiz.empty()) return;
+    if (g_caveQuizQuestionIndex < 0 || g_caveQuizQuestionIndex >= (int)g_caveQuiz.size()) return;
+
+    const auto &q = g_caveQuiz[ g_caveQuizQuestionIndex ];
+
+    int panelW = RENDER_W - 140;
+    int panelH = 220;
+    int x = (RENDER_W - panelW) / 2;
+    int y = (RENDER_H - panelH) / 2;
+
+    drawTextBox( engineContext, x, y, panelW, panelH, rgb( 12, 12, 16 ), rgb( 180, 150, 60 ) );
+    std::string header = "WARDEN STATUE TRIAL " + std::to_string( g_caveQuizQuestionIndex + 1 ) + "/" + std::to_string( g_caveQuiz.size() );
+    drawString16x16( engineContext, x + 16, y + 14, header, rgb( 255, 225, 120 ), panelW - 32, 1, 1, false );
+
+    int cy = y + 46;
+    cy = drawWrappedText( engineContext, x + 16, cy, q.question, rgb( 220, 220, 220 ), panelW - 32 );
+    cy += 12;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        std::string line = std::to_string( i + 1 ) + ") " + q.options[ i ];
+        drawString16x16( engineContext, x + 22, cy, line, rgb( 210, 210, 205 ), panelW - 44, 1, 1, false );
+        cy += 24;
+    }
+
+    drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "PRESS 1-4 TO ANSWER   ESC TO CANCEL", rgb( 130, 130, 145 ), 1, 1, 1, false );
 }
 
 static void buildSimpleKeySprite( Image &img, Uint32 keyColor ) {
@@ -196,6 +237,10 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     g_codeEntryBuffer.clear();
     g_notesOpen = false;
     g_caveFinalNoteCollected = false;
+    g_caveQuizActive = false;
+    g_caveQuizPassed = false;
+    g_caveQuizQuestionIndex = 0;
+    g_caveQuiz.clear();
 
     g_keyPickups.clear();
     g_keyPickups.push_back( {"BRONZE KEY", 12.6f, 9.6f, false, addKeyPickupSprite( engineContext, 12.6f, 9.6f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
@@ -214,15 +259,53 @@ static void initMuseumPuzzle( Engine &engineContext ) {
         } );
 }
 
+static void initCaveQuiz() {
+    g_caveQuiz.clear();
+    g_caveQuiz.push_back( {
+        "Which period is generally associated with Rembrandt's The Night Watch?",
+        {"Baroque", "Neoclassical", "Medieval", "Romantic"},
+        0
+        } );
+    g_caveQuiz.push_back( {
+        "Roman portraiture is best known for emphasizing what?",
+        {"Idealized perfection", "Abstract geometry", "Realistic likeness", "Pure symbolism"},
+        2
+        } );
+    g_caveQuiz.push_back( {
+        "Renaissance artists were strongly influenced by the revival of which cultures?",
+        {"Mayan and Aztec", "Greek and Roman", "Norse and Celtic", "Persian and Mughal"},
+        1
+        } );
+}
+
 static void initCaveFinalObjective( Engine &engineContext ) {
     g_clueNotes.clear();
     g_foundNotes.clear();
+    g_clueNotes.push_back( {
+        "Camp Note: Warden Test",
+        "The cave statue asks 3 questions: Baroque, Roman realism, and Renaissance revival.",
+        2.8f, 2.3f, false, addNotePickupSprite( engineContext, 2.8f, 2.3f, "Camp Note: Warden Test" )
+        } );
+    g_clueNotes.push_back( {
+        "Visitor Memo",
+        "Remember: Roman portrait busts focused on truthful features, not idealized beauty.",
+        4.8f, 3.8f, false, addNotePickupSprite( engineContext, 4.8f, 3.8f, "Visitor Memo" )
+        } );
+    g_clueNotes.push_back( {
+        "Archivist Card",
+        "Renaissance is the rebirth of Greek and Roman learning. Keep that for the final statue.",
+        6.2f, 2.1f, false, addNotePickupSprite( engineContext, 6.2f, 2.1f, "Archivist Card" )
+        } );
     g_clueNotes.push_back( {
         "Last Journal Fragment",
         "You are beneath the museum in buried foundation tunnels.\nThe gallery was built over a much older site.",
         8.5f, 5.2f, false, addNotePickupSprite( engineContext, 8.5f, 5.2f, "Last Journal Fragment" )
         } );
     g_caveFinalNoteCollected = false;
+    g_caveQuizActive = false;
+    g_caveQuizPassed = false;
+    g_caveQuizQuestionIndex = 0;
+    initCaveQuiz();
 }
 
 static void clearPuzzleState() {
@@ -237,6 +320,10 @@ static void clearPuzzleState() {
     g_codeEntryLockIndex = -1;
     g_codeEntryBuffer.clear();
     g_notesOpen = false;
+    g_caveQuizActive = false;
+    g_caveQuizPassed = false;
+    g_caveQuizQuestionIndex = 0;
+    g_caveQuiz.clear();
 }
 
 static int findDoorLockIndex( int tx, int ty ) {
@@ -291,7 +378,13 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.propImages.clear();
     engineContext.quads.clear();
     engineContext.benches3D.clear();
-
+	engineContext.hasWallCracks = false;
+    engineContext.hasFloorCracks = false;
+    engineContext.caveMode = false;
+    engineContext.hasFloorPuddles = false;
+    engineContext.hasFloorStains = false;
+    engineContext.hasWallStains = false;
+    engineContext.hasWallOverlay = false;
 
     fs::path folder = level.folder;
     /*
@@ -380,6 +473,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
             box.height = 0.15f; // 55cm tall
             box.angle = 3.14159265f;
 
+            
             // Load textures (or reuse existing images)
             if (!box.sideTexure.loadBMP( (folder / "bench.bmp").string() ))
             {
@@ -461,7 +555,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
 
     // Init objectives
-    mesuemObjectives.setMainObjective( "View All Artworks" );
+    mesuemObjectives.setMainObjective( "Talk to Statue" );
 
     // Dynamically set the total to find based on the loaded artworks
     mesuemObjectives.totalArtworksToFind = engineContext.artworks.size();
@@ -583,6 +677,18 @@ static bool isPlayerNearStatue( Engine const &engineContext ) {
     float tolerance = 1.0f; // 1 meter
     float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
     return (distSq <= tolerance * tolerance);
+}
+
+static bool isPlayerNearCaveStatue( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::CAVE) return false;
+
+    constexpr float statueX = 11.1f;
+    constexpr float statueY = 9.5f;
+    constexpr float tolerance = 1.2f;
+
+    float dx = engineContext.positionX - statueX;
+    float dy = engineContext.positionY - statueY;
+    return (dx * dx + dy * dy) <= (tolerance * tolerance);
 }
 
 void renderStatueChatbox( Engine &engineContext ) {
@@ -1499,7 +1605,17 @@ static void render( Engine &engineContext, float dt ) {
                 Uint32 color = texture.sample( texX, texY );
                 if (!isNearMagenta( color, 120 ))
                 {
-                    putPix( engineContext, sx, sy, color );
+                    float shade = 1.0f;
+                    if (engineContext.caveMode)
+                    {
+                        shade = caveLight( transY );
+                    }
+                    else
+                    {
+                        shade = 1.0f / (1.0f + 0.08f * transY + 0.02f * transY * transY);
+                        shade = std::clamp( shade, 0.18f, 1.0f );
+                    }
+                    putPix( engineContext, sx, sy, shadeCol( color, shade ) );
                 }
             }
         }
@@ -1654,6 +1770,11 @@ static void render( Engine &engineContext, float dt ) {
         drawString16x16( engineContext, 10, RENDER_H - 40, "[N] Notes", rgb( 200, 200, 120 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
+    if (engineContext.currentLevel == Levels::CAVE && !g_caveQuizPassed && !g_caveQuizActive)
+    {
+        drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "CAMP LOGS HOLD CLUES FOR THE WARDEN STATUE", rgb( 170, 180, 210 ), 1, 1, 1, false );
+    }
+
     int nearbyKey = getNearbyKeyPickup( engineContext );
     if (nearbyKey >= 0 && !g_codeEntryActive)
     {
@@ -1664,6 +1785,12 @@ static void render( Engine &engineContext, float dt ) {
     if (nearbyNote >= 0 && !g_codeEntryActive)
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] COLLECT NOTE", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (engineContext.currentLevel == Levels::CAVE && isPlayerNearCaveStatue( engineContext ) && !g_caveQuizActive)
+    {
+        std::string statuePrompt = g_caveQuizPassed ? "WARDEN: PATH OPEN" : "[E] ANSWER WARDEN QUESTIONS";
+        drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, statuePrompt, rgb( 210, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int doorTx = 0, doorTy = 0;
@@ -1714,6 +1841,7 @@ static void render( Engine &engineContext, float dt ) {
     renderAccessPopup( engineContext );
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
+    renderCaveQuiz( engineContext );
 
     
 }
@@ -2002,6 +2130,43 @@ int main( int argc, char **argv ) {
                         continue;
                     }
 
+                    if (g_caveQuizActive)
+                    {
+                        if (ev.key.key == SDLK_ESCAPE)
+                        {
+                            g_caveQuizActive = false;
+                        }
+                        else if (ev.key.key >= SDLK_1 && ev.key.key <= SDLK_4)
+                        {
+                            int selected = (int)(ev.key.key - SDLK_1);
+                            if (!g_caveQuiz.empty() && g_caveQuizQuestionIndex >= 0 && g_caveQuizQuestionIndex < (int)g_caveQuiz.size())
+                            {
+                                const auto &q = g_caveQuiz[ g_caveQuizQuestionIndex ];
+                                if (selected == q.correctOption)
+                                {
+                                    g_caveQuizQuestionIndex++;
+                                    if (g_caveQuizQuestionIndex >= (int)g_caveQuiz.size())
+                                    {
+                                        g_caveQuizPassed = true;
+                                        g_caveQuizActive = false;
+                                        showAccessPopup( "The warden statue steps aside. You may proceed.", 2600 );
+                                        currentState = STATE_ENDING;
+                                    }
+                                    else
+                                    {
+                                        showAccessPopup( "Correct. Next question.", 1200 );
+                                    }
+                                }
+                                else
+                                {
+                                    playFailedDoorOpen( levels[ engineContext.currentLevel ].folder );
+                                    showAccessPopup( "Incorrect. Check cave notes in the camp area.", 2200 );
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     if (g_codeEntryActive)
                     {
                         if (ev.key.key >= SDLK_0 && ev.key.key <= SDLK_9 && g_codeEntryBuffer.size() < 4)
@@ -2094,7 +2259,25 @@ int main( int argc, char **argv ) {
                             if (engineContext.currentLevel == Levels::CAVE)
                             {
                                 g_caveFinalNoteCollected = true;
+                                showAccessPopup( "Journal fragment recovered. Return to the warden statue.", 2400 );
+                            }
+                            continue;
+                        }
+
+                        if (engineContext.currentLevel == Levels::CAVE && isPlayerNearCaveStatue( engineContext ))
+                        {
+                            if (!g_caveFinalNoteCollected)
+                            {
+                                showAccessPopup( "The statue whispers: Bring me the final journal fragment.", 2400 );
+                            }
+                            else if (g_caveQuizPassed)
+                            {
                                 currentState = STATE_ENDING;
+                            }
+                            else
+                            {
+                                g_caveQuizQuestionIndex = 0;
+                                g_caveQuizActive = true;
                             }
                             continue;
                         }
@@ -2242,7 +2425,7 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (ks[ SDL_SCANCODE_LEFT ])
             {

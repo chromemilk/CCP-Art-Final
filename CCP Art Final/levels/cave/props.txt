@@ -1,0 +1,1 @@
+STATUE 11.1481 9.50316 statue.bmp 1
