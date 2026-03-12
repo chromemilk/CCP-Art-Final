@@ -113,8 +113,8 @@ void playFootstep( const std::string &baseMusicDirectory ) {
 
 	std::cout << "Trying to play footstep sound: " << soundPath << std::endl;
 
-
-	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME | SND_NOSTOP );
+	// Replace with SND_NOSTOP if no work
+	PlaySoundA( soundPath.c_str(), NULL, SND_ASYNC | SND_FILENAME );
 }
 
 void playDoorCreak( const std::string &baseMusicDirectory ) {
