@@ -57,4 +57,191 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <Media Include="levels\museum\A_Night_To_Remember_Laufey.mp3" />
+    <Media Include="levels\museum\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\failed_door_open.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\I_Wish_You_Love_Laufey.mp3" />
+    <Media Include="levels\museum\Misty_Laufey.mp3" />
+    <Media Include="levels\museum\Nocture_Interlude_Laufey.mp3" />
+    <Media Include="levels\museum\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\pickup.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Creepy_Cave_Noise.mp3" />
+    <Media Include="levels\cave\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="levels\museum\apollo.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\bench.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\BigFour.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\bulls.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\centaur.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\coins.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\corinthian_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\cup.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\door.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\doric_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\feline.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ionic_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\mastaba.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\plant.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ramses.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\rope.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\statue.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\stonehenge.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\trashcan.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase1.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase2.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase3.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_cracks.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_puddles.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_stains.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\statue.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_cracks.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_darkening.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_stain.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\door.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="levels\museum\artworks.txt" />
+    <Text Include="levels\museum\artworksVerbose.txt" />
+    <Text Include="levels\museum\columns.txt" />
+    <Text Include="levels\museum\map.txt" />
+    <Text Include="levels\museum\props.txt" />
+    <Text Include="levels\cave\map.txt" />
+    <Text Include="levels\cave\props.txt" />
+    <Text Include="levels\transition\map.txt" />
+  </ItemGroup>
 </Project>

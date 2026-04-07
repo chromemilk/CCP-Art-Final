@@ -145,6 +145,81 @@
     <ClInclude Include="Settings.h" />
     <ClInclude Include="WalkBot.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Media Include="levels\cave\Creepy_Cave_Noise.mp3" />
+    <Media Include="levels\cave\door_creak.wav" />
+    <Media Include="levels\cave\paper_rustle.wav" />
+    <Media Include="levels\cave\Paper_Rustle_01.wav" />
+    <Media Include="levels\cave\Paper_Rustle_02.wav" />
+    <Media Include="levels\cave\Sound 01.wav" />
+    <Media Include="levels\museum\A_Night_To_Remember_Laufey.mp3" />
+    <Media Include="levels\museum\door_creak.wav" />
+    <Media Include="levels\museum\failed_door_open.wav" />
+    <Media Include="levels\museum\I_Wish_You_Love_Laufey.mp3" />
+    <Media Include="levels\museum\Misty_Laufey.mp3" />
+    <Media Include="levels\museum\Nocture_Interlude_Laufey.mp3" />
+    <Media Include="levels\museum\paper_rustle.wav" />
+    <Media Include="levels\museum\Paper_Rustle_01.wav" />
+    <Media Include="levels\museum\Paper_Rustle_02.wav" />
+    <Media Include="levels\museum\pickup.wav" />
+    <Media Include="levels\museum\Sound 01.wav" />
+    <Media Include="levels\transition\door_creak.wav" />
+    <Media Include="levels\transition\paper_rustle.wav" />
+    <Media Include="levels\transition\Paper_Rustle_01.wav" />
+    <Media Include="levels\transition\Paper_Rustle_02.wav" />
+    <Media Include="levels\transition\Sound 01.wav" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="levels\cave\ceiling.bmp" />
+    <Image Include="levels\cave\floor.bmp" />
+    <Image Include="levels\cave\floor_cracks.bmp" />
+    <Image Include="levels\cave\floor_puddles.bmp" />
+    <Image Include="levels\cave\floor_stains.bmp" />
+    <Image Include="levels\cave\statue.bmp" />
+    <Image Include="levels\cave\wall.bmp" />
+    <Image Include="levels\cave\wall_cracks.bmp" />
+    <Image Include="levels\cave\wall_darkening.bmp" />
+    <Image Include="levels\cave\wall_stain.bmp" />
+    <Image Include="levels\museum\apollo.bmp" />
+    <Image Include="levels\museum\bench.bmp" />
+    <Image Include="levels\museum\BigFour.bmp" />
+    <Image Include="levels\museum\bulls.bmp" />
+    <Image Include="levels\museum\ceiling.bmp" />
+    <Image Include="levels\museum\centaur.bmp" />
+    <Image Include="levels\museum\coins.bmp" />
+    <Image Include="levels\museum\corinthian_surface.bmp" />
+    <Image Include="levels\museum\cup.bmp" />
+    <Image Include="levels\museum\door.bmp" />
+    <Image Include="levels\museum\doric_surface.bmp" />
+    <Image Include="levels\museum\feline.bmp" />
+    <Image Include="levels\museum\floor.bmp" />
+    <Image Include="levels\museum\ionic_surface.bmp" />
+    <Image Include="levels\museum\mastaba.bmp" />
+    <Image Include="levels\museum\plant.bmp" />
+    <Image Include="levels\museum\ramses.bmp" />
+    <Image Include="levels\museum\rope.bmp" />
+    <Image Include="levels\museum\statue.bmp" />
+    <Image Include="levels\museum\stonehenge.bmp" />
+    <Image Include="levels\museum\trashcan.bmp" />
+    <Image Include="levels\museum\vase1.bmp" />
+    <Image Include="levels\museum\vase2.bmp" />
+    <Image Include="levels\museum\vase3.bmp" />
+    <Image Include="levels\museum\wall.bmp" />
+    <Image Include="levels\transition\ceiling.bmp" />
+    <Image Include="levels\transition\door.bmp" />
+    <Image Include="levels\transition\floor.bmp" />
+    <Image Include="levels\transition\wall.bmp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="levels\cave\map.txt" />
+    <Text Include="levels\cave\props.txt" />
+    <Text Include="levels\museum\artworks.txt" />
+    <Text Include="levels\museum\artworksVerbose.txt" />
+    <Text Include="levels\museum\columns.txt" />
+    <Text Include="levels\museum\map.txt" />
+    <Text Include="levels\museum\props.txt" />
+    <Text Include="levels\transition\map.txt" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
