@@ -53,11 +53,34 @@ struct ClueNote
     int propIndex = -1;
 };
 
+struct SafePuzzle
+{
+    std::string safeName;
+    std::string code;
+    float x = 0.f;
+    float y = 0.f;
+    bool solved = false;
+    std::string rewardKey;
+};
+
+struct SymbolPuzzle
+{
+    std::string name;
+    int targetCombo[3] = {0,0,0}; // 0-based indices for symbols
+    float x = 0.f;
+    float y = 0.f;
+    bool solved = false;
+    std::string rewardKey;
+};
+
 static std::vector<RoomLock> g_roomLocks;
 static std::vector<KeyPickup> g_keyPickups;
 static std::vector<ClueNote> g_clueNotes;
+static std::vector<SafePuzzle> g_safes;
+static std::vector<SymbolPuzzle> g_symbols;
 static std::unordered_set<std::string> g_playerKeys;
 static std::vector<int> g_foundNotes;
+
 
 static std::string g_accessPopup;
 static Uint32 g_accessPopupUntil = 0;
@@ -65,6 +88,10 @@ static Uint32 g_accessPopupUntil = 0;
 static bool g_codeEntryActive = false;
 static int g_codeEntryLockIndex = -1;
 static std::string g_codeEntryBuffer;
+static int g_safeEntryIndex = -1;
+static int g_symbolEntryIndex = -1;
+static int g_symbolState[3] = {0,0,0};
+static int g_symbolFocus = 0;
 static bool g_notesOpen = false;
 static bool g_caveFinalNoteCollected = false;
 static int g_notesCollectedRun = 0;
@@ -73,14 +100,54 @@ static bool g_caveQuizActive = false;
 static bool g_caveQuizPassed = false;
 static int g_caveQuizQuestionIndex = 0;
 static std::vector<CaveQuizQuestion> g_caveQuiz;
+static bool g_museumPuzzleInitialized = false;
+
+static float g_caveTimerSeconds = 120.0f;
+static bool g_caveTimerActive = false;
 
 struct LevelDef
 {
     string name;
     string folder;
+    string mapFile = "map.txt";
     float spawnX = 2.0f, spawnY = 9.5f, spawnDirDeg = 0.f;
     int levelId = 0;
+    Uint32 ambianceTint = rgb( 255, 255, 255 );
+    float ambianceMul = 1.0f;
+    bool isMuseumFloor = false;
+    std::string objectiveLabel;
 };
+
+enum class InteractionAnimType
+{
+    NONE,
+    ITEM_PICKUP,
+    KEY_USE,
+    NOTE_COLLECT,
+    DOOR_USE
+};
+
+struct LevelTransitionState
+{
+    bool active = false;
+    bool switched = false;
+    float t = 0.0f;
+    float duration = 1.05f;
+    Levels targetLevel = Levels::MUSEUM;
+};
+
+struct InteractionAnimState
+{
+    bool active = false;
+    float t = 0.0f;
+    float duration = 0.55f;
+    InteractionAnimType type = InteractionAnimType::NONE;
+    std::string label;
+};
+
+static LevelTransitionState g_levelTransition;
+static InteractionAnimState g_interactionAnim;
+static bool g_perfLowMode = false;
 
 enum GameState
 {
@@ -92,6 +159,33 @@ enum GameState
 static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) {
     g_accessPopup = msg;
     g_accessPopupUntil = SDL_GetTicks() + durationMs;
+}
+
+static bool isPlayerNearPoint( Engine const &engineContext, float px, float py, float tolerance = 1.0f ) {
+    float dx = engineContext.positionX - px;
+    float dy = engineContext.positionY - py;
+    return (dx * dx + dy * dy) <= (tolerance * tolerance);
+}
+
+static bool isMuseumLikeLevel( Levels level ) {
+    return level == Levels::MUSEUM || level == Levels::MUSEUM_UPPER;
+}
+
+static void beginLevelTransition( Levels target, float seconds = 1.05f ) {
+    g_levelTransition.active = true;
+    g_levelTransition.switched = false;
+    g_levelTransition.t = 0.0f;
+    g_levelTransition.duration = std::max( 0.2f, seconds );
+    g_levelTransition.targetLevel = target;
+}
+
+static void triggerInteractionAnim( InteractionAnimType type, const std::string &label, float seconds = 0.55f ) {
+    constexpr float kAnimDurationScale = 1.28f;
+    g_interactionAnim.active = true;
+    g_interactionAnim.t = 0.0f;
+    g_interactionAnim.duration = std::max( 0.18f, seconds * kAnimDurationScale );
+    g_interactionAnim.type = type;
+    g_interactionAnim.label = label;
 }
 
 static void renderCaveQuiz( Engine &engineContext ) {
@@ -121,6 +215,101 @@ static void renderCaveQuiz( Engine &engineContext ) {
     }
 
     drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "PRESS 1-4 TO ANSWER   ESC TO CANCEL", rgb( 130, 130, 145 ), 1, 1, 1, false );
+}
+
+static void renderInteractionAnimation( Engine &engineContext ) {
+    if (!g_interactionAnim.active) return;
+
+    float p = std::clamp( g_interactionAnim.t / std::max( 0.001f, g_interactionAnim.duration ), 0.0f, 1.0f );
+    int w = 520;
+    int h = 126;
+    int camShiftX = int( std::sin( p * 3.14159265f ) * 14.0f );
+    int x = (RENDER_W - w) / 2 + camShiftX;
+    int y = RENDER_H - h - 28;
+
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), 0.18f );
+    drawTextBox( engineContext, x, y, w, h, rgb( 8, 8, 12 ), rgb( 165, 138, 70 ) );
+    drawString16x16( engineContext, x + 16, y + 12, g_interactionAnim.label, rgb( 235, 220, 170 ), w - 32, 1, 1, false );
+
+    int stageY = y + 54;
+    int stageH = 52;
+    drawTextBox( engineContext, x + 14, stageY, w - 28, stageH, rgb( 12, 12, 16 ), rgb( 80, 80, 95 ) );
+
+    if (g_interactionAnim.type == InteractionAnimType::KEY_USE)
+    {
+        int lockX = x + w - 118;
+        int lockY = stageY + 12;
+        drawTextBox( engineContext, lockX, lockY, 56, 28, rgb( 50, 44, 34 ), rgb( 170, 148, 96 ) );
+        drawTextBox( engineContext, lockX + 18, lockY + 7, 20, 14, rgb( 18, 18, 18 ), rgb( 130, 110, 70 ) );
+
+        float keyMotion = std::clamp( p * 0.85f, 0.0f, 1.0f );
+        int keyStartX = x + 34;
+        int keyTargetX = lockX + 10;
+        int keyX = keyStartX + int( (keyTargetX - keyStartX) * keyMotion );
+        int keyY = stageY + 26;
+
+        Uint32 keyCol = rgb( 210, 176, 88 );
+        for (int yy = -5; yy <= 5; ++yy)
+        {
+            for (int xx = -5; xx <= 5; ++xx)
+            {
+                if (xx * xx + yy * yy <= 25) putPix( engineContext, keyX + xx, keyY + yy, keyCol );
+            }
+        }
+        for (int xx = 6; xx <= 30; ++xx) putPix( engineContext, keyX + xx, keyY, keyCol );
+        putPix( engineContext, keyX + 26, keyY + 1, keyCol );
+        putPix( engineContext, keyX + 27, keyY + 1, keyCol );
+        putPix( engineContext, keyX + 26, keyY + 2, keyCol );
+
+        if (p > 0.72f)
+        {
+            drawStringTinyScaled( engineContext, x + w - 176, y + h - 16, "TURNING...", rgb( 220, 190, 120 ), 1, 1, 1, false );
+        }
+    }
+    else if (g_interactionAnim.type == InteractionAnimType::NOTE_COLLECT)
+    {
+        int nx = x + 40;
+        int ny = stageY + 6;
+        drawTextBox( engineContext, nx, ny, 72, 40, rgb( 210, 198, 164 ), rgb( 120, 96, 64 ) );
+        drawStringTinyScaled( engineContext, nx + 10, ny + 12, "NOTE", rgb( 70, 55, 36 ), 1, 1, 1, false );
+    }
+    else if (g_interactionAnim.type == InteractionAnimType::ITEM_PICKUP)
+    {
+        int cx = x + 70;
+        int cy = stageY + 26;
+        for (int yy = -8; yy <= 8; ++yy)
+        {
+            for (int xx = -8; xx <= 8; ++xx)
+            {
+                if (xx * xx + yy * yy <= 64) putPix( engineContext, cx + xx, cy + yy, rgb( 160, 200, 120 ) );
+            }
+        }
+        drawStringTinyScaled( engineContext, x + 110, stageY + 22, "ACQUIRED", rgb( 180, 220, 145 ), 1, 1, 1, false );
+    }
+    else
+    {
+        int barX = x + 24;
+        int barY = stageY + 18;
+        int barW = w - 48;
+        int barH = 16;
+        drawTextBox( engineContext, barX, barY, barW, barH, rgb( 12, 12, 12 ), rgb( 90, 90, 105 ) );
+        int fill = (int)((barW - 2) * p);
+        for (int yy = barY + 1; yy < barY + barH - 1; ++yy)
+        {
+            for (int xx = barX + 1; xx < barX + 1 + fill; ++xx)
+            {
+                putPix( engineContext, xx, yy, rgb( 195, 165, 85 ) );
+            }
+        }
+    }
+}
+
+static void renderLevelTransitionOverlay( Engine &engineContext ) {
+    if (!g_levelTransition.active) return;
+
+    float p = std::clamp( g_levelTransition.t / std::max( 0.001f, g_levelTransition.duration ), 0.0f, 1.0f );
+    float fade = (p < 0.5f) ? (p * 2.0f) : ((1.0f - p) * 2.0f);
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), std::clamp( 0.95f - fade * 0.65f, 0.2f, 0.95f ) );
 }
 
 static void buildSimpleKeySprite( Image &img, Uint32 keyColor ) {
@@ -220,12 +409,109 @@ static int addNotePickupSprite( Engine &engineContext, float x, float y, const s
     return propIndex;
 }
 
+static void buildSafeSprite( Image &img ) {
+    img.width = 32;
+    img.height = 32;
+    img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
+
+    Uint32 metal = rgb( 100, 105, 110 );
+    Uint32 dark = rgb( 50, 50, 55 );
+    Uint32 dial = rgb( 180, 190, 200 );
+
+    auto p = [&]( int x, int y, Uint32 c ) {
+        if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height) img.pixels[ y * img.width + x ] = c;
+    };
+
+    for (int y = 4; y <= 28; ++y)
+    {
+        for (int x = 4; x <= 28; ++x)
+        {
+            if (x == 4 || x == 28 || y == 4 || y == 28) p( x, y, dark );
+            else p( x, y, metal );
+        }
+    }
+    // Dial
+    for (int y = 14; y <= 18; ++y)
+        for (int x = 14; x <= 18; ++x)
+            p( x, y, dial );
+}
+
+static int addSafeSprite( Engine &engineContext, float x, float y, const std::string &name ) {
+    Image img;
+    buildSafeSprite( img );
+    int texId = (int)engineContext.propImages.size();
+    engineContext.propImages.push_back( std::move( img ) );
+
+    Prop prop;
+    prop.x = x;
+    prop.y = y;
+    prop.kind = "SAFE";
+    prop.filename = name;
+    prop.textureID = texId;
+    prop.scale = 0.65f;
+    int propIndex = (int)engineContext.props.size();
+    engineContext.props.push_back( std::move( prop ) );
+    return propIndex;
+}
+
+static void buildPedestalSprite( Image &img ) {
+    img.width = 30;
+    img.height = 40;
+    img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
+
+    Uint32 stone = rgb( 150, 145, 135 );
+    Uint32 base = rgb( 100, 95, 85 );
+
+    auto p = [&]( int x, int y, Uint32 c ) {
+        if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height) img.pixels[ y * img.width + x ] = c;
+    };
+
+    // Base
+    for (int y = 32; y <= 38; ++y)
+        for (int x = 2; x <= 28; ++x)
+            p( x, y, base );
+
+    // Pillar
+    for (int y = 8; y <= 31; ++y)
+        for (int x = 8; x <= 22; ++x)
+            p( x, y, stone );
+
+    // Top
+    for (int y = 2; y <= 7; ++y)
+        for (int x = 4; x <= 26; ++x)
+            p( x, y, base );
+}
+
+static int addPedestalSprite( Engine &engineContext, float x, float y, const std::string &name ) {
+    Image img;
+    buildPedestalSprite( img );
+    int texId = (int)engineContext.propImages.size();
+    engineContext.propImages.push_back( std::move( img ) );
+
+    Prop prop;
+    prop.x = x;
+    prop.y = y;
+    prop.kind = "PEDESTAL";
+    prop.filename = name;
+    prop.textureID = texId;
+    prop.scale = 0.85f;
+    int propIndex = (int)engineContext.props.size();
+    engineContext.props.push_back( std::move( prop ) );
+    return propIndex;
+}
+
 static void initMuseumPuzzle( Engine &engineContext ) {
     g_roomLocks = {
+        // Doors blocking the main 4 wings:
         {6, 9, "West Wing", LockType::KEY, "BRONZE KEY", false},
         {10, 6, "North Wing", LockType::CODE, "0300", false},
-        {16, 9, "East Wing", LockType::KEY, "SILVER KEY", false},
-        {10, 12, "South Wing", LockType::CODE, "1642", false}
+        {16, 9, "East Wing", LockType::KEY, "GOLD KEY", false},
+        {10, 12, "South Wing", LockType::CODE, "7391", false},
+        // Doors blocking the new 4 corner rooms:
+        {5, 2, "NW Archives", LockType::KEY, "BRONZE KEY", false}, // From NW
+        {14, 3, "NE Vault", LockType::KEY, "IRON KEY", false}, // From NW
+        {5, 15, "SW Crypt", LockType::KEY, "SILVER KEY", false}, // From SW
+        {17, 13, "SE Office", LockType::KEY, "BRONZE KEY", false} // From East
     };
 
     g_playerKeys.clear();
@@ -234,29 +520,80 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     g_accessPopupUntil = 0;
     g_codeEntryActive = false;
     g_codeEntryLockIndex = -1;
+    g_safeEntryIndex = -1;
+    g_symbolEntryIndex = -1;
     g_codeEntryBuffer.clear();
     g_notesOpen = false;
     g_caveFinalNoteCollected = false;
+    g_caveTimerActive = false;
     g_caveQuizActive = false;
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
 
     g_keyPickups.clear();
-    g_keyPickups.push_back( {"BRONZE KEY", 12.6f, 9.6f, false, addKeyPickupSprite( engineContext, 12.6f, 9.6f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
-    g_keyPickups.push_back( {"SILVER KEY", 10.3f, 3.2f, false, addKeyPickupSprite( engineContext, 10.3f, 3.2f, "SILVER KEY", rgb( 190, 190, 205 ) )} );
+    // Bronze Key in main atrium start
+    g_keyPickups.push_back( {"BRONZE KEY", 14.5f, 11.5f, false, addKeyPickupSprite( engineContext, 14.5f, 11.5f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
+    // Silver Key in North Wing
+    g_keyPickups.push_back( {"SILVER KEY", 10.5f, 3.5f, false, addKeyPickupSprite( engineContext, 10.5f, 3.5f, "SILVER KEY", rgb( 190, 190, 200 ) )} );
+    // Fallback Gold Key in North Wing so progression cannot dead-end
+   // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
+
+    g_safes.clear();
+    // Safe in SE Office
+    g_safes.push_back({"Director's Safe", "2026", 17.5f, 15.5f, false, "GOLD KEY"});
+    addSafeSprite( engineContext, 17.5f, 15.5f, "Director's Safe" );
+
+    g_symbols.clear();
+    // Pedestal in NW Archives
+    g_symbols.push_back({"Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY"}); // WOLF(1) SERPENT(3) OWL(0)
+    addPedestalSprite( engineContext, 3.5f, 3.5f, "Ancient Pedestal" );
 
     g_clueNotes.clear();
+    // Atrium note
     g_clueNotes.push_back( {
-        "West Wing Curator Note",
-        "The Roman gallery clue points to the North lock code. The rule of four guides the access",
-        4.5f, 9.1f, false, addNotePickupSprite( engineContext, 4.5f, 9.1f, "West Wing Curator Note" )
-        } );
+        "Janitor's Log",
+        "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
+        15.5f, 11.5f, false, addNotePickupSprite( engineContext, 15.5f, 11.5f, "Janitor's Log" )
+    } );
+    // West Wing Note
     g_clueNotes.push_back( {
-        "East Wing Archivist Note",
-        "The final South lock code is the year of the militia",
-        18.5f, 9.0f, false, addNotePickupSprite( engineContext, 18.5f, 9.0f, "East Wing Archivist Note" )
-        } );
+        "Archivist Notebook",
+        "The NW Archives pedestal requires the predator, the deceiver, and the wise one.",
+        3.5f, 8.5f, false, addNotePickupSprite( engineContext, 3.5f, 8.5f, "Archivist Notebook" )
+    } );
+    // West Wing progression note (guarantees early North Wing access)
+    g_clueNotes.push_back( {
+        "Security Log",
+        "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
+        4.5f, 10.5f, false, addNotePickupSprite( engineContext, 4.5f, 10.5f, "Security Log" )
+    } );
+    // SW Crypt Note
+    g_clueNotes.push_back( {
+        "Director Memo",
+        "The SE Office safe code is current year. It contains the Gold Key.",
+        3.5f, 15.5f, false, addNotePickupSprite( engineContext, 3.5f, 15.5f, "Director Memo" )
+    } );
+    // East Wing Note
+    g_clueNotes.push_back( {
+        "Final Code Clue",
+        "The South Wing emergency code is 7391.",
+        18.5f, 9.5f, false, addNotePickupSprite( engineContext, 18.5f, 9.5f, "Final Code Clue" )
+    } );
+    // North Wing fallback note so South code is always obtainable
+    g_clueNotes.push_back( {
+        "Emergency Override Slip",
+        "If wing routing fails, South Wing emergency code is 7391.",
+        8.5f, 4.5f, false, addNotePickupSprite( engineContext, 8.5f, 4.5f, "Emergency Override Slip" )
+    } );
+    // NE Vault lore note so the room is still meaningful after progression rebalance
+    g_clueNotes.push_back( {
+        "Vault Ledger",
+        "Iron access approved. Reserve artifacts moved to East Wing transfer corridor.",
+        17.5f, 2.5f, false, addNotePickupSprite( engineContext, 17.5f, 2.5f, "Vault Ledger" )
+    } );
+
+    g_museumPuzzleInitialized = true;
 }
 
 static void initCaveQuiz() {
@@ -309,21 +646,27 @@ static void initCaveFinalObjective( Engine &engineContext ) {
 }
 
 static void clearPuzzleState() {
-    g_roomLocks.clear();
-    g_keyPickups.clear();
-    g_clueNotes.clear();
-    g_playerKeys.clear();
-    g_foundNotes.clear();
-    g_accessPopup.clear();
-    g_accessPopupUntil = 0;
-    g_codeEntryActive = false;
-    g_codeEntryLockIndex = -1;
-    g_codeEntryBuffer.clear();
+g_roomLocks.clear();
+g_keyPickups.clear();
+g_clueNotes.clear();
+g_safes.clear();
+g_symbols.clear();
+g_playerKeys.clear();
+g_foundNotes.clear();
+g_accessPopup.clear();
+g_accessPopupUntil = 0;
+g_codeEntryActive = false;
+g_codeEntryLockIndex = -1;
+g_safeEntryIndex = -1;
+g_symbolEntryIndex = -1;
+g_codeEntryBuffer.clear();
     g_notesOpen = false;
     g_caveQuizActive = false;
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
+    g_museumPuzzleInitialized = false;
+    g_caveTimerActive = false;
 }
 
 static int findDoorLockIndex( int tx, int ty ) {
@@ -363,6 +706,32 @@ static int getNearbyClueNote( Engine const &engineContext, float radius = 0.9f )
         if (n.collected) continue;
         float dx = engineContext.positionX - n.x;
         float dy = engineContext.positionY - n.y;
+        if (dx * dx + dy * dy <= radiusSq) return i;
+    }
+    return -1;
+}
+
+static int getNearbySafe( Engine const &engineContext, float radius = 1.6f ) {
+    float radiusSq = radius * radius;
+    for (int i = 0; i < (int)g_safes.size(); ++i)
+    {
+        const auto &s = g_safes[ i ];
+        if (s.solved) continue;
+        float dx = engineContext.positionX - s.x;
+        float dy = engineContext.positionY - s.y;
+        if (dx * dx + dy * dy <= radiusSq) return i;
+    }
+    return -1;
+}
+
+static int getNearbySymbol( Engine const &engineContext, float radius = 1.6f ) {
+    float radiusSq = radius * radius;
+    for (int i = 0; i < (int)g_symbols.size(); ++i)
+    {
+        const auto &s = g_symbols[ i ];
+        if (s.solved) continue;
+        float dx = engineContext.positionX - s.x;
+        float dy = engineContext.positionY - s.y;
         if (dx * dx + dy * dy <= radiusSq) return i;
     }
     return -1;
@@ -415,8 +784,15 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     */
   
 
+    engineContext.ambianceTint = level.ambianceTint;
+    engineContext.ambianceMul = level.ambianceMul;
+    engineContext.indoorShadeLinear = level.isMuseumFloor ? 0.08f : 0.10f;
+    engineContext.indoorShadeQuadratic = level.isMuseumFloor ? 0.02f : 0.03f;
+    engineContext.indoorShadeMin = level.isMuseumFloor ? 0.02f : 0.04f;
+
+    fs::path mapPath = level.mapFile.empty() ? (folder / "map.txt") : (folder / level.mapFile);
     // Map (1=wall, D=door)
-    if (!loadMap( (folder / "map.txt").string(), engineContext.map )) return false;
+    if (!loadMap( mapPath.string(), engineContext.map )) return false;
 
     auto loadOrFallback = [&]( const fs::path &path, Image &img, Uint32 fill ) {
         if (!img.loadBMP( path.string() ))
@@ -447,8 +823,13 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     }
 
 
-    if (level.levelId == Levels::MUSEUM)
+    if (isMuseumLikeLevel( (Levels)level.levelId ))
     {
+        bool museumFreshStart = !g_museumPuzzleInitialized;
+        if (!g_museumPuzzleInitialized)
+        {
+            initMuseumPuzzle( engineContext );
+        }
 
 		loadColumns( (folder / "columns.txt").string(), engineContext );
 
@@ -464,7 +845,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
                 loadImageOrFallback( ip.string(), engineContext.artImages[ i ], rgb( 220, 220, 220 ) );
             }
         }
-
+        /*
         {
             BoxProp box;
             box.centerX = 2.6f; box.centerY = 2.0f;
@@ -490,7 +871,13 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
             engineContext.benches3D.push_back( std::move( box ) );
 
         }
-        initMuseumPuzzle( engineContext );
+        */
+
+        if (museumFreshStart)
+        {
+            mesuemObjectives.viewedArtworks.clear();
+            mesuemObjectives.totalArtworksToFind = (int)engineContext.artworks.size();
+        }
     }
     else
     {
@@ -498,6 +885,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         if (level.levelId == Levels::CAVE)
         {
             initCaveFinalObjective( engineContext );
+            g_caveTimerActive = true;
+            g_caveTimerSeconds = 120.0f;
         }
     }
 
@@ -554,13 +943,18 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.yaw = level.spawnDirDeg;
 
 
-    // Init objectives
-    mesuemObjectives.setMainObjective( "Talk to Statue" );
+    if (!level.objectiveLabel.empty())
+    {
+        mesuemObjectives.setMainObjective( level.objectiveLabel );
+    }
 
-    // Dynamically set the total to find based on the loaded artworks
-    mesuemObjectives.totalArtworksToFind = engineContext.artworks.size();
-
-    mesuemObjectives.viewedArtworks.clear();
+    if (isMuseumLikeLevel( (Levels)level.levelId ))
+    {
+        if (mesuemObjectives.totalArtworksToFind <= 0)
+        {
+            mesuemObjectives.totalArtworksToFind = (int)engineContext.artworks.size();
+        }
+    }
 
     // Load the current levels' music track
     playMusicTrack( folder.string(), engineContext.currentLevel);
@@ -965,7 +1359,7 @@ void renderObjectives( Engine &engineContext ) {
     // Draw main box
     drawTextBox( engineContext, x, y, width, height, colBg, colBorder );
 
-    std::string header = "GALLERY TOUR";
+    std::string header = "Progress";
     drawString16x16( engineContext, x + 10, y + 8, header, colBorder, width, 1, 1, false );
 
     // Draw Progress Bar outline
@@ -989,6 +1383,22 @@ void renderObjectives( Engine &engineContext ) {
     // Progress Text
     std::string progText = std::to_string( mesuemObjectives.viewedArtworks.size() ) + "/" + std::to_string( mesuemObjectives.totalArtworksToFind );
     drawStringTinyScaled( engineContext, barX + barWidth - 30, barY - 12, progText, colText, 1 );
+}
+
+static void renderCaveHUD( Engine &engineContext ) {
+    if (!g_caveTimerActive || engineContext.currentLevel != Levels::CAVE || g_caveQuizPassed) return;
+
+    int w = 180;
+    int h = 40;
+    int x = RENDER_W - w - 10;
+    int y = 10;
+    drawTextBox( engineContext, x, y, w, h, rgb( 20, 10, 10 ), rgb( 180, 50, 50 ) );
+
+    int mins = (int)g_caveTimerSeconds / 60;
+    int secs = (int)g_caveTimerSeconds % 60;
+    char buf[ 32 ];
+    snprintf( buf, sizeof( buf ), "OXYGEN %02d:%02d", mins, secs );
+    drawString16x16( engineContext, x + 12, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
 }
 
 static void renderAccessPopup( Engine &engineContext ) {
@@ -1025,6 +1435,51 @@ static void renderCodeEntry( Engine &engineContext ) {
     drawTextBox( engineContext, x + 16, y + 65, w - 32, 34, rgb( 0, 0, 0 ), rgb( 90, 90, 110 ) );
     drawString16x16( engineContext, x + 30, y + 74, g_codeEntryBuffer.empty() ? "----" : g_codeEntryBuffer, rgb( 220, 220, 230 ), w - 60, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 16, y + 112, "TYPE 4 DIGITS, ENTER TO CONFIRM, ESC TO CANCEL", rgb( 120, 120, 140 ), 1, 1, 1, false );
+}
+
+static void renderSafeEntry( Engine &engineContext ) {
+    if (!g_codeEntryActive || g_safeEntryIndex < 0 || g_safeEntryIndex >= (int)g_safes.size()) return;
+
+    const SafePuzzle &safe = g_safes[ g_safeEntryIndex ];
+    int w = 380;
+    int h = 160;
+    int x = (RENDER_W - w) / 2;
+    int y = (RENDER_H - h) / 2;
+    drawTextBox( engineContext, x, y, w, h, rgb( 15, 10, 10 ), rgb( 150, 150, 150 ) );
+
+    drawString16x16( engineContext, x + 16, y + 14, "DIAL SAFE CODE", rgb( 210, 210, 210 ), w - 32, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 42, safe.safeName, rgb( 170, 170, 185 ), 2, 1, 1, false );
+    drawTextBox( engineContext, x + 16, y + 65, w - 32, 34, rgb( 0, 0, 0 ), rgb( 70, 70, 70 ) );
+    drawString16x16( engineContext, x + 30, y + 74, g_codeEntryBuffer.empty() ? "----" : g_codeEntryBuffer, rgb( 220, 220, 230 ), w - 60, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 120, "INPUT 4 DIGITS, ENTER CONFIRM, ESC CANCEL", rgb( 120, 120, 140 ), 1, 1, 1, false );
+}
+
+static void renderSymbolEntry( Engine &engineContext ) {
+    if (!g_codeEntryActive || g_symbolEntryIndex < 0 || g_symbolEntryIndex >= (int)g_symbols.size()) return;
+
+    const SymbolPuzzle &sym = g_symbols[ g_symbolEntryIndex ];
+    int w = 460;
+    int h = 200;
+    int x = (RENDER_W - w) / 2;
+    int y = (RENDER_H - h) / 2;
+    drawTextBox( engineContext, x, y, w, h, rgb( 10, 15, 10 ), rgb( 100, 150, 100 ) );
+
+    drawString16x16( engineContext, x + 16, y + 14, "PEDESTAL", rgb( 150, 220, 150 ), w - 32, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 42, sym.name, rgb( 170, 170, 185 ), 2, 1, 1, false );
+
+    const char* symbolNames[] = { "OWL", "WOLF", "STAG", "SERPENT" };
+
+    for(int i = 0; i < 3; ++i) {
+        int bx = x + 30 + (i * 140);
+        int by = y + 70;
+        bool focus = (g_symbolFocus == i);
+        drawTextBox( engineContext, bx, by, 120, 50, rgb( 5, 5, 5 ), focus ? rgb(200, 200, 200) : rgb( 60, 60, 60 ) );
+        drawString16x16( engineContext, bx + 10, by + 16, symbolNames[g_symbolState[i]], focus ? rgb( 255, 255, 255 ) : rgb( 160, 160, 160 ), 100, 1, 1, false );
+    }
+
+    drawStringTinyScaled( engineContext, x + 16, y + 140, "LEFT/RIGHT SELECT SLOT", rgb( 120, 120, 140 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 155, "UP/DOWN CHANGE SYMBOL", rgb( 120, 120, 140 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + 170, "ENTER TO SUBMIT, ESC TO EXIT", rgb( 120, 120, 140 ), 1, 1, 1, false );
 }
 
 static void renderNotesScreen( Engine &engineContext ) {
@@ -1119,6 +1574,8 @@ static void renderEndingScreen( Engine &engineContext ) {
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
+    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive;
+
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
         return (0.299f * r + 0.587f * g + 0.114f * b) / 255.0f;
@@ -1147,6 +1604,17 @@ static void render( Engine &engineContext, float dt ) {
         Uint8 r = Uint8( ((c >> 16) & 255) * s );
         Uint8 g = Uint8( ((c >> 8) & 255) * s );
         Uint8 b = Uint8( (c & 255) * s );
+        return rgb( r, g, b );
+        };
+
+    auto applyAmbience = [&]( Uint32 c, float shade ) -> Uint32 {
+        Uint32 shaded = shadeCol( c, shade );
+        float tr = float( (engineContext.ambianceTint >> 16) & 255 ) / 255.0f;
+        float tg = float( (engineContext.ambianceTint >> 8) & 255 ) / 255.0f;
+        float tb = float( engineContext.ambianceTint & 255 ) / 255.0f;
+        Uint8 r = Uint8( std::clamp( float( (shaded >> 16) & 255 ) * tr * engineContext.ambianceMul, 0.0f, 255.0f ) );
+        Uint8 g = Uint8( std::clamp( float( (shaded >> 8) & 255 ) * tg * engineContext.ambianceMul, 0.0f, 255.0f ) );
+        Uint8 b = Uint8( std::clamp( float( shaded & 255 ) * tb * engineContext.ambianceMul, 0.0f, 255.0f ) );
         return rgb( r, g, b );
         };
 
@@ -1256,7 +1724,7 @@ static void render( Engine &engineContext, float dt ) {
 
         if (hitTile == 1)
         {
-            if (engineContext.currentLevel == Levels::MUSEUM) {
+            if ((engineContext.currentLevel == Levels::MUSEUM || engineContext.currentLevel == Levels::MUSEUM_UPPER) && !(g_perfLowMode && (x & 1))) {
                 for (size_t artIndex = 0; artIndex < engineContext.artworks.size(); ++artIndex)
                 {
                     const auto& art = engineContext.artworks[artIndex];
@@ -1428,21 +1896,21 @@ static void render( Engine &engineContext, float dt ) {
 
                     float m = 1.0f;
 
-                    if (engineContext.hasFloorStains)
+                    if (engineContext.hasFloorStains && !g_perfLowMode)
                     {
                         int ox = int( fx * engineContext.floorOverlayStains.width ) % engineContext.floorOverlayStains.width;
                         int oy = int( fy * engineContext.floorOverlayStains.height ) % engineContext.floorOverlayStains.height;
                         Uint32 oc = engineContext.floorOverlayStains.sample( ox, oy );
                         m *= mulFromOverlay( oc, /*strength*/0.45f, /*min*/0.80f, /*max*/1.03f, /*gamma*/1.2f );
                     }
-                    if (engineContext.hasFloorCracks)
+                    if (engineContext.hasFloorCracks && !g_perfLowMode)
                     {
                         int ox = int( fx * engineContext.floorOverlayCracks.width ) % engineContext.floorOverlayCracks.width;
                         int oy = int( fy * engineContext.floorOverlayCracks.height ) % engineContext.floorOverlayCracks.height;
                         Uint32 oc = engineContext.floorOverlayCracks.sample( ox, oy );
                         m *= mulFromOverlay( oc, /*strength*/0.85f, /*min*/0.55f, /*max*/1.00f, /*gamma*/1.6f );
                     }
-                    if (engineContext.hasFloorPuddles)
+                    if (engineContext.hasFloorPuddles && !g_perfLowMode)
                     {
                         int ox = int( fx * engineContext.floorOverlayPuddles.width ) % engineContext.floorOverlayPuddles.width;
                         int oy = int( fy * engineContext.floorOverlayPuddles.height ) % engineContext.floorOverlayPuddles.height;
@@ -1461,12 +1929,12 @@ static void render( Engine &engineContext, float dt ) {
                     else
                     {
                         // Museum Mode: Match the wall formula for consistency
-                        shade = 1.0f / (1.0f + 0.08f * rowDist + 0.02f * rowDist * rowDist);
-                        shade = std::clamp( shade, 0.02f, 1.0f );
+                        shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * rowDist + engineContext.indoorShadeQuadratic * rowDist * rowDist);
+                        shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
                     }
-                    putPix( engineContext, x, y, shadeCol( color, shade ) );
+                    putPix( engineContext, x, y, applyAmbience( color, shade ) );
 
-                    if (rowDist < engineContext.zbuffer[ x ] && !engineContext.quadBuckets.empty())
+                    if (!g_perfLowMode && rowDist < engineContext.zbuffer[ x ] && !engineContext.quadBuckets.empty())
                     {
                         if (shade >= 0.06f) // skip work when very dark
                         {
@@ -1529,11 +1997,11 @@ static void render( Engine &engineContext, float dt ) {
                     else
                     {
                         // Museum Mode: Match the wall formula for consistency
-                        shade = 1.0f / (1.0f + 0.08f * rowDist + 0.02f * rowDist * rowDist);
-                        shade = std::clamp( shade, 0.02f, 1.0f );
+                        shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * rowDist + engineContext.indoorShadeQuadratic * rowDist * rowDist);
+                        shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
                     }
 
-                    putPix( engineContext, x, y, shadeCol( color, shade ) );
+                    putPix( engineContext, x, y, applyAmbience( color, shade ) );
                 }
                 else
                 {
@@ -1597,7 +2065,8 @@ static void render( Engine &engineContext, float dt ) {
             float u = float( sx - x0 ) * invSpriteW;
             int texX = std::clamp( int( u * texture.width ), 0, texture.width - 1 );
 
-            for (int sy = cy0; sy <= cy1; ++sy)
+            int yStep = g_perfLowMode ? 2 : 1;
+            for (int sy = cy0; sy <= cy1; sy += yStep)
             {
                 float v = float( sy - y0 ) * invSpriteH;
                 int texY = std::clamp( int( v * texture.height ), 0, texture.height - 1 );
@@ -1612,10 +2081,101 @@ static void render( Engine &engineContext, float dt ) {
                     }
                     else
                     {
-                        shade = 1.0f / (1.0f + 0.08f * transY + 0.02f * transY * transY);
+                        shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * transY + engineContext.indoorShadeQuadratic * transY * transY);
                         shade = std::clamp( shade, 0.18f, 1.0f );
                     }
-                    putPix( engineContext, sx, sy, shadeCol( color, shade ) );
+                    Uint32 shaded = applyAmbience( color, shade );
+                    putPix( engineContext, sx, sy, shaded );
+                    if (yStep == 2 && sy + 1 <= cy1)
+                    {
+                        putPix( engineContext, sx, sy + 1, shaded );
+                    }
+                }
+            }
+        }
+    }
+
+    if (!engineContext.columns.empty())
+    {
+        for (auto &col : engineContext.columns)
+        {
+            float dx = col.x - engineContext.positionX;
+            float dy = col.y - engineContext.positionY;
+            col.distance = dx * dx + dy * dy;
+        }
+
+        std::sort( engineContext.columns.begin(), engineContext.columns.end(), []( const ColumnProp &a, const ColumnProp &b ) {
+            return a.distance > b.distance;
+            } );
+
+        for (const auto &col : engineContext.columns)
+        {
+            auto setIt = engineContext.columnSpriteSets.find( col.setName );
+            if (setIt == engineContext.columnSpriteSets.end() || setIt->second.numViews == 0) continue;
+
+            const SpriteSet &spriteSet = setIt->second;
+            const int numViews = spriteSet.numViews;
+            float toPlayerX = engineContext.positionX - col.x;
+            float toPlayerY = engineContext.positionY - col.y;
+            float rel = std::atan2( toPlayerY, toPlayerX );
+            while (rel < 0.0f) rel += 2.0f * 3.14159265f;
+            while (rel >= 2.0f * 3.14159265f) rel -= 2.0f * 3.14159265f;
+            float slice = (2.0f * 3.14159265f) / numViews;
+            int viewIndex = int( (rel + slice * 0.5f) / slice ) % numViews;
+            const Image &texture = spriteSet.views[ viewIndex ];
+
+            float dx = col.x - engineContext.positionX;
+            float dy = col.y - engineContext.positionY;
+            float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
+            float transX = invDet * (engineContext.directionY * dx - engineContext.directionX * dy);
+            float transY = invDet * (-engineContext.planeY * dx + engineContext.planeX * dy);
+            if (transY <= 0) continue;
+
+            int spriteScreenX = int( (RENDER_W / 2) * (1 + transX / transY) );
+            float baseH = (RENDER_H / transY);
+            int spriteH = std::max( 1, int( std::fabs( baseH * col.scale ) ) );
+            int spriteW = (texture.height > 0) ? std::max( 1, int( spriteH * (float( texture.width ) / float( texture.height )) ) ) : spriteH;
+            int bottomY = int( RENDER_H * 0.5f + baseH * 0.5f );
+
+            int y0 = bottomY - spriteH;
+            int y1 = bottomY - 1;
+            int x0 = -spriteW / 2 + spriteScreenX;
+            int x1 = spriteW / 2 + spriteScreenX - 1;
+
+            int cy0 = std::max( 0, y0 );
+            int cy1 = std::min( RENDER_H - 1, y1 );
+            int cx0 = std::max( 0, x0 );
+            int cx1 = std::min( RENDER_W - 1, x1 );
+            if (cy0 > cy1 || cx0 > cx1) continue;
+
+            float invSpriteH = 1.0f / std::max( 1, spriteH );
+            float invSpriteW = 1.0f / std::max( 1, spriteW );
+            for (int sx = cx0; sx <= cx1; ++sx)
+            {
+                if (!(transY > 0 && transY < engineContext.zbuffer[ sx ])) continue;
+                float u = float( sx - x0 ) * invSpriteW;
+                int texX = std::clamp( int( u * texture.width ), 0, texture.width - 1 );
+                for (int sy = cy0; sy <= cy1; ++sy)
+                {
+                    float v = float( sy - y0 ) * invSpriteH;
+                    int texY = std::clamp( int( v * texture.height ), 0, texture.height - 1 );
+                    Uint32 color = texture.sample( texX, texY );
+                    if (!boolIsNearBlack( color, 120 ))
+                    {
+                        float shade = 1.0f;
+                        if (engineContext.caveMode)
+                        {
+                            shade = std::clamp( 1.0f / (0.35f * transY), 0.20f, 1.0f );
+                            shade *= caveLight( transY );
+                        }
+                        else
+                        {
+                            shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * transY + engineContext.indoorShadeQuadratic * transY * transY);
+                            shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
+                            shade *= 0.78f;
+                        }
+                        putPix( engineContext, sx, sy, applyAmbience( color, shade ) );
+                    }
                 }
             }
         }
@@ -1755,49 +2315,75 @@ static void render( Engine &engineContext, float dt ) {
 
 
 
-    if (lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5)
+    if (!overlayBusy && lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5)
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.inRangeOfStatue && !engineContext.statueChatActive)
+    if (!overlayBusy && engineContext.inRangeOfStatue && !engineContext.statueChatActive)
     {
 		drawString16x16( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.showHelp)
+    if (!overlayBusy && engineContext.showHelp)
     {
         drawString16x16( engineContext, 10, RENDER_H - 40, "[N] Notes", rgb( 200, 200, 120 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.currentLevel == Levels::CAVE && !g_caveQuizPassed && !g_caveQuizActive)
+    if (!overlayBusy && engineContext.currentLevel == Levels::CAVE && !g_caveQuizPassed && !g_caveQuizActive)
     {
         drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "CAMP LOGS HOLD CLUES FOR THE WARDEN STATUE", rgb( 170, 180, 210 ), 1, 1, 1, false );
     }
 
     int nearbyKey = getNearbyKeyPickup( engineContext );
-    if (nearbyKey >= 0 && !g_codeEntryActive)
+    if (!overlayBusy && nearbyKey >= 0 && !g_codeEntryActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 45, "[E] PICK UP KEY ITEM", rgb( 255, 240, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 45, "[E] INTERACT", rgb( 255, 240, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int nearbyNote = getNearbyClueNote( engineContext );
-    if (nearbyNote >= 0 && !g_codeEntryActive)
+    if (!overlayBusy && nearbyNote >= 0 && !g_codeEntryActive)
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] COLLECT NOTE", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (engineContext.currentLevel == Levels::CAVE && isPlayerNearCaveStatue( engineContext ) && !g_caveQuizActive)
+    int nearbySafe = getNearbySafe( engineContext );
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && nearbySafe >= 0 && !g_codeEntryActive)
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] EXAMINE SAFE", rgb( 180, 210, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    int nearbySymbol = getNearbySymbol( engineContext );
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && nearbySymbol >= 0 && !g_codeEntryActive)
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] EXAMINE PEDESTAL", rgb( 250, 180, 250 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && engineContext.currentLevel == Levels::CAVE && isPlayerNearCaveStatue( engineContext ) && !g_caveQuizActive)
     {
         std::string statuePrompt = g_caveQuizPassed ? "WARDEN: PATH OPEN" : "[E] ANSWER WARDEN QUESTIONS";
         drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, statuePrompt, rgb( 210, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && engineContext.currentLevel == Levels::ENTRANCE && isPlayerNearPoint( engineContext, 11.5f, 2.5f, 1.4f ))
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 160, (RENDER_H / 2) + 105, "[E] CHECK IN", rgb( 220, 220, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, 19.5f, 9.3f, 1.1f ))
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 130, (RENDER_H / 2) + 105, "[E] TAKE STAIRS TO UPPER GALLERY", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearPoint( engineContext, 3.5f, 9.3f, 1.1f ))
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, "[E] RETURN TO GROUND FLOOR", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int doorTx = 0, doorTy = 0;
     if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, doorTx, doorTy ))
     {
         int lockIndex = findDoorLockIndex( doorTx, doorTy );
-        if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked && !g_codeEntryActive)
+        if (!overlayBusy && lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked && !g_codeEntryActive)
         {
             const auto &lock = g_roomLocks[ lockIndex ];
             std::string req = (lock.type == LockType::KEY) ? ("[F] Use " + lock.requirement) : "[F] Enter 4-Digit Code";
@@ -1832,16 +2418,22 @@ static void render( Engine &engineContext, float dt ) {
         renderStatueChatbox( engineContext );
     }
 
-    if (engineContext.currentLevel == Levels::MUSEUM)
+    if (engineContext.currentLevel == Levels::MUSEUM || engineContext.currentLevel == Levels::MUSEUM_UPPER)
     {
         renderObjectives( engineContext );
         renderGalleryCard( engineContext ); 
     }
+    
+    renderCaveHUD( engineContext );
 
-    renderAccessPopup( engineContext );
+    if (!overlayBusy) renderAccessPopup( engineContext );
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
+    renderSafeEntry( engineContext );
+    renderSymbolEntry( engineContext );
     renderCaveQuiz( engineContext );
+    renderInteractionAnimation( engineContext );
+    renderLevelTransitionOverlay( engineContext );
 
     
 }
@@ -1959,10 +2551,26 @@ int main( int argc, char **argv ) {
 
     std::filesystem::path cwd = std::filesystem::current_path();
 
+    auto findProjectRoot = [&]( std::filesystem::path start ) {
+        for (int i = 0; i < 6; ++i)
+        {
+            if (std::filesystem::exists( start / "levels" / "museum" / "map.txt" )) return start;
+            if (std::filesystem::exists( start / "CCP Art Final" / "levels" / "museum" / "map.txt" )) return start / "CCP Art Final";
+            if (!start.has_parent_path()) break;
+            std::filesystem::path parent = start.parent_path();
+            if (parent == start) break;
+            start = parent;
+        }
+        return cwd;
+        };
+    std::filesystem::path assetRoot = findProjectRoot( cwd );
+
     std::vector<LevelDef> levels = {
-    {"Museum", (cwd / "levels" / "museum").string(), 10.0f, 9.0f, 90.f, 0},
-    {"Cave", (cwd / "levels" / "cave").string(), 2.5, 2.5, 90.0f, 1 },
-    {"Transition", (cwd / "levels" / "transition").string(), 1.5, 4.5, 270.f, 2 }
+    {"Museum Entrance", (assetRoot / "levels" / "entrance").string(), "map.txt", 11.5f, 15.5f, 270.f, Levels::ENTRANCE, rgb( 230, 238, 255 ), 1.0f, false, "Check in at the desk"},
+    {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 1.06f, true, "Explore both floors and report to the statue"},
+    {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.92f, true, "Explore both floors and report to the statue"},
+    {"Transition", (assetRoot / "levels" / "transition").string(), "map.txt", 1.5f, 4.5f, 270.f, Levels::TRANSITION, rgb( 235, 235, 235 ), 1.0f, false, "Proceed through the tunnels"},
+    {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.90f, false, "Find the final journal fragment"}
 
 
     };
@@ -2006,7 +2614,22 @@ int main( int argc, char **argv ) {
         float dt = (now - prev) / 1000.0f;
         prev = now;
         if (dt > 0.05f) dt = 0.05f;
-        if (currentState == STATE_GAME) g_runElapsedSeconds += dt;
+        if (currentState == STATE_GAME) 
+        {
+            g_runElapsedSeconds += dt;
+            if (g_caveTimerActive && !g_caveQuizPassed)
+            {
+                g_caveTimerSeconds -= dt;
+                if (g_caveTimerSeconds <= 0.0f)
+                {
+                    g_caveTimerActive = false;
+                    showAccessPopup( "Oxygen depleted. Returning to entrance.", 4000 );
+                    handleLevelChange( engineContext, levels, Levels::ENTRANCE );
+                    g_notesCollectedRun = 0;
+                    g_runElapsedSeconds = 0.0f;
+                }
+            }
+        }
         // Input
         SDL_Event ev;
         float actualSpeed;
@@ -2049,6 +2672,36 @@ int main( int argc, char **argv ) {
         }
 
         updateMusicStream();
+
+        if (g_interactionAnim.active)
+        {
+            g_interactionAnim.t += dt;
+            float ip = std::clamp( g_interactionAnim.t / std::max( 0.001f, g_interactionAnim.duration ), 0.0f, 1.0f );
+            float amp = (g_interactionAnim.type == InteractionAnimType::KEY_USE) ? 3.5f : 1.2f;
+            engineContext.pitchOffset = std::sin( ip * 3.14159265f ) * amp;
+            if (g_interactionAnim.t >= g_interactionAnim.duration)
+            {
+                g_interactionAnim.active = false;
+                g_interactionAnim.t = 0.0f;
+                engineContext.pitchOffset = 0.0f;
+            }
+        }
+
+        if (g_levelTransition.active)
+        {
+            g_levelTransition.t += dt;
+            if (!g_levelTransition.switched && g_levelTransition.t >= (g_levelTransition.duration * 0.5f))
+            {
+                handleLevelChange( engineContext, levels, g_levelTransition.targetLevel );
+                g_levelTransition.switched = true;
+            }
+            if (g_levelTransition.t >= g_levelTransition.duration)
+            {
+                g_levelTransition.active = false;
+                g_levelTransition.switched = false;
+                g_levelTransition.t = 0.0f;
+            }
+        }
 
         while (SDL_PollEvent( &ev ))
         {
@@ -2121,12 +2774,22 @@ int main( int argc, char **argv ) {
             {
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
+                    if (g_levelTransition.active)
+                    {
+                        continue;
+                    }
+
                     if (g_notesOpen)
                     {
                         if (ev.key.key == SDLK_N || ev.key.key == SDLK_ESCAPE)
                         {
                             g_notesOpen = false;
                         }
+                        continue;
+                    }
+
+                    if (g_interactionAnim.active)
+                    {
                         continue;
                     }
 
@@ -2169,46 +2832,111 @@ int main( int argc, char **argv ) {
 
                     if (g_codeEntryActive)
                     {
-                        if (ev.key.key >= SDLK_0 && ev.key.key <= SDLK_9 && g_codeEntryBuffer.size() < 4)
+                        if (g_symbolEntryIndex >= 0)
                         {
-                            g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_0) ) );
-                        }
-                        else if (ev.key.key >= SDLK_KP_0 && ev.key.key <= SDLK_KP_9 && g_codeEntryBuffer.size() < 4)
-                        {
-                            g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_KP_0) ) );
-                        }
-                        else if (ev.key.key == SDLK_BACKSPACE && !g_codeEntryBuffer.empty())
-                        {
-                            g_codeEntryBuffer.pop_back();
-                        }
-                        else if (ev.key.key == SDLK_ESCAPE)
-                        {
-                            g_codeEntryActive = false;
-                            g_codeEntryBuffer.clear();
-                            g_codeEntryLockIndex = -1;
-                        }
-                        else if ((ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER) && g_codeEntryLockIndex >= 0 && g_codeEntryLockIndex < (int)g_roomLocks.size())
-                        {
-                            auto &lock = g_roomLocks[ g_codeEntryLockIndex ];
-                            if (g_codeEntryBuffer == lock.requirement)
+                            if (ev.key.key == SDLK_LEFT)
                             {
-                                lock.unlocked = true;
-                                int idx = lock.ty * engineContext.map.width + lock.tx;
-                                if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2)
+                                g_symbolFocus = (g_symbolFocus - 1 + 3) % 3;
+                            }
+                            else if (ev.key.key == SDLK_RIGHT)
+                            {
+                                g_symbolFocus = (g_symbolFocus + 1) % 3;
+                            }
+                            else if (ev.key.key == SDLK_UP)
+                            {
+                                g_symbolState[g_symbolFocus] = (g_symbolState[g_symbolFocus] + 1) % 4;
+                            }
+                            else if (ev.key.key == SDLK_DOWN)
+                            {
+                                g_symbolState[g_symbolFocus] = (g_symbolState[g_symbolFocus] - 1 + 4) % 4;
+                            }
+                            else if (ev.key.key == SDLK_ESCAPE)
+                            {
+                                g_codeEntryActive = false;
+                                g_symbolEntryIndex = -1;
+                            }
+                            else if (ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER)
+                            {
+                                auto &sym = g_symbols[ g_symbolEntryIndex ];
+                                if (g_symbolState[0] == sym.targetCombo[0] && g_symbolState[1] == sym.targetCombo[1] && g_symbolState[2] == sym.targetCombo[2])
                                 {
-                                    engineContext.map.tiles[ idx ] = 0;
+                                    sym.solved = true;
+                                    showAccessPopup( sym.name + " solved! Obtained " + sym.rewardKey, 2800 );
+                                    g_playerKeys.insert( sym.rewardKey );
+                                    triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + sym.rewardKey, 0.8f );
                                 }
-                                showAccessPopup( lock.roomName + " unlocked.", 1800 );
-                                playDoorCreak(levels[engineContext.currentLevel].folder);
+                                else
+                                {
+                                    showAccessPopup( "Pedestal mechanism is jammed." );
+                                }
+                                g_codeEntryActive = false;
+                                g_symbolEntryIndex = -1;
                             }
-                            else
+                        }
+                        else
+                        {
+                            if (ev.key.key >= SDLK_0 && ev.key.key <= SDLK_9 && g_codeEntryBuffer.size() < 4)
                             {
-                                playFailedDoorOpen(levels[engineContext.currentLevel].folder);
-                                showAccessPopup( "Wrong code. Access denied." );
+                                g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_0) ) );
                             }
-                            g_codeEntryActive = false;
-                            g_codeEntryBuffer.clear();
-                            g_codeEntryLockIndex = -1;
+                            else if (ev.key.key >= SDLK_KP_0 && ev.key.key <= SDLK_KP_9 && g_codeEntryBuffer.size() < 4)
+                            {
+                                g_codeEntryBuffer.push_back( char( '0' + (ev.key.key - SDLK_KP_0) ) );
+                            }
+                            else if (ev.key.key == SDLK_BACKSPACE && !g_codeEntryBuffer.empty())
+                            {
+                                g_codeEntryBuffer.pop_back();
+                            }
+                            else if (ev.key.key == SDLK_ESCAPE)
+                            {
+                                g_codeEntryActive = false;
+                                g_codeEntryBuffer.clear();
+                                g_codeEntryLockIndex = -1;
+                                g_safeEntryIndex = -1;
+                            }
+                            else if ((ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER))
+                            {
+                                if (g_codeEntryLockIndex >= 0 && g_codeEntryLockIndex < (int)g_roomLocks.size())
+                                {
+                                    auto &lock = g_roomLocks[ g_codeEntryLockIndex ];
+                                    if (g_codeEntryBuffer == lock.requirement)
+                                    {
+                                        lock.unlocked = true;
+                                        int idx = lock.ty * engineContext.map.width + lock.tx;
+                                        if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2)
+                                        {
+                                            engineContext.map.tiles[ idx ] = 0;
+                                        }
+                                        showAccessPopup( lock.roomName + " unlocked.", 1800 );
+                                        playDoorCreak(levels[engineContext.currentLevel].folder);
+                                        triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ACCESS CODE ACCEPTED", 0.7f );
+                                    }
+                                    else
+                                    {
+                                        playFailedDoorOpen(levels[engineContext.currentLevel].folder);
+                                        showAccessPopup( "Wrong code. Access denied." );
+                                    }
+                                }
+                                else if (g_safeEntryIndex >= 0 && g_safeEntryIndex < (int)g_safes.size())
+                                {
+                                    auto &safe = g_safes[ g_safeEntryIndex ];
+                                    if (g_codeEntryBuffer == safe.code)
+                                    {
+                                        safe.solved = true;
+                                        showAccessPopup( safe.safeName + " unlocked! Obtained " + safe.rewardKey, 2800 );
+                                        g_playerKeys.insert( safe.rewardKey );
+                                        triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + safe.rewardKey, 0.8f );
+                                    }
+                                    else
+                                    {
+                                        showAccessPopup( "Safe combination incorrect." );
+                                    }
+                                }
+                                g_codeEntryActive = false;
+                                g_codeEntryBuffer.clear();
+                                g_codeEntryLockIndex = -1;
+                                g_safeEntryIndex = -1;
+                            }
                         }
                         continue;
                     }
@@ -2227,6 +2955,27 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
+                        if (engineContext.currentLevel == Levels::ENTRANCE && isPlayerNearPoint( engineContext, 11.5f, 2.5f, 1.4f ))
+                        {
+                            triggerInteractionAnim( InteractionAnimType::DOOR_USE, "CHECKING IN WITH FRONT DESK", 0.9f );
+                            beginLevelTransition( Levels::MUSEUM, 1.1f );
+                            continue;
+                        }
+
+                        if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, 19.5f, 9.3f, 1.1f ))
+                        {
+                            triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ASCENDING TO UPPER GALLERY", 0.9f );
+                            beginLevelTransition( Levels::MUSEUM_UPPER, 1.0f );
+                            continue;
+                        }
+
+                        if (engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearPoint( engineContext, 3.5f, 9.3f, 1.1f ))
+                        {
+                            triggerInteractionAnim( InteractionAnimType::DOOR_USE, "RETURNING TO GROUND FLOOR", 0.9f );
+                            beginLevelTransition( Levels::MUSEUM, 1.0f );
+                            continue;
+                        }
+
                         int nearbyKey = getNearbyKeyPickup( engineContext );
                         if (nearbyKey >= 0)
                         {
@@ -2239,6 +2988,7 @@ int main( int argc, char **argv ) {
                             }
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
                             playPickup(levels[engineContext.currentLevel].folder);
+                            triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
                             continue;
                         }
 
@@ -2255,11 +3005,15 @@ int main( int argc, char **argv ) {
                             }
                             showAccessPopup( "Collected note: " + n.title, 2200 );
 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
+                            triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
 
                             if (engineContext.currentLevel == Levels::CAVE)
                             {
-                                g_caveFinalNoteCollected = true;
-                                showAccessPopup( "Journal fragment recovered. Return to the warden statue.", 2400 );
+                                if (n.title == "Last Journal Fragment")
+                                {
+                                    g_caveFinalNoteCollected = true;
+                                    showAccessPopup( "Journal fragment recovered. Return to the warden statue.", 2400 );
+                                }
                             }
                             continue;
                         }
@@ -2319,6 +3073,29 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
+                        int nearbySafe = getNearbySafe( engineContext );
+                        if (nearbySafe >= 0)
+                        {
+                            g_codeEntryActive = true;
+                            g_safeEntryIndex = nearbySafe;
+                            g_codeEntryLockIndex = -1;
+                            g_symbolEntryIndex = -1;
+                            g_codeEntryBuffer.clear();
+                            continue;
+                        }
+
+                        int nearbySymbol = getNearbySymbol( engineContext );
+                        if (nearbySymbol >= 0)
+                        {
+                            g_codeEntryActive = true;
+                            g_symbolEntryIndex = nearbySymbol;
+                            g_codeEntryLockIndex = -1;
+                            g_safeEntryIndex = -1;
+                            g_symbolFocus = 0;
+                            g_codeEntryBuffer.clear();
+                            continue;
+                        }
+
                         int tx = 0;
                         int ty = 0;
                         if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, tx, ty ))
@@ -2333,6 +3110,7 @@ int main( int argc, char **argv ) {
                                     {
                                         lock.unlocked = true;
                                         showAccessPopup( lock.requirement + " used.", 1600 );
+                                    triggerInteractionAnim( InteractionAnimType::KEY_USE, "USING " + lock.requirement, 1.25f );
                                     }
                                     else
                                     {
@@ -2354,6 +3132,7 @@ int main( int argc, char **argv ) {
                         if (toggled)
                         {
                             playDoorCreak( levels[ engineContext.currentLevel ].folder );
+                            triggerInteractionAnim( InteractionAnimType::DOOR_USE, "OPENING DOOR", 0.45f );
                         }
 
    
@@ -2396,9 +3175,9 @@ int main( int argc, char **argv ) {
                         saveProps( (levels[ curLevel ].folder + "/props.txt"),
                             engineContext.props, engineContext.propImages, engineContext.quads );
                     }
-                    else if (ev.key.scancode == SDL_SCANCODE_N)
+                    else if (ev.key.scancode == SDL_SCANCODE_K)
                     {
-                        handleLevelChange( engineContext, levels, Levels::TRANSITION );
+                        handleLevelChange( engineContext, levels, Levels::MUSEUM );
                     }
                 }
             }
@@ -2408,7 +3187,7 @@ int main( int argc, char **argv ) {
                 {
                     if (ev.key.key == SDLK_R)
                     {
-                        handleLevelChange( engineContext, levels, Levels::MUSEUM );
+                        handleLevelChange( engineContext, levels, Levels::ENTRANCE );
                         g_notesCollectedRun = 0;
                         g_runElapsedSeconds = 0.0f;
                         currentState = STATE_GAME;
@@ -2425,7 +3204,7 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (ks[ SDL_SCANCODE_LEFT ])
             {

@@ -232,6 +232,11 @@ struct Engine
 	float lightRadius = 5.0f;
 	float lightFalloff = 2.0f;
 	float caveAmbient = 0.08f;
+    float indoorShadeLinear = 0.08f;
+    float indoorShadeQuadratic = 0.02f;
+    float indoorShadeMin = 0.02f;
+    Uint32 ambianceTint = 0xFFFFFFFFu;
+    float ambianceMul = 1.0f;
 
     Image wallOverlay;
     Image floorOverlayCracks, floorOverlayStains, floorOverlayPuddles;
@@ -256,7 +261,7 @@ struct Engine
     GrayTex wallMul;    
     bool hasWallMul = false;
 
-    Levels currentLevel = Levels::MUSEUM;
+    Levels currentLevel = Levels::ENTRANCE;
 
     float yaw;
 

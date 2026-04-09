@@ -23,6 +23,16 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
     int bob = (RENDER_H / 2) + (int)engineContext.pitchOffset;
     const int wallTopY = -lineH / 2 + bob;
 
+    auto tintAndMul = [&]( Uint32 base, Uint32 tint, float mul ) -> Uint32 {
+        float tr = float( (tint >> 16) & 255 ) / 255.0f;
+        float tg = float( (tint >> 8) & 255 ) / 255.0f;
+        float tb = float( tint & 255 ) / 255.0f;
+        Uint8 r = Uint8( std::clamp( float( (base >> 16) & 255 ) * tr * mul, 0.0f, 255.0f ) );
+        Uint8 g = Uint8( std::clamp( float( (base >> 8) & 255 ) * tg * mul, 0.0f, 255.0f ) );
+        Uint8 b = Uint8( std::clamp( float( base & 255 ) * tb * mul, 0.0f, 255.0f ) );
+        return rgb( r, g, b );
+    };
+
     float shade = 1.0f;
 
     if (engineContext.caveMode)
@@ -37,21 +47,20 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
     else
     {
 		// Use quadratic falloff for museum mode
-        shade = 1.0f / (1.0f + 0.08f * perpDist + 0.02f * perpDist * perpDist);
-        shade = std::clamp( shade, 0.02f, 1.0f );
+        shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * perpDist + engineContext.indoorShadeQuadratic * perpDist * perpDist);
+        shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
 
         // Makes walls facing one axis darker than the other to show geometry depth
         if (side == 1) shade *= 0.75f;
 
-        // If texture coordinate (wallX) is near 0 or 1, we are in a corner. Darken it.
+        // very subtle edge AO only to avoid visible streaking artifacts
         float edgeDist = std::min( wallX, 1.0f - wallX );
-        float aoThreshold = 0.15f; 
+        float aoThreshold = 0.03f;
         if (edgeDist < aoThreshold)
         {
-            // Smoothstep interpolation for soft shadows
             float t = edgeDist / aoThreshold;
             float ao = t * t * (3.0f - 2.0f * t);
-            shade *= (0.6f + 0.4f * ao); // Darken up to 40%
+            shade *= (0.96f + 0.04f * ao);
         }
     }
 
@@ -128,19 +137,8 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
         }
 
 
-        float shade = std::clamp( 1.0f / (0.4f * perpDist), 0.15f, 1.0f );
-
-        if (engineContext.caveMode)
-        {
-            float R = engineContext.lightRadius;
-            float t = std::clamp( 1.0f - std::pow( perpDist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
-            float l = std::max( engineContext.caveAmbient, t );
-            shade *= l;
-        }
-
-        Uint8 r = (color >> 16) & 255, g = (color >> 8) & 255, box = color & 255;
-        r = Uint8( r * shade ); g = Uint8( g * shade ); box = Uint8( box * shade );
-        putPix( engineContext, x, y, rgb( r, g, box ) );
+        color = tintAndMul( color, engineContext.ambianceTint, engineContext.ambianceMul * shade );
+        putPix( engineContext, x, y, color );
     }
 }
 

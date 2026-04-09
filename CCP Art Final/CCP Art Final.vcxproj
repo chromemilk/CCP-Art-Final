@@ -213,12 +213,15 @@
   <ItemGroup>
     <Text Include="levels\cave\map.txt" />
     <Text Include="levels\cave\props.txt" />
+    <Text Include="levels\entrance\map.txt" />
+    <Text Include="levels\entrance\props.txt" />
     <Text Include="levels\museum\artworks.txt" />
     <Text Include="levels\museum\artworksVerbose.txt" />
     <Text Include="levels\museum\columns.txt" />
     <Text Include="levels\museum\map.txt" />
     <Text Include="levels\museum\props.txt" />
     <Text Include="levels\transition\map.txt" />
+    <Text Include="levels\transition\props.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

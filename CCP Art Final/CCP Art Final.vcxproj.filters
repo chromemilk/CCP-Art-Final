@@ -243,5 +243,8 @@
     <Text Include="levels\cave\map.txt" />
     <Text Include="levels\cave\props.txt" />
     <Text Include="levels\transition\map.txt" />
+    <Text Include="levels\entrance\map.txt" />
+    <Text Include="levels\transition\props.txt" />
+    <Text Include="levels\entrance\props.txt" />
   </ItemGroup>
 </Project>
