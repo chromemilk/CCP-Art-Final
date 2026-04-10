@@ -78,6 +78,10 @@ static std::vector<KeyPickup> g_keyPickups;
 static std::vector<ClueNote> g_clueNotes;
 static std::vector<SafePuzzle> g_safes;
 static std::vector<SymbolPuzzle> g_symbols;
+static std::vector<int> g_safeBoxIndices;
+static std::vector<int> g_pedestalBoxIndices;
+static Image g_stairWallOverlay;
+static bool g_stairWallOverlayReady = false;
 static std::unordered_set<std::string> g_playerKeys;
 static std::vector<int> g_foundNotes;
 
@@ -104,6 +108,9 @@ static bool g_museumPuzzleInitialized = false;
 
 static float g_caveTimerSeconds = 120.0f;
 static bool g_caveTimerActive = false;
+static constexpr float kUpperEntryX = 20.6f;
+static constexpr float kUpperEntryY = 9.3f;
+static constexpr float kUpperEntryRadius = 0.85f;
 
 struct LevelDef
 {
@@ -361,6 +368,47 @@ static int addKeyPickupSprite( Engine &engineContext, float x, float y, const st
     return propIndex;
 }
 
+static void buildStairWallOverlay( Image &img ) {
+    img.width = 96;
+    img.height = 96;
+    img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
+
+    auto p = [&]( int x, int y, Uint32 c ) {
+        if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height) img.pixels[ y * img.width + x ] = c;
+    };
+
+    Uint32 wallShadow = rgb( 38, 42, 52 );
+    Uint32 wallEdge = rgb( 78, 84, 98 );
+    Uint32 stepTop = rgb( 142, 148, 158 );
+    Uint32 stepFront = rgb( 92, 98, 110 );
+
+    for (int y = 12; y <= 92; ++y)
+    {
+        for (int x = 14; x <= 82; ++x)
+        {
+            p( x, y, wallShadow );
+        }
+    }
+    for (int x = 14; x <= 82; ++x) { p( x, 12, wallEdge ); p( x, 92, wallEdge ); }
+    for (int y = 12; y <= 92; ++y) { p( 14, y, wallEdge ); p( 82, y, wallEdge ); }
+
+    int left = 24;
+    int right = 72;
+    int y = 86;
+    for (int s = 0; s < 8; ++s)
+    {
+        int topY = y - 3;
+        for (int xx = left; xx <= right; ++xx) p( xx, topY, stepTop );
+        for (int yy = topY + 1; yy <= y; ++yy)
+            for (int xx = left; xx <= right; ++xx)
+                p( xx, yy, stepFront );
+
+        left += 2;
+        right -= 2;
+        y -= 9;
+    }
+}
+
 static void buildSimpleNoteSprite( Image &img ) {
     img.width = 24;
     img.height = 24;
@@ -410,30 +458,62 @@ static int addNotePickupSprite( Engine &engineContext, float x, float y, const s
 }
 
 static void buildSafeSprite( Image &img ) {
-    img.width = 32;
-    img.height = 32;
+    img.width = 48;
+    img.height = 40;
     img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
 
-    Uint32 metal = rgb( 100, 105, 110 );
-    Uint32 dark = rgb( 50, 50, 55 );
-    Uint32 dial = rgb( 180, 190, 200 );
+    Uint32 frontMid = rgb( 108, 116, 124 );
+    Uint32 frontDark = rgb( 74, 80, 88 );
+    Uint32 topCol = rgb( 142, 150, 160 );
+    Uint32 sideCol = rgb( 84, 92, 102 );
+    Uint32 rim = rgb( 52, 56, 62 );
+    Uint32 dial = rgb( 188, 198, 210 );
 
     auto p = [&]( int x, int y, Uint32 c ) {
         if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height) img.pixels[ y * img.width + x ] = c;
     };
 
-    for (int y = 4; y <= 28; ++y)
+    // top face (faux 3D)
+    for (int y = 4; y <= 10; ++y)
     {
-        for (int x = 4; x <= 28; ++x)
+        for (int x = 10; x <= 37; ++x)
         {
-            if (x == 4 || x == 28 || y == 4 || y == 28) p( x, y, dark );
-            else p( x, y, metal );
+            p( x, y, topCol );
         }
     }
-    // Dial
-    for (int y = 14; y <= 18; ++y)
-        for (int x = 14; x <= 18; ++x)
+
+    // front face
+    for (int y = 11; y <= 34; ++y)
+    {
+        for (int x = 8; x <= 37; ++x)
+        {
+            Uint32 c = (x < 15) ? frontDark : frontMid;
+            p( x, y, c );
+        }
+    }
+
+    // right side face
+    for (int y = 11; y <= 34; ++y)
+    {
+        for (int x = 38; x <= 43; ++x)
+        {
+            p( x, y, sideCol );
+        }
+    }
+
+    // rims
+    for (int x = 8; x <= 43; ++x) { p( x, 11, rim ); p( x, 34, rim ); }
+    for (int y = 11; y <= 34; ++y) { p( 8, y, rim ); p( 43, y, rim ); }
+
+    // dial + handle
+    for (int y = 19; y <= 25; ++y)
+    {
+        for (int x = 20; x <= 26; ++x)
+        {
             p( x, y, dial );
+        }
+    }
+    for (int x = 27; x <= 31; ++x) p( x, 22, dial );
 }
 
 static int addSafeSprite( Engine &engineContext, float x, float y, const std::string &name ) {
@@ -448,38 +528,48 @@ static int addSafeSprite( Engine &engineContext, float x, float y, const std::st
     prop.kind = "SAFE";
     prop.filename = name;
     prop.textureID = texId;
-    prop.scale = 0.65f;
+    prop.scale = 0.95f;
     int propIndex = (int)engineContext.props.size();
     engineContext.props.push_back( std::move( prop ) );
     return propIndex;
 }
 
 static void buildPedestalSprite( Image &img ) {
-    img.width = 30;
-    img.height = 40;
+    img.width = 48;
+    img.height = 56;
     img.pixels.assign( img.width * img.height, rgb( 255, 0, 255 ) );
 
-    Uint32 stone = rgb( 150, 145, 135 );
-    Uint32 base = rgb( 100, 95, 85 );
+    Uint32 light = rgb( 170, 162, 145 );
+    Uint32 mid = rgb( 146, 136, 118 );
+    Uint32 dark = rgb( 112, 102, 88 );
 
     auto p = [&]( int x, int y, Uint32 c ) {
         if ((unsigned)x < (unsigned)img.width && (unsigned)y < (unsigned)img.height) img.pixels[ y * img.width + x ] = c;
     };
 
-    // Base
-    for (int y = 32; y <= 38; ++y)
-        for (int x = 2; x <= 28; ++x)
-            p( x, y, base );
+    // top slab
+    for (int y = 4; y <= 11; ++y)
+        for (int x = 10; x <= 37; ++x)
+            p( x, y, light );
 
-    // Pillar
-    for (int y = 8; y <= 31; ++y)
-        for (int x = 8; x <= 22; ++x)
-            p( x, y, stone );
+    // shaft front
+    for (int y = 12; y <= 45; ++y)
+        for (int x = 14; x <= 33; ++x)
+            p( x, y, (x < 22) ? mid : light );
 
-    // Top
-    for (int y = 2; y <= 7; ++y)
-        for (int x = 4; x <= 26; ++x)
-            p( x, y, base );
+    // shaft side
+    for (int y = 12; y <= 45; ++y)
+        for (int x = 34; x <= 39; ++x)
+            p( x, y, dark );
+
+    // base plinth
+    for (int y = 46; y <= 53; ++y)
+    {
+        for (int x = 8; x <= 39; ++x)
+        {
+            p( x, y, (x < 24) ? dark : mid );
+        }
+    }
 }
 
 static int addPedestalSprite( Engine &engineContext, float x, float y, const std::string &name ) {
@@ -494,10 +584,146 @@ static int addPedestalSprite( Engine &engineContext, float x, float y, const std
     prop.kind = "PEDESTAL";
     prop.filename = name;
     prop.textureID = texId;
-    prop.scale = 0.85f;
+    prop.scale = 1.05f;
     int propIndex = (int)engineContext.props.size();
     engineContext.props.push_back( std::move( prop ) );
     return propIndex;
+}
+
+static BoxProp buildStairStepBox( float centerX, float centerY, float halfLength, float halfDepth, float height, float angle, const Image &tex ) {
+    BoxProp step;
+    step.centerX = centerX;
+    step.centerY = centerY;
+    step.halfLength = halfLength;
+    step.halfDepth = halfDepth;
+    step.height = height;
+    step.angle = angle;
+    step.sideTexure = tex;
+    step.legTexure = tex;
+    step.legHalf = 0.03f;
+    step.legInsetLength = 0.02f;
+    step.legInsetDepth = 0.02f;
+    return step;
+}
+
+static Image makeSafeMetalTexture() {
+    Image tex;
+    tex.width = 64;
+    tex.height = 64;
+    tex.pixels.assign( 64 * 64, rgb( 140, 150, 162 ) );
+    for (int y = 0; y < tex.height; ++y)
+    {
+        for (int x = 0; x < tex.width; ++x)
+        {
+            int n = ((x * 17 + y * 31) & 7) - 3;
+            int shade = std::clamp( 150 + n - (x / 5), 132, 212 );
+            tex.pixels[ y * tex.width + x ] = rgb( shade, shade + 6, shade + 14 );
+        }
+    }
+    return tex;
+}
+
+static Image makeSafeDoorTexture() {
+    Image tex;
+    tex.width = 64;
+    tex.height = 64;
+    tex.pixels.assign( 64 * 64, rgb( 136, 146, 156 ) );
+    for (int y = 0; y < tex.height; ++y)
+    {
+        for (int x = 0; x < tex.width; ++x)
+        {
+            int base = 132 + ((x + y) & 7);
+            tex.pixels[ y * tex.width + x ] = rgb( base, base + 8, base + 14 );
+        }
+    }
+    for (int y = 18; y <= 46; ++y)
+    {
+        for (int x = 18; x <= 46; ++x)
+        {
+            int dx = x - 32;
+            int dy = y - 32;
+            int r2 = dx * dx + dy * dy;
+            if (r2 <= 100)
+            {
+                tex.pixels[ y * tex.width + x ] = rgb( 176, 188, 205 );
+            }
+            else if (r2 <= 144)
+            {
+                tex.pixels[ y * tex.width + x ] = rgb( 128, 138, 152 );
+            }
+        }
+    }
+    return tex;
+}
+
+static Image makeStoneTexture() {
+    Image tex;
+    tex.width = 64;
+    tex.height = 64;
+    tex.pixels.assign( 64 * 64, rgb( 172, 162, 144 ) );
+    for (int y = 0; y < tex.height; ++y)
+    {
+        for (int x = 0; x < tex.width; ++x)
+        {
+            int n = ((x * 13 + y * 23 + (x * y) / 9) & 15) - 7;
+            int shade = std::clamp( 168 + n, 138, 214 );
+            tex.pixels[ y * tex.width + x ] = rgb( shade, shade - 8, shade - 20 );
+        }
+    }
+    return tex;
+}
+
+static int addBoxMesh( Engine &engineContext, float x, float y, float halfLength, float halfDepth, float height, const Image &tex ) {
+    BoxProp box;
+    box.centerX = x;
+    box.centerY = y;
+    box.halfLength = halfLength;
+    box.halfDepth = halfDepth;
+    box.height = height;
+    box.angle = 0.0f;
+    box.sideTexure = tex;
+    box.legTexure = tex;
+    box.legHalf = 0.0f;
+    box.legInsetLength = 0.0f;
+    box.legInsetDepth = 0.0f;
+    int index = (int)engineContext.benches3D.size();
+    engineContext.benches3D.push_back( std::move( box ) );
+    return index;
+}
+
+static void addSafe3D( Engine &engineContext, float x, float y ) {
+    Image bodyTex = makeSafeMetalTexture();
+    Image doorTex = makeSafeDoorTexture();
+    // Merge door details into one texture to avoid coplanar z-fighting artifacts.
+    for (int yy = 8; yy < 56; ++yy)
+    {
+        for (int xx = 8; xx < 56; ++xx)
+        {
+            bodyTex.pixels[ yy * bodyTex.width + xx ] = doorTex.pixels[ yy * doorTex.width + xx ];
+        }
+    }
+    g_safeBoxIndices.push_back( addBoxMesh( engineContext, x, y, 0.33f, 0.24f, 0.40f, bodyTex ) );
+}
+
+static void addPedestal3D( Engine &engineContext, float x, float y ) {
+    Image stoneTex = makeStoneTexture();
+    // Emboss fake cap/base bands in texture while keeping a single stable 3D mesh.
+    for (int yTex = 0; yTex < stoneTex.height; ++yTex)
+    {
+        for (int xTex = 0; xTex < stoneTex.width; ++xTex)
+        {
+            Uint32 c = stoneTex.pixels[ yTex * stoneTex.width + xTex ];
+            int r = (c >> 16) & 255;
+            int g = (c >> 8) & 255;
+            int b = c & 255;
+            bool capBand = (yTex >= 6 && yTex <= 14);
+            bool baseBand = (yTex >= 46 && yTex <= 58);
+            if (capBand) { r = std::min( 255, r + 18 ); g = std::min( 255, g + 16 ); b = std::min( 255, b + 12 ); }
+            if (baseBand) { r = std::max( 0, r - 20 ); g = std::max( 0, g - 18 ); b = std::max( 0, b - 14 ); }
+            stoneTex.pixels[ yTex * stoneTex.width + xTex ] = rgb( (Uint8)r, (Uint8)g, (Uint8)b );
+        }
+    }
+    g_pedestalBoxIndices.push_back( addBoxMesh( engineContext, x, y, 0.22f, 0.22f, 0.46f, stoneTex ) );
 }
 
 static void initMuseumPuzzle( Engine &engineContext ) {
@@ -531,6 +757,12 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
 
+    if (!g_stairWallOverlayReady)
+    {
+        buildStairWallOverlay( g_stairWallOverlay );
+        g_stairWallOverlayReady = true;
+    }
+
     g_keyPickups.clear();
     // Bronze Key in main atrium start
     g_keyPickups.push_back( {"BRONZE KEY", 14.5f, 11.5f, false, addKeyPickupSprite( engineContext, 14.5f, 11.5f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
@@ -540,14 +772,16 @@ static void initMuseumPuzzle( Engine &engineContext ) {
    // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
 
     g_safes.clear();
+    g_safeBoxIndices.clear();
     // Safe in SE Office
     g_safes.push_back({"Director's Safe", "2026", 17.5f, 15.5f, false, "GOLD KEY"});
-    addSafeSprite( engineContext, 17.5f, 15.5f, "Director's Safe" );
+    addSafe3D( engineContext, 17.5f, 15.5f );
 
     g_symbols.clear();
+    g_pedestalBoxIndices.clear();
     // Pedestal in NW Archives
     g_symbols.push_back({"Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY"}); // WOLF(1) SERPENT(3) OWL(0)
-    addPedestalSprite( engineContext, 3.5f, 3.5f, "Ancient Pedestal" );
+    addPedestal3D( engineContext, 3.5f, 3.5f );
 
     g_clueNotes.clear();
     // Atrium note
@@ -651,6 +885,8 @@ g_keyPickups.clear();
 g_clueNotes.clear();
 g_safes.clear();
 g_symbols.clear();
+g_safeBoxIndices.clear();
+g_pedestalBoxIndices.clear();
 g_playerKeys.clear();
 g_foundNotes.clear();
 g_accessPopup.clear();
@@ -845,6 +1081,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
                 loadImageOrFallback( ip.string(), engineContext.artImages[ i ], rgb( 220, 220, 220 ) );
             }
         }
+
+        // Stair transition is now represented as a wall mural overlay near the upper entry point.
         /*
         {
             BoxProp box;
@@ -1844,6 +2082,33 @@ static void render( Engine &engineContext, float dt ) {
                     }
                 }
             }
+            if (engineContext.currentLevel == Levels::MUSEUM && g_stairWallOverlayReady)
+            {
+                bool stairWallTile = (side == 0) && (mapX == 22) && (mapY == 9);
+                if (stairWallTile)
+                {
+                    float u0 = 0.0f;
+                    float u1 = 1.0f;
+                    if (wallX >= u0 && wallX <= u1)
+                    {
+                        int bandStart = drawStart;
+                        int bandEnd = drawEnd;
+                        int bandH = std::max( 1, bandEnd - bandStart + 1 );
+
+                        float un = (wallX - u0) / std::max( 0.0001f, (u1 - u0) );
+                        int texX = std::clamp( int( un * (g_stairWallOverlay.width - 1) ), 0, g_stairWallOverlay.width - 1 );
+
+                        for (int y = bandStart; y <= bandEnd; ++y)
+                        {
+                            float vn = (y - bandStart) / float( std::max( 1, bandH - 1 ) );
+                            int texY = std::clamp( int( vn * (g_stairWallOverlay.height - 1) ), 0, g_stairWallOverlay.height - 1 );
+                            Uint32 c = g_stairWallOverlay.sample( texX, texY );
+                            if (((c >> 16) & 255) == 255 && ((c >> 8) & 255) == 0 && (c & 255) == 255) continue;
+                            putPix( engineContext, x, y, c );
+                        }
+                    }
+                }
+            }
             else if (engineContext.currentLevel == Levels::CAVE) {
 
             }
@@ -2018,6 +2283,7 @@ static void render( Engine &engineContext, float dt ) {
     {
         for (const auto &box : engineContext.benches3D)
         {
+            render_box_top( engineContext, box, box.sideTexure );
             render_box( engineContext, box );
             //render_legs( engineContext, box );
         }
@@ -2370,9 +2636,9 @@ static void render( Engine &engineContext, float dt ) {
         drawString16x16( engineContext, (RENDER_W / 2) - 160, (RENDER_H / 2) + 105, "[E] CHECK IN", rgb( 220, 220, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
-    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, 19.5f, 9.3f, 1.1f ))
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 130, (RENDER_H / 2) + 105, "[E] TAKE STAIRS TO UPPER GALLERY", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 140, (RENDER_H / 2) + 105, "[E] ENTER STAIRWELL TO UPPER GALLERY", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearPoint( engineContext, 3.5f, 9.3f, 1.1f ))
     {
@@ -2962,7 +3228,7 @@ int main( int argc, char **argv ) {
                             continue;
                         }
 
-                        if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, 19.5f, 9.3f, 1.1f ))
+                        if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
                         {
                             triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ASCENDING TO UPPER GALLERY", 0.9f );
                             beginLevelTransition( Levels::MUSEUM_UPPER, 1.0f );

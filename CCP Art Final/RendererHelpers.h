@@ -1049,7 +1049,7 @@ inline void draw_vertical_face( Engine &engineContext, float ax, float ay, float
             // magenta transparent
             if (((c >> 16) & 255) == 255 && ((c >> 8) & 255) == 0 && (c & 255) == 255) continue;
 
-            if (boolIsNearBlack( c, 120 ))
+            if (boolIsNearBlack( c, 10 ))
             {
                 continue;
             }
