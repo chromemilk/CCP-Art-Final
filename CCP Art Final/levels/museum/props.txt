@@ -3,7 +3,7 @@ TRASHCAN 15.7814 7.15972 trashcan.bmp 0.5
 VASE2 5.79969 11.7951 vase2.bmp 0.5
 TRASHCAN 1.20395 11.7943 trashcan.bmp 0.5
 TRASHCAN 17.9 14.2 trashcan.bmp 0.5
-PLANT 16.20107 15.7856 plant.bmp 1
+PLANT 16.20107 15.7 plant.bmp 1
 PLANT 1.20107 7.2056 plant.bmp 1
 PLANT 5.7963 7.20711 plant.bmp 1
 PLANT 13.7927 1.20411 plant.bmp 1

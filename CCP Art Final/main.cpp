@@ -144,6 +144,7 @@ struct WorldModelInstance
     std::shared_ptr<CpuModel> model;
     float x = 0.0f;
     float y = 0.0f;
+    float heightOffset = 0.0f;
     float scale = 1.0f;
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -709,7 +710,8 @@ static int addWorldModelInstance(
     float pitch = 0.0f,
     float roll = 0.0f,
     bool spinYaw = false,
-    float spinSpeed = 0.0f ) {
+    float spinSpeed = 0.0f,
+    float heightOffset = 0.0f ) {
     auto model = loadCpuModel( modelPath );
     if (!model) return -1;
 
@@ -724,6 +726,7 @@ static int addWorldModelInstance(
     inst.model = std::move( model );
     inst.x = x;
     inst.y = y;
+    inst.heightOffset = heightOffset;
     inst.scale = std::clamp( (targetWorldSize / modelReferenceSize) * overrideMul, 0.01f, 2.0f );
     inst.tint = tint;
     inst.yaw = yaw;
@@ -1021,7 +1024,7 @@ static NotePickupVisual addNotePickupModel( Engine &engineContext, float x, floa
         0.25f,
         rgb( 225, 214, 180 ),
         0.0f,
-        -1.5707963f,
+        0.0f,
         0.0f,
         true,
         1.4f );
@@ -1057,10 +1060,11 @@ static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::strin
         0.17f,
         keyColor,
         0.0f,
-        -1.5707963f,
         0.0f,
+        -1.5707963f,
         true,
-        1.2f );
+        1.2f,
+        0.2f);
 
     KeyPickup out;
     out.keyName = keyName;
@@ -1397,12 +1401,12 @@ static int addBoxMesh( Engine &engineContext, float x, float y, float halfLength
 
 static void addSafe3D( Engine &engineContext, float x, float y ) {
     (void)engineContext;
-    g_safeBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Safe.glb" ), x, y, 0.72f, rgb( 255, 255, 255 ), 3.14) );
+    g_safeBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Safe.glb" ), x, y, 0.72f, rgb( 255, 255, 255 ), 3.14, 0, 0, false, 0, -0.05f) );
 }
 
 static void addPedestal3D( Engine &engineContext, float x, float y ) {
     (void)engineContext;
-    g_pedestalBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Pedestal.glb" ), x, y, 0.46f, rgb( 164, 156, 142 ) ) );
+    g_pedestalBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Pedestal.glb" ), x, y, 0.46f, rgb( 164, 156, 142 ), 0, 0, false, 0, -0.05f) );
 }
 
 static void initMuseumPuzzle( Engine &engineContext ) {
@@ -1444,7 +1448,7 @@ static void initMuseumPuzzle( Engine &engineContext ) {
 
     g_keyPickups.clear();
     // Bronze Key in main atrium start
-    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BRONZE KEY", 14.5f, 11.5f, rgb( 180, 120, 40 ), "Bronze Key.glb" ) );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BRONZE KEY", 8.1f, 7.7f, rgb( 180, 120, 40 ), "Bronze Key.glb" ) );
     // Silver Key in North Wing
     g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "SILVER KEY", 10.5f, 3.5f, rgb( 190, 190, 200 ), "Silver Key.glb" ) );
     // Fallback Gold Key in North Wing so progression cannot dead-end
@@ -1463,18 +1467,26 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     addPedestal3D( engineContext, 3.5f, 3.5f );
 
     // Director room furnishing + decor models
-    addWorldModelInstance( resolveAssetModelPath( "Full Desk.glb" ), 16.36f, 16.55f, 0.8f, rgb( 170, 150, 130 ), 3.1415926f );
-    addWorldModelInstance( resolveAssetModelPath( "Shelf.glb" ), 18.6f, 14.2f, 0.8f, rgb( 170, 160, 140 ), -1.5707963f );
+    addWorldModelInstance( resolveAssetModelPath( "Full Desk.glb" ), 16.36f, 16.55f, 0.8f, rgb( 170, 150, 130 ), 3.1415926f, 0, 0 , false, 0, -0.05f);
+    addWorldModelInstance( resolveAssetModelPath( "Shelf.glb" ), 18.6f, 14.2f, 0.8f, rgb( 170, 160, 140 ), -1.5707963f, 0, 0, false, 0, -0.05f);
   //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.24f, 14.48f, 0.14f, rgb( 230, 218, 184 ), -1.5707963f, -1.5707963f );
   //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.38f, 14.52f, 0.13f, rgb( 228, 216, 180 ), -1.5707963f, -1.5707963f );
-    addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.6f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926);
-    addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f);
+    addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.5f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
+    addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
+    addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
+
+
+    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
 
     // Scattered floor paper props (1-3)
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 16.4f, 14.9f, 0.22f, rgb( 224, 214, 188 ), 0.45f );
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.1f, 14.4f, 0.20f, rgb( 220, 210, 182 ), -0.20f );
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.8f, 15.0f, 0.18f, rgb( 226, 216, 190 ), 0.95f );
-
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 16.4f, 14.9f, 0.22f, rgb( 224, 214, 188 ), 0.45f, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.1f, 14.4f, 0.20f, rgb( 220, 210, 182 ), -0.20f, 0, 0, false, 0, -0.05f);
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.8f, 15.0f, 0.18f, rgb( 226, 216, 190 ), 0.95f, 0, 0, false, 0, -0.05f);
     g_clueNotes.clear();
     // Atrium note
     g_clueNotes.push_back( makeClueNote( engineContext,
@@ -1750,7 +1762,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     for (auto &prop : engineContext.props)
     {
         if (!prop.prefersModel || prop.modelAssetPath.empty()) continue;
-        addWorldModelInstance( prop.modelAssetPath, prop.x, prop.y, targetHeightForKind( prop.kind, prop.scale ), modelTintForKind( prop.kind ) );
+        addWorldModelInstance( prop.modelAssetPath, prop.x, prop.y, targetHeightForKind( prop.kind, prop.scale ), modelTintForKind( prop.kind ), 0, 0, 0, false, 0, -0.05f );
         prop.scale = 0.0f;
     }
 
@@ -2564,7 +2576,7 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             const glm::vec3 r = transformed[ i ];
 
             const float wx = inst.x + r.x;
-            const float wy = r.y - modelMinY;
+            const float wy = (r.y - modelMinY) + inst.heightOffset;
             const float wz = inst.y + r.z;
 
             const float dx = wx - engineContext.positionX;
