@@ -6,6 +6,24 @@
 #include <filesystem> 
 #include <thread>
 #include <array>
+#include <memory>
+#include <limits>
+#include <functional>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+#ifndef TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_IMPLEMENTATION
+#endif
+#ifndef STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#endif
+#ifndef STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
+#include "tiny_gltf.h"
 
 using namespace std;
 
@@ -34,6 +52,7 @@ struct KeyPickup
     float y = 0.f;
     bool collected = false;
     int propIndex = -1;
+    int modelIndex = -1;
 };
 
 struct CaveQuizQuestion
@@ -51,6 +70,7 @@ struct ClueNote
     float y = 0.f;
     bool collected = false;
     int propIndex = -1;
+    int modelIndex = -1;
 };
 
 struct SafePuzzle
@@ -105,6 +125,616 @@ static bool g_caveQuizPassed = false;
 static int g_caveQuizQuestionIndex = 0;
 static std::vector<CaveQuizQuestion> g_caveQuiz;
 static bool g_museumPuzzleInitialized = false;
+
+struct CpuModel
+{
+    std::vector<glm::vec3> vertices;
+    std::vector<glm::vec3> colors;
+    std::vector<glm::vec2> uvs;
+    std::vector<uint32_t> indices;
+    std::vector<Image> baseColorTextures;
+    std::vector<int> triangleTextureIndex;
+    std::vector<glm::vec4> triangleBaseColorFactor;
+    glm::vec3 boundsMin{0.0f};
+    glm::vec3 boundsMax{0.0f};
+};
+
+struct WorldModelInstance
+{
+    std::shared_ptr<CpuModel> model;
+    float x = 0.0f;
+    float y = 0.0f;
+    float scale = 1.0f;
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    float roll = 0.0f;
+    bool spinYaw = false;
+    float spinSpeed = 0.0f;
+    Uint32 tint = rgb( 170, 170, 170 );
+    bool visible = true;
+};
+
+static std::unordered_map<std::string, std::shared_ptr<CpuModel>> g_cpuModelCache;
+static std::vector<WorldModelInstance> g_worldModels;
+
+static std::string resolveAssetModelPath( const std::string &assetName ) {
+    namespace fs = std::filesystem;
+    fs::path start = fs::current_path();
+    for (int i = 0; i < 7; ++i)
+    {
+        fs::path a = start / "assets" / assetName;
+        if (fs::exists( a )) return a.string();
+        fs::path b = start / "CCP Art Final" / "assets" / assetName;
+        if (fs::exists( b )) return b.string();
+        if (!start.has_parent_path()) break;
+        fs::path parent = start.parent_path();
+        if (parent == start) break;
+        start = parent;
+    }
+    return (fs::current_path() / "assets" / assetName).string();
+}
+
+static bool readAccessorVec3( const tinygltf::Model &gltf, int accessorIndex, std::vector<glm::vec3> &out ) {
+    if (accessorIndex < 0 || accessorIndex >= (int)gltf.accessors.size()) return false;
+    const auto &acc = gltf.accessors[ accessorIndex ];
+    if (acc.type != TINYGLTF_TYPE_VEC3 || acc.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) return false;
+    if (acc.bufferView < 0 || acc.bufferView >= (int)gltf.bufferViews.size()) return false;
+    const auto &view = gltf.bufferViews[ acc.bufferView ];
+    if (view.buffer < 0 || view.buffer >= (int)gltf.buffers.size()) return false;
+
+    const auto &buf = gltf.buffers[ view.buffer ];
+    size_t stride = acc.ByteStride( view );
+    if (stride == 0) stride = sizeof( float ) * 3;
+    const uint8_t *src = buf.data.data() + view.byteOffset + acc.byteOffset;
+    out.resize( acc.count );
+    for (size_t i = 0; i < acc.count; ++i)
+    {
+        const float *f = reinterpret_cast<const float *>( src + i * stride );
+        out[ i ] = glm::vec3( f[ 0 ], f[ 1 ], f[ 2 ] );
+    }
+    return true;
+}
+
+static glm::mat4 buildNodeLocalMatrix( const tinygltf::Node &node ) {
+    if (node.matrix.size() == 16)
+    {
+        return glm::make_mat4( node.matrix.data() );
+    }
+
+    glm::mat4 m( 1.0f );
+    if (node.translation.size() == 3)
+    {
+        m = glm::translate( m, glm::vec3(
+            (float)node.translation[ 0 ],
+            (float)node.translation[ 1 ],
+            (float)node.translation[ 2 ] ) );
+    }
+    if (node.rotation.size() == 4)
+    {
+        const glm::quat q(
+            (float)node.rotation[ 3 ],
+            (float)node.rotation[ 0 ],
+            (float)node.rotation[ 1 ],
+            (float)node.rotation[ 2 ] );
+        m *= glm::mat4_cast( q );
+    }
+    if (node.scale.size() == 3)
+    {
+        m = glm::scale( m, glm::vec3(
+            (float)node.scale[ 0 ],
+            (float)node.scale[ 1 ],
+            (float)node.scale[ 2 ] ) );
+    }
+    return m;
+}
+
+static bool readAccessorIndices( const tinygltf::Model &gltf, int accessorIndex, std::vector<uint32_t> &out );
+
+static bool readAccessorVec2( const tinygltf::Model &gltf, int accessorIndex, std::vector<glm::vec2> &out ) {
+    if (accessorIndex < 0 || accessorIndex >= (int)gltf.accessors.size()) return false;
+    const auto &acc = gltf.accessors[ accessorIndex ];
+    if (acc.type != TINYGLTF_TYPE_VEC2) return false;
+    if (acc.bufferView < 0 || acc.bufferView >= (int)gltf.bufferViews.size()) return false;
+    const auto &view = gltf.bufferViews[ acc.bufferView ];
+    if (view.buffer < 0 || view.buffer >= (int)gltf.buffers.size()) return false;
+
+    const auto &buf = gltf.buffers[ view.buffer ];
+    size_t stride = acc.ByteStride( view );
+    if (stride == 0)
+    {
+        size_t compSize = sizeof( float );
+        if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE || acc.componentType == TINYGLTF_COMPONENT_TYPE_BYTE) compSize = sizeof( uint8_t );
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT || acc.componentType == TINYGLTF_COMPONENT_TYPE_SHORT) compSize = sizeof( uint16_t );
+        else if (acc.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) return false;
+        stride = compSize * 2;
+    }
+
+    const uint8_t *src = buf.data.data() + view.byteOffset + acc.byteOffset;
+    out.resize( acc.count );
+    for (size_t i = 0; i < acc.count; ++i)
+    {
+        const uint8_t *p = src + i * stride;
+        if (acc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+        {
+            const float *f = reinterpret_cast<const float *>( p );
+            out[ i ] = glm::vec2( f[ 0 ], f[ 1 ] );
+        }
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+        {
+            const uint8_t *u = reinterpret_cast<const uint8_t *>( p );
+            out[ i ] = glm::vec2( float( u[ 0 ] ) / 255.0f, float( u[ 1 ] ) / 255.0f );
+        }
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+        {
+            const uint16_t *u = reinterpret_cast<const uint16_t *>( p );
+            out[ i ] = glm::vec2( float( u[ 0 ] ) / 65535.0f, float( u[ 1 ] ) / 65535.0f );
+        }
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_BYTE)
+        {
+            const int8_t *s = reinterpret_cast<const int8_t *>( p );
+            out[ i ] = glm::vec2( std::clamp( float( s[ 0 ] ) / 127.0f, -1.0f, 1.0f ), std::clamp( float( s[ 1 ] ) / 127.0f, -1.0f, 1.0f ) );
+            out[ i ] = out[ i ] * 0.5f + glm::vec2( 0.5f );
+        }
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_SHORT)
+        {
+            const int16_t *s = reinterpret_cast<const int16_t *>( p );
+            out[ i ] = glm::vec2( std::clamp( float( s[ 0 ] ) / 32767.0f, -1.0f, 1.0f ), std::clamp( float( s[ 1 ] ) / 32767.0f, -1.0f, 1.0f ) );
+            out[ i ] = out[ i ] * 0.5f + glm::vec2( 0.5f );
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int appendBaseColorTexture( const tinygltf::Model &gltf, const tinygltf::Primitive &primitive, CpuModel &out ) {
+    if (primitive.material < 0 || primitive.material >= (int)gltf.materials.size()) return -1;
+
+    const auto &mat = gltf.materials[ primitive.material ];
+    int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
+    if (texIndex < 0 || texIndex >= (int)gltf.textures.size()) return -1;
+
+    int imageIndex = gltf.textures[ texIndex ].source;
+    if (imageIndex < 0 || imageIndex >= (int)gltf.images.size()) return -1;
+
+    const auto &img = gltf.images[ imageIndex ];
+    if (img.width <= 0 || img.height <= 0 || img.image.empty()) return -1;
+
+    const int comp = std::max( 1, img.component );
+    int bytesPerComponent = 1;
+    if (img.bits > 0)
+    {
+        bytesPerComponent = std::max( 1, (img.bits + 7) / 8 );
+    }
+    else if (img.pixel_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT || img.pixel_type == TINYGLTF_COMPONENT_TYPE_SHORT)
+    {
+        bytesPerComponent = 2;
+    }
+    else if (img.pixel_type == TINYGLTF_COMPONENT_TYPE_FLOAT || img.pixel_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+    {
+        bytesPerComponent = 4;
+    }
+
+    const size_t pixelStride = size_t( comp ) * size_t( bytesPerComponent );
+    if (pixelStride == 0) return -1;
+
+    Image tex;
+    tex.width = img.width;
+    tex.height = img.height;
+    tex.pixels.resize( img.width * img.height );
+
+    auto readChannel8 = [&]( const uint8_t *px, size_t pxBytes, int channel )->Uint8 {
+        channel = std::clamp( channel, 0, comp - 1 );
+        const size_t off = size_t( channel ) * size_t( bytesPerComponent );
+        if (off >= pxBytes) return 255;
+
+        const uint8_t *src = px + off;
+        const size_t avail = pxBytes - off;
+
+        if (bytesPerComponent == 1)
+        {
+            return src[ 0 ];
+        }
+        if (bytesPerComponent == 2)
+        {
+            if (avail < 2) return src[ 0 ];
+            const uint16_t v = uint16_t( src[ 0 ] ) | (uint16_t( src[ 1 ] ) << 8);
+            return Uint8( v / 257u );
+        }
+        if (bytesPerComponent == 4 && img.pixel_type == TINYGLTF_COMPONENT_TYPE_FLOAT)
+        {
+            if (avail < 4) return src[ 0 ];
+            float f = 0.0f;
+            std::memcpy( &f, src, sizeof( float ) );
+            return Uint8( std::clamp( f * 255.0f, 0.0f, 255.0f ) );
+        }
+
+        return src[ 0 ];
+        };
+
+    for (int y = 0; y < img.height; ++y)
+    {
+        for (int x = 0; x < img.width; ++x)
+        {
+            const size_t i = size_t( y * img.width + x ) * pixelStride;
+            if (i >= img.image.size())
+            {
+                tex.pixels[ y * img.width + x ] = rgb( 255, 255, 255 );
+                continue;
+            }
+            const size_t pxBytes = std::min( pixelStride, img.image.size() - i );
+            const uint8_t *px = img.image.data() + i;
+
+            const Uint8 r = readChannel8( px, pxBytes, 0 );
+            const Uint8 g = (comp > 1) ? readChannel8( px, pxBytes, 1 ) : r;
+            const Uint8 b = (comp > 2) ? readChannel8( px, pxBytes, 2 ) : r;
+            tex.pixels[ y * img.width + x ] = rgb( r, g, b );
+        }
+    }
+
+    int newIndex = (int)out.baseColorTextures.size();
+    out.baseColorTextures.push_back( std::move( tex ) );
+    return newIndex;
+}
+
+static bool readAccessorColor3( const tinygltf::Model &gltf, int accessorIndex, std::vector<glm::vec3> &out ) {
+    if (accessorIndex < 0 || accessorIndex >= (int)gltf.accessors.size()) return false;
+    const auto &acc = gltf.accessors[ accessorIndex ];
+    if (acc.bufferView < 0 || acc.bufferView >= (int)gltf.bufferViews.size()) return false;
+    const auto &view = gltf.bufferViews[ acc.bufferView ];
+    if (view.buffer < 0 || view.buffer >= (int)gltf.buffers.size()) return false;
+    const auto &buf = gltf.buffers[ view.buffer ];
+
+    const int comps = (acc.type == TINYGLTF_TYPE_VEC4) ? 4 : ((acc.type == TINYGLTF_TYPE_VEC3) ? 3 : 0);
+    if (comps == 0) return false;
+
+    size_t stride = acc.ByteStride( view );
+    if (stride == 0)
+    {
+        size_t compSize = 4;
+        if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) compSize = 1;
+        else if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) compSize = 2;
+        stride = compSize * comps;
+    }
+
+    const uint8_t *src = buf.data.data() + view.byteOffset + acc.byteOffset;
+    out.resize( acc.count, glm::vec3( 1.0f ) );
+
+    for (size_t i = 0; i < acc.count; ++i)
+    {
+        const uint8_t *p = src + i * stride;
+        auto readComp = [&]( int c )->float {
+            if (acc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+            {
+                return reinterpret_cast<const float *>( p )[ c ];
+            }
+            if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+            {
+                const float v = float( reinterpret_cast<const uint8_t *>( p )[ c ] );
+                return acc.normalized ? (v / 255.0f) : v;
+            }
+            if (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+            {
+                const float v = float( reinterpret_cast<const uint16_t *>( p )[ c ] );
+                return acc.normalized ? (v / 65535.0f) : v;
+            }
+            return 1.0f;
+            };
+
+        out[ i ].r = std::clamp( readComp( 0 ), 0.0f, 1.0f );
+        out[ i ].g = std::clamp( readComp( 1 ), 0.0f, 1.0f );
+        out[ i ].b = std::clamp( readComp( 2 ), 0.0f, 1.0f );
+    }
+
+    return true;
+}
+
+static void appendMeshPrimitiveToCpuModel(
+    const tinygltf::Model &gltf,
+    const tinygltf::Primitive &primitive,
+    const glm::mat4 &world,
+    CpuModel &out ) {
+    if (primitive.mode != -1 && primitive.mode != TINYGLTF_MODE_TRIANGLES)
+    {
+        return;
+    }
+
+    auto posIt = primitive.attributes.find( "POSITION" );
+    if (posIt == primitive.attributes.end()) return;
+
+    std::vector<glm::vec3> pos;
+    if (!readAccessorVec3( gltf, posIt->second, pos )) return;
+
+    std::vector<glm::vec2> uv0;
+    std::vector<glm::vec2> uv1;
+    std::vector<glm::vec2> uv;
+    bool hasValidUv = false;
+    auto uv0It = primitive.attributes.find( "TEXCOORD_0" );
+    if (uv0It != primitive.attributes.end())
+    {
+        hasValidUv = readAccessorVec2( gltf, uv0It->second, uv0 );
+    }
+
+    auto uv1It = primitive.attributes.find( "TEXCOORD_1" );
+    bool hasValidUv1 = false;
+    if (uv1It != primitive.attributes.end())
+    {
+        hasValidUv1 = readAccessorVec2( gltf, uv1It->second, uv1 );
+    }
+
+    int baseTexCoordSet = 0;
+    if (primitive.material >= 0 && primitive.material < (int)gltf.materials.size())
+    {
+        baseTexCoordSet = gltf.materials[ primitive.material ].pbrMetallicRoughness.baseColorTexture.texCoord;
+    }
+
+    if (baseTexCoordSet == 1 && hasValidUv1 && uv1.size() == pos.size())
+    {
+        uv = uv1;
+        hasValidUv = true;
+    }
+    else if (hasValidUv && uv0.size() == pos.size())
+    {
+        uv = uv0;
+        hasValidUv = true;
+    }
+
+    if (uv.size() != pos.size())
+    {
+        uv.assign( pos.size(), glm::vec2( 0.0f ) );
+        hasValidUv = false;
+    }
+
+    glm::vec4 materialBaseColorFactor( 1.0f );
+    if (primitive.material >= 0 && primitive.material < (int)gltf.materials.size())
+    {
+        const auto &mat = gltf.materials[ primitive.material ];
+        const auto &factor = mat.pbrMetallicRoughness.baseColorFactor;
+        if (factor.size() >= 4)
+        {
+            materialBaseColorFactor = glm::vec4(
+                (float)factor[ 0 ],
+                (float)factor[ 1 ],
+                (float)factor[ 2 ],
+                (float)factor[ 3 ] );
+        }
+    }
+
+    std::vector<glm::vec3> vcol;
+    auto colorIt = primitive.attributes.find( "COLOR_0" );
+    if (colorIt != primitive.attributes.end())
+    {
+        (void)readAccessorColor3( gltf, colorIt->second, vcol );
+    }
+    if (vcol.size() != pos.size())
+    {
+        vcol.assign( pos.size(), glm::vec3( 1.0f ) );
+    }
+
+    std::vector<uint32_t> idx;
+    if (primitive.indices >= 0)
+    {
+        if (!readAccessorIndices( gltf, primitive.indices, idx )) return;
+    }
+    else
+    {
+        idx.resize( pos.size() );
+        for (uint32_t i = 0; i < (uint32_t)pos.size(); ++i) idx[ i ] = i;
+    }
+
+    for (uint32_t i : idx)
+    {
+        if (i >= pos.size()) return;
+    }
+
+    const uint32_t base = (uint32_t)out.vertices.size();
+    out.vertices.reserve( out.vertices.size() + pos.size() );
+    out.colors.reserve( out.colors.size() + pos.size() );
+    out.uvs.reserve( out.uvs.size() + pos.size() );
+    for (const auto &v : pos)
+    {
+        const size_t vi = size_t( &v - pos.data() );
+        const glm::vec3 tv = glm::vec3( world * glm::vec4( v, 1.0f ) );
+        out.vertices.push_back( tv );
+        out.colors.push_back( vcol[ vi ] );
+        out.uvs.push_back( uv[ vi ] );
+        out.boundsMin = glm::min( out.boundsMin, tv );
+        out.boundsMax = glm::max( out.boundsMax, tv );
+    }
+
+    int primitiveTextureIndex = appendBaseColorTexture( gltf, primitive, out );
+    if (!hasValidUv)
+    {
+        primitiveTextureIndex = -1;
+    }
+
+    out.indices.reserve( out.indices.size() + idx.size() );
+    for (uint32_t i : idx)
+    {
+        out.indices.push_back( base + i );
+    }
+
+    const int triCount = (int)(idx.size() / 3);
+    if (triCount > 0)
+    {
+        out.triangleTextureIndex.reserve( out.triangleTextureIndex.size() + triCount );
+        out.triangleBaseColorFactor.reserve( out.triangleBaseColorFactor.size() + triCount );
+        for (int t = 0; t < triCount; ++t)
+        {
+            out.triangleTextureIndex.push_back( primitiveTextureIndex );
+            out.triangleBaseColorFactor.push_back( materialBaseColorFactor );
+        }
+    }
+}
+
+static bool readAccessorIndices( const tinygltf::Model &gltf, int accessorIndex, std::vector<uint32_t> &out ) {
+    if (accessorIndex < 0 || accessorIndex >= (int)gltf.accessors.size()) return false;
+    const auto &acc = gltf.accessors[ accessorIndex ];
+    if (acc.bufferView < 0 || acc.bufferView >= (int)gltf.bufferViews.size()) return false;
+    const auto &view = gltf.bufferViews[ acc.bufferView ];
+    if (view.buffer < 0 || view.buffer >= (int)gltf.buffers.size()) return false;
+    const auto &buf = gltf.buffers[ view.buffer ];
+
+    size_t stride = acc.ByteStride( view );
+    if (stride == 0)
+    {
+        stride = (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) ? 2 :
+            (acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ? 1 : 4);
+    }
+
+    const uint8_t *src = buf.data.data() + view.byteOffset + acc.byteOffset;
+    out.resize( acc.count );
+    for (size_t i = 0; i < acc.count; ++i)
+    {
+        const uint8_t *p = src + i * stride;
+        switch (acc.componentType)
+        {
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+            out[ i ] = *reinterpret_cast<const uint8_t *>( p );
+            break;
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+            out[ i ] = *reinterpret_cast<const uint16_t *>( p );
+            break;
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+            out[ i ] = *reinterpret_cast<const uint32_t *>( p );
+            break;
+        default:
+            return false;
+        }
+    }
+    return true;
+}
+
+static std::shared_ptr<CpuModel> loadCpuModel( const std::string &modelPath ) {
+    auto hit = g_cpuModelCache.find( modelPath );
+    if (hit != g_cpuModelCache.end()) return hit->second;
+
+    tinygltf::TinyGLTF loader;
+    tinygltf::Model gltf;
+    std::string warn;
+    std::string err;
+
+    bool ok = false;
+    if (modelPath.size() >= 4 && modelPath.substr( modelPath.size() - 4 ) == ".glb")
+        ok = loader.LoadBinaryFromFile( &gltf, &err, &warn, modelPath );
+    else
+        ok = loader.LoadASCIIFromFile( &gltf, &err, &warn, modelPath );
+
+    if (!ok)
+    {
+        g_cpuModelCache[ modelPath ] = nullptr;
+        return nullptr;
+    }
+
+    auto out = std::make_shared<CpuModel>();
+    out->boundsMin = glm::vec3( std::numeric_limits<float>::max() );
+    out->boundsMax = glm::vec3( std::numeric_limits<float>::lowest() );
+
+    bool wroteAny = false;
+    auto appendMeshByNode = [&]( int meshIndex, const glm::mat4 &world ) {
+        if (meshIndex < 0 || meshIndex >= (int)gltf.meshes.size()) return;
+        const auto &mesh = gltf.meshes[ meshIndex ];
+        for (const auto &primitive : mesh.primitives)
+        {
+            const size_t beforeCount = out->vertices.size();
+            appendMeshPrimitiveToCpuModel( gltf, primitive, world, *out );
+            if (out->vertices.size() > beforeCount) wroteAny = true;
+        }
+    };
+
+    std::function<void( int, const glm::mat4& )> walkNode;
+    walkNode = [&]( int nodeIndex, const glm::mat4 &parentWorld ) {
+        if (nodeIndex < 0 || nodeIndex >= (int)gltf.nodes.size()) return;
+        const auto &node = gltf.nodes[ nodeIndex ];
+        const glm::mat4 world = parentWorld * buildNodeLocalMatrix( node );
+        appendMeshByNode( node.mesh, world );
+        for (int child : node.children)
+        {
+            walkNode( child, world );
+        }
+    };
+
+    int sceneIndex = gltf.defaultScene;
+    if (sceneIndex < 0 && !gltf.scenes.empty()) sceneIndex = 0;
+    if (sceneIndex >= 0 && sceneIndex < (int)gltf.scenes.size())
+    {
+        const auto &scene = gltf.scenes[ sceneIndex ];
+        for (int rootNode : scene.nodes)
+        {
+            walkNode( rootNode, glm::mat4( 1.0f ) );
+        }
+    }
+
+    if (!wroteAny)
+    {
+        for (size_t meshIndex = 0; meshIndex < gltf.meshes.size(); ++meshIndex)
+        {
+            appendMeshByNode( (int)meshIndex, glm::mat4( 1.0f ) );
+        }
+    }
+
+    if (out->vertices.empty() || out->indices.size() < 3)
+    {
+        g_cpuModelCache[ modelPath ] = nullptr;
+        return nullptr;
+    }
+
+    g_cpuModelCache[ modelPath ] = out;
+    return out;
+}
+
+static float modelScaleOverride( const std::string &modelPath ) {
+    const std::string lower = std::filesystem::path( modelPath ).filename().string();
+    if (lower.find( "Plant" ) != std::string::npos) return 0.92f;
+    if (lower.find( "Pedestal" ) != std::string::npos) return 0.95f;
+    if (lower.find( "Vase2" ) != std::string::npos) return 0.58f;
+    if (lower.find( "Vase1" ) != std::string::npos) return 0.86f;
+    if (lower.find( "Vase3" ) != std::string::npos) return 0.82f;
+    if (lower.find( "Bronze Key" ) != std::string::npos) return 1.30f;
+    if (lower.find( "Silver Key" ) != std::string::npos) return 1.30f;
+    if (lower.find( "Gold Key" ) != std::string::npos) return 1.30f;
+    if (lower.find( "Iron Key" ) != std::string::npos) return 1.30f;
+    return 1.0f;
+}
+
+static int addWorldModelInstance(
+    const std::string &modelPath,
+    float x,
+    float y,
+    float scale,
+    Uint32 tint,
+    float yaw = 0.0f,
+    float pitch = 0.0f,
+    float roll = 0.0f,
+    bool spinYaw = false,
+    float spinSpeed = 0.0f ) {
+    auto model = loadCpuModel( modelPath );
+    if (!model) return -1;
+
+    const float modelSizeX = std::max( 0.0001f, std::fabs( model->boundsMax.x - model->boundsMin.x ) );
+    const float modelSizeY = std::max( 0.0001f, std::fabs( model->boundsMax.y - model->boundsMin.y ) );
+    const float modelSizeZ = std::max( 0.0001f, std::fabs( model->boundsMax.z - model->boundsMin.z ) );
+    const float modelReferenceSize = std::max( { modelSizeX, modelSizeY, modelSizeZ } );
+    const float targetWorldSize = std::max( 0.02f, scale );
+    const float overrideMul = modelScaleOverride( modelPath );
+
+    WorldModelInstance inst;
+    inst.model = std::move( model );
+    inst.x = x;
+    inst.y = y;
+    inst.scale = std::clamp( (targetWorldSize / modelReferenceSize) * overrideMul, 0.01f, 2.0f );
+    inst.tint = tint;
+    inst.yaw = yaw;
+    inst.pitch = pitch;
+    inst.roll = roll;
+    inst.spinYaw = spinYaw;
+    inst.spinSpeed = spinSpeed;
+    int index = (int)g_worldModels.size();
+    g_worldModels.push_back( std::move( inst ) );
+    return index;
+}
 
 static float g_caveTimerSeconds = 120.0f;
 static bool g_caveTimerActive = false;
@@ -366,6 +996,80 @@ static int addKeyPickupSprite( Engine &engineContext, float x, float y, const st
     int propIndex = (int)engineContext.props.size();
     engineContext.props.push_back( std::move( prop ) );
     return propIndex;
+}
+
+static int addNotePickupSprite( Engine &engineContext, float x, float y, const std::string &noteName );
+
+struct NotePickupVisual
+{
+    int propIndex = -1;
+    int modelIndex = -1;
+};
+
+static NotePickupVisual addNotePickupModel( Engine &engineContext, float x, float y, const std::string &noteName ) {
+    NotePickupVisual out;
+    out.propIndex = addNotePickupSprite( engineContext, x, y, noteName );
+    if (out.propIndex >= 0 && out.propIndex < (int)engineContext.props.size())
+    {
+        engineContext.props[ out.propIndex ].scale = 0.0f;
+    }
+
+    out.modelIndex = addWorldModelInstance(
+        resolveAssetModelPath( "Note.glb" ),
+        x,
+        y,
+        0.25f,
+        rgb( 225, 214, 180 ),
+        0.0f,
+        -1.5707963f,
+        0.0f,
+        true,
+        1.4f );
+
+    return out;
+}
+
+static ClueNote makeClueNote( Engine &engineContext, const std::string &title, const std::string &body, float x, float y ) {
+    ClueNote note;
+    note.title = title;
+    note.body = body;
+    note.x = x;
+    note.y = y;
+    note.collected = false;
+
+    NotePickupVisual vis = addNotePickupModel( engineContext, x, y, title );
+    note.propIndex = vis.propIndex;
+    note.modelIndex = vis.modelIndex;
+    return note;
+}
+
+static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset ) {
+    int spriteIndex = addKeyPickupSprite( engineContext, x, y, keyName, keyColor );
+    if (spriteIndex >= 0 && spriteIndex < (int)engineContext.props.size())
+    {
+        engineContext.props[ spriteIndex ].scale = 0.0f;
+    }
+
+    int modelIndex = addWorldModelInstance(
+        resolveAssetModelPath( modelAsset ),
+        x,
+        y,
+        0.17f,
+        keyColor,
+        0.0f,
+        -1.5707963f,
+        0.0f,
+        true,
+        1.2f );
+
+    KeyPickup out;
+    out.keyName = keyName;
+    out.x = x;
+    out.y = y;
+    out.collected = false;
+    out.propIndex = spriteIndex;
+    out.modelIndex = modelIndex;
+    return out;
 }
 
 static void buildStairWallOverlay( Image &img ) {
@@ -692,38 +1396,13 @@ static int addBoxMesh( Engine &engineContext, float x, float y, float halfLength
 }
 
 static void addSafe3D( Engine &engineContext, float x, float y ) {
-    Image bodyTex = makeSafeMetalTexture();
-    Image doorTex = makeSafeDoorTexture();
-    // Merge door details into one texture to avoid coplanar z-fighting artifacts.
-    for (int yy = 8; yy < 56; ++yy)
-    {
-        for (int xx = 8; xx < 56; ++xx)
-        {
-            bodyTex.pixels[ yy * bodyTex.width + xx ] = doorTex.pixels[ yy * doorTex.width + xx ];
-        }
-    }
-    g_safeBoxIndices.push_back( addBoxMesh( engineContext, x, y, 0.33f, 0.24f, 0.40f, bodyTex ) );
+    (void)engineContext;
+    g_safeBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Safe.glb" ), x, y, 0.72f, rgb( 255, 255, 255 ), 3.14) );
 }
 
 static void addPedestal3D( Engine &engineContext, float x, float y ) {
-    Image stoneTex = makeStoneTexture();
-    // Emboss fake cap/base bands in texture while keeping a single stable 3D mesh.
-    for (int yTex = 0; yTex < stoneTex.height; ++yTex)
-    {
-        for (int xTex = 0; xTex < stoneTex.width; ++xTex)
-        {
-            Uint32 c = stoneTex.pixels[ yTex * stoneTex.width + xTex ];
-            int r = (c >> 16) & 255;
-            int g = (c >> 8) & 255;
-            int b = c & 255;
-            bool capBand = (yTex >= 6 && yTex <= 14);
-            bool baseBand = (yTex >= 46 && yTex <= 58);
-            if (capBand) { r = std::min( 255, r + 18 ); g = std::min( 255, g + 16 ); b = std::min( 255, b + 12 ); }
-            if (baseBand) { r = std::max( 0, r - 20 ); g = std::max( 0, g - 18 ); b = std::max( 0, b - 14 ); }
-            stoneTex.pixels[ yTex * stoneTex.width + xTex ] = rgb( (Uint8)r, (Uint8)g, (Uint8)b );
-        }
-    }
-    g_pedestalBoxIndices.push_back( addBoxMesh( engineContext, x, y, 0.22f, 0.22f, 0.46f, stoneTex ) );
+    (void)engineContext;
+    g_pedestalBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Pedestal.glb" ), x, y, 0.46f, rgb( 164, 156, 142 ) ) );
 }
 
 static void initMuseumPuzzle( Engine &engineContext ) {
@@ -765,17 +1444,17 @@ static void initMuseumPuzzle( Engine &engineContext ) {
 
     g_keyPickups.clear();
     // Bronze Key in main atrium start
-    g_keyPickups.push_back( {"BRONZE KEY", 14.5f, 11.5f, false, addKeyPickupSprite( engineContext, 14.5f, 11.5f, "BRONZE KEY", rgb( 180, 120, 40 ) )} );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BRONZE KEY", 14.5f, 11.5f, rgb( 180, 120, 40 ), "Bronze Key.glb" ) );
     // Silver Key in North Wing
-    g_keyPickups.push_back( {"SILVER KEY", 10.5f, 3.5f, false, addKeyPickupSprite( engineContext, 10.5f, 3.5f, "SILVER KEY", rgb( 190, 190, 200 ) )} );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "SILVER KEY", 10.5f, 3.5f, rgb( 190, 190, 200 ), "Silver Key.glb" ) );
     // Fallback Gold Key in North Wing so progression cannot dead-end
    // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
 
     g_safes.clear();
     g_safeBoxIndices.clear();
     // Safe in SE Office
-    g_safes.push_back({"Director's Safe", "2026", 17.5f, 15.5f, false, "GOLD KEY"});
-    addSafe3D( engineContext, 17.5f, 15.5f );
+    g_safes.push_back({"Director's Safe", "2026", 18.7f, 16.7f, false, "GOLD KEY"});
+    addSafe3D( engineContext, 18.7f, 16.7f);
 
     g_symbols.clear();
     g_pedestalBoxIndices.clear();
@@ -783,49 +1462,55 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     g_symbols.push_back({"Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY"}); // WOLF(1) SERPENT(3) OWL(0)
     addPedestal3D( engineContext, 3.5f, 3.5f );
 
+    // Director room furnishing + decor models
+    addWorldModelInstance( resolveAssetModelPath( "Full Desk.glb" ), 16.36f, 16.55f, 0.8f, rgb( 170, 150, 130 ), 3.1415926f );
+    addWorldModelInstance( resolveAssetModelPath( "Shelf.glb" ), 18.6f, 14.2f, 0.8f, rgb( 170, 160, 140 ), -1.5707963f );
+  //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.24f, 14.48f, 0.14f, rgb( 230, 218, 184 ), -1.5707963f, -1.5707963f );
+  //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.38f, 14.52f, 0.13f, rgb( 228, 216, 180 ), -1.5707963f, -1.5707963f );
+    addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.6f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926);
+    addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f);
+
+    // Scattered floor paper props (1-3)
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 16.4f, 14.9f, 0.22f, rgb( 224, 214, 188 ), 0.45f );
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.1f, 14.4f, 0.20f, rgb( 220, 210, 182 ), -0.20f );
+    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.8f, 15.0f, 0.18f, rgb( 226, 216, 190 ), 0.95f );
+
     g_clueNotes.clear();
     // Atrium note
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Janitor's Log",
         "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
-        15.5f, 11.5f, false, addNotePickupSprite( engineContext, 15.5f, 11.5f, "Janitor's Log" )
-    } );
+        15.5f, 11.5f ) );
     // West Wing Note
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Archivist Notebook",
         "The NW Archives pedestal requires the predator, the deceiver, and the wise one.",
-        3.5f, 8.5f, false, addNotePickupSprite( engineContext, 3.5f, 8.5f, "Archivist Notebook" )
-    } );
+        3.5f, 8.5f ) );
     // West Wing progression note (guarantees early North Wing access)
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Security Log",
         "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
-        4.5f, 10.5f, false, addNotePickupSprite( engineContext, 4.5f, 10.5f, "Security Log" )
-    } );
+        4.5f, 10.5f ) );
     // SW Crypt Note
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Director Memo",
         "The SE Office safe code is current year. It contains the Gold Key.",
-        3.5f, 15.5f, false, addNotePickupSprite( engineContext, 3.5f, 15.5f, "Director Memo" )
-    } );
+        3.5f, 15.5f ) );
     // East Wing Note
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Final Code Clue",
         "The South Wing emergency code is 7391.",
-        18.5f, 9.5f, false, addNotePickupSprite( engineContext, 18.5f, 9.5f, "Final Code Clue" )
-    } );
+        18.5f, 9.5f ) );
     // North Wing fallback note so South code is always obtainable
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Emergency Override Slip",
         "If wing routing fails, South Wing emergency code is 7391.",
-        8.5f, 4.5f, false, addNotePickupSprite( engineContext, 8.5f, 4.5f, "Emergency Override Slip" )
-    } );
+        8.5f, 4.5f ) );
     // NE Vault lore note so the room is still meaningful after progression rebalance
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Vault Ledger",
         "Iron access approved. Reserve artifacts moved to East Wing transfer corridor.",
-        17.5f, 2.5f, false, addNotePickupSprite( engineContext, 17.5f, 2.5f, "Vault Ledger" )
-    } );
+        17.5f, 2.5f ) );
 
     g_museumPuzzleInitialized = true;
 }
@@ -852,26 +1537,22 @@ static void initCaveQuiz() {
 static void initCaveFinalObjective( Engine &engineContext ) {
     g_clueNotes.clear();
     g_foundNotes.clear();
-    g_clueNotes.push_back( {
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Camp Note: Warden Test",
         "The cave statue asks 3 questions: Baroque, Roman realism, and Renaissance revival.",
-        2.8f, 2.3f, false, addNotePickupSprite( engineContext, 2.8f, 2.3f, "Camp Note: Warden Test" )
-        } );
-    g_clueNotes.push_back( {
+        2.8f, 2.3f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Visitor Memo",
         "Remember: Roman portrait busts focused on truthful features, not idealized beauty.",
-        4.8f, 3.8f, false, addNotePickupSprite( engineContext, 4.8f, 3.8f, "Visitor Memo" )
-        } );
-    g_clueNotes.push_back( {
+        4.8f, 3.8f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Archivist Card",
         "Renaissance is the rebirth of Greek and Roman learning. Keep that for the final statue.",
-        6.2f, 2.1f, false, addNotePickupSprite( engineContext, 6.2f, 2.1f, "Archivist Card" )
-        } );
-    g_clueNotes.push_back( {
+        6.2f, 2.1f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
         "Last Journal Fragment",
         "You are beneath the museum in buried foundation tunnels.\nThe gallery was built over a much older site.",
-        8.5f, 5.2f, false, addNotePickupSprite( engineContext, 8.5f, 5.2f, "Last Journal Fragment" )
-        } );
+        8.5f, 5.2f ) );
     g_caveFinalNoteCollected = false;
     g_caveQuizActive = false;
     g_caveQuizPassed = false;
@@ -983,6 +1664,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.propImages.clear();
     engineContext.quads.clear();
     engineContext.benches3D.clear();
+    g_worldModels.clear();
 	engineContext.hasWallCracks = false;
     engineContext.hasFloorCracks = false;
     engineContext.caveMode = false;
@@ -1045,6 +1727,33 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     // Props
     loadProps( (folder / "props.txt").string(), engineContext.props, engineContext.propImages, engineContext.quads );
+
+    auto modelTintForKind = [&]( const std::string &kind )->Uint32 {
+        if (kind == "PLANT") return rgb( 255, 255, 255 );
+        if (kind == "TRASHCAN") return rgb( 122, 132, 142 );
+        if (kind == "VASE1" || kind == "VASE2" || kind == "VASE3") return rgb( 182, 158, 120 );
+        if (kind == "BENCH") return rgb( 126, 96, 64 );
+        if (kind == "SAFE") return rgb( 132, 144, 156 );
+        if (kind == "PEDESTAL") return rgb( 164, 156, 142 );
+        return rgb( 168, 168, 172 );
+    };
+
+    auto targetHeightForKind = [&]( const std::string &kind, float sourceScale )->float {
+        const float s = std::max( 0.2f, sourceScale );
+        if (kind == "PLANT") return 0.96f * s;
+        if (kind == "TRASHCAN") return 0.88f * s;
+        if (kind == "VASE1" || kind == "VASE2" || kind == "VASE3") return 0.74f * s;
+        if (kind == "BENCH") return 0.56f * s;
+        return 0.70f * s;
+    };
+
+    for (auto &prop : engineContext.props)
+    {
+        if (!prop.prefersModel || prop.modelAssetPath.empty()) continue;
+        addWorldModelInstance( prop.modelAssetPath, prop.x, prop.y, targetHeightForKind( prop.kind, prop.scale ), modelTintForKind( prop.kind ) );
+        prop.scale = 0.0f;
+    }
+
     // Build spatial buckets for quads (by tile)
     engineContext.quadBuckets.assign( engineContext.map.width * engineContext.map.height, {} );
     for (int i = 0; i < (int)engineContext.quads.size(); ++i)
@@ -1809,6 +2518,197 @@ static void renderEndingScreen( Engine &engineContext ) {
     drawString16x16( engineContext, x + 20, y + h - 34, "[R] Restart   [ESC] Menu", rgb( 210, 210, 210 ), w - 40, 1, 1, false );
 }
 
+static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer ) {
+    if (g_worldModels.empty()) return;
+
+    const float projScaleY = (RENDER_W * 0.5f);
+    const float horizon = (RENDER_H * 0.5f) + engineContext.pitchOffset;
+    const float camHeight = 0.52f;
+    const float nearClip = 0.18f;
+    const float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
+    const glm::vec3 lightDir = glm::normalize( glm::vec3( -0.35f, 0.85f, -0.40f ) );
+
+    struct ProjVert { float sx = 0, sy = 0, z = -1; glm::vec3 world{0.0f}; glm::vec3 color{1.0f}; glm::vec2 uv{0.0f}; bool valid = false; };
+
+    for (const auto &inst : g_worldModels)
+    {
+        if (!inst.visible || !inst.model || inst.model->indices.size() < 3) continue;
+
+        std::vector<ProjVert> projected;
+        projected.resize( inst.model->vertices.size() );
+        std::vector<glm::vec3> transformed;
+        transformed.resize( inst.model->vertices.size(), glm::vec3( 0.0f ) );
+        const float timeSeconds = SDL_GetTicks() * 0.001f;
+        const float yawNow = inst.yaw + (inst.spinYaw ? (inst.spinSpeed * timeSeconds) : 0.0f);
+        const glm::quat qYaw = glm::angleAxis( yawNow, glm::vec3( 0.0f, 1.0f, 0.0f ) );
+        const glm::quat qPitch = glm::angleAxis( inst.pitch, glm::vec3( 1.0f, 0.0f, 0.0f ) );
+        const glm::quat qRoll = glm::angleAxis( inst.roll, glm::vec3( 0.0f, 0.0f, 1.0f ) );
+        const glm::quat q = qYaw * qPitch * qRoll;
+        const glm::vec3 pivot(
+            (inst.model->boundsMin.x + inst.model->boundsMax.x) * 0.5f,
+            inst.model->boundsMin.y,
+            (inst.model->boundsMin.z + inst.model->boundsMax.z) * 0.5f );
+
+        float modelMinY = std::numeric_limits<float>::max();
+        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        {
+            const glm::vec3 v = inst.model->vertices[ i ];
+            const glm::vec3 local = (v - pivot) * inst.scale;
+            transformed[ i ] = q * local;
+            modelMinY = std::min( modelMinY, transformed[ i ].y );
+        }
+        if (!std::isfinite( modelMinY )) modelMinY = 0.0f;
+
+        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        {
+            const glm::vec3 r = transformed[ i ];
+
+            const float wx = inst.x + r.x;
+            const float wy = r.y - modelMinY;
+            const float wz = inst.y + r.z;
+
+            const float dx = wx - engineContext.positionX;
+            const float dy = wz - engineContext.positionY;
+            const float tx = invDet * (engineContext.directionY * dx - engineContext.directionX * dy);
+            const float tz = invDet * (-engineContext.planeY * dx + engineContext.planeX * dy);
+            if (tz <= nearClip) continue;
+
+            projected[ i ].sx = (RENDER_W * 0.5f) * (1.0f + (tx / tz));
+            projected[ i ].sy = horizon - ((wy - camHeight) * projScaleY / tz);
+            projected[ i ].z = tz;
+            projected[ i ].world = glm::vec3( wx, wy, wz );
+            if (i < inst.model->colors.size()) projected[ i ].color = inst.model->colors[ i ];
+            if (i < inst.model->uvs.size()) projected[ i ].uv = inst.model->uvs[ i ];
+            projected[ i ].valid = true;
+        }
+
+        for (size_t i = 0; i + 2 < inst.model->indices.size(); i += 3)
+        {
+            const int triIdx = int( i / 3 );
+            const uint32_t i0 = inst.model->indices[ i + 0 ];
+            const uint32_t i1 = inst.model->indices[ i + 1 ];
+            const uint32_t i2 = inst.model->indices[ i + 2 ];
+            if (i0 >= projected.size() || i1 >= projected.size() || i2 >= projected.size()) continue;
+
+            const ProjVert &a = projected[ i0 ];
+            const ProjVert &b = projected[ i1 ];
+            const ProjVert &c = projected[ i2 ];
+            if (!a.valid || !b.valid || !c.valid) continue;
+            if (a.z <= nearClip || b.z <= nearClip || c.z <= nearClip) continue;
+
+            const float area = (b.sx - a.sx) * (c.sy - a.sy) - (b.sy - a.sy) * (c.sx - a.sx);
+            if (std::fabs( area ) < 1e-4f) continue;
+
+            const int minX = std::max( 0, (int)std::floor( std::min( { a.sx, b.sx, c.sx } ) ) );
+            const int maxX = std::min( RENDER_W - 1, (int)std::ceil( std::max( { a.sx, b.sx, c.sx } ) ) );
+            const int minY = std::max( 0, (int)std::floor( std::min( { a.sy, b.sy, c.sy } ) ) );
+            const int maxY = std::min( RENDER_H - 1, (int)std::ceil( std::max( { a.sy, b.sy, c.sy } ) ) );
+            if (minX > maxX || minY > maxY) continue;
+            if ((maxX - minX) > (RENDER_W - 8) || (maxY - minY) > (RENDER_H - 8)) continue;
+
+            glm::vec3 nrm = glm::cross( b.world - a.world, c.world - a.world );
+            const float nLen = glm::length( nrm );
+            if (nLen <= 1e-6f) continue;
+            nrm /= nLen;
+            const float lambert = std::clamp( 0.35f + 0.65f * std::fabs( glm::dot( nrm, lightDir ) ), 0.20f, 1.0f );
+
+            const float invZ0 = 1.0f / std::max( 0.0001f, a.z );
+            const float invZ1 = 1.0f / std::max( 0.0001f, b.z );
+            const float invZ2 = 1.0f / std::max( 0.0001f, c.z );
+
+            for (int y = minY; y <= maxY; ++y)
+            {
+                for (int x = minX; x <= maxX; ++x)
+                {
+                    const float px = x + 0.5f;
+                    const float py = y + 0.5f;
+
+                    const float w0raw = (b.sx - px) * (c.sy - py) - (b.sy - py) * (c.sx - px);
+                    const float w1raw = (c.sx - px) * (a.sy - py) - (c.sy - py) * (a.sx - px);
+                    const float w2raw = (a.sx - px) * (b.sy - py) - (a.sy - py) * (b.sx - px);
+
+                    if (area > 0.0f)
+                    {
+                        if (w0raw < 0.0f || w1raw < 0.0f || w2raw < 0.0f) continue;
+                    }
+                    else
+                    {
+                        if (w0raw > 0.0f || w1raw > 0.0f || w2raw > 0.0f) continue;
+                    }
+
+                    const float w0 = w0raw / area;
+                    const float w1 = w1raw / area;
+                    const float w2 = w2raw / area;
+
+                    const glm::vec3 vertexColor =
+                        (a.color * w0) +
+                        (b.color * w1) +
+                        (c.color * w2);
+
+                    glm::vec3 materialColor( 1.0f );
+                    if (triIdx >= 0 && triIdx < (int)inst.model->triangleBaseColorFactor.size())
+                    {
+                        const glm::vec4 f = inst.model->triangleBaseColorFactor[ triIdx ];
+                        materialColor = glm::vec3( f.r, f.g, f.b );
+                    }
+
+                    glm::vec3 texColor( 1.0f );
+                    int texIdx = -1;
+                    if (triIdx >= 0 && triIdx < (int)inst.model->triangleTextureIndex.size())
+                    {
+                        texIdx = inst.model->triangleTextureIndex[ triIdx ];
+                    }
+                    const bool hasTexture = (texIdx >= 0 && texIdx < (int)inst.model->baseColorTextures.size());
+                    if (hasTexture)
+                    {
+                        const Image &tex = inst.model->baseColorTextures[ texIdx ];
+                        if (tex.width > 0 && tex.height > 0)
+                        {
+                            const glm::vec2 uv = (a.uv * w0) + (b.uv * w1) + (c.uv * w2);
+                            float uu = uv.x - std::floor( uv.x );
+                            float vv = uv.y - std::floor( uv.y );
+                            int tx = std::clamp( int( uu * tex.width ), 0, tex.width - 1 );
+                            int ty = std::clamp( int( vv * tex.height ), 0, tex.height - 1 );
+                            Uint32 tc = tex.sample( tx, ty );
+                            texColor.r = float( (tc >> 16) & 255 ) / 255.0f;
+                            texColor.g = float( (tc >> 8) & 255 ) / 255.0f;
+                            texColor.b = float( tc & 255 ) / 255.0f;
+                        }
+                    }
+
+                    const float invZ = (w0 * invZ0) + (w1 * invZ1) + (w2 * invZ2);
+                    const float z = 1.0f / std::max( 0.0001f, invZ );
+                    if (z >= engineContext.zbuffer[ x ]) continue;
+
+                    const int pix = y * RENDER_W + x;
+                    if (z >= meshDepthBuffer[ pix ]) continue;
+
+                    float distanceShade;
+                    if (engineContext.caveMode)
+                    {
+                        float R = engineContext.lightRadius;
+                        float t = std::clamp( 1.0f - std::pow( z / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+                        distanceShade = std::max( engineContext.caveAmbient, t );
+                    }
+                    else
+                    {
+                        distanceShade = 1.0f / (1.0f + engineContext.indoorShadeLinear * z + engineContext.indoorShadeQuadratic * z * z);
+                        distanceShade = std::clamp( distanceShade, engineContext.indoorShadeMin, 1.0f );
+                    }
+
+                    const float lit = std::clamp( 0.28f + 0.95f * (lambert * distanceShade), 0.28f, 1.15f );
+                    const glm::vec3 vertexMul = hasTexture ? glm::vec3( 1.0f ) : vertexColor;
+                    Uint8 r = Uint8( std::clamp( materialColor.r * vertexMul.r * texColor.r * lit * 255.0f, 0.0f, 255.0f ) );
+                    Uint8 g = Uint8( std::clamp( materialColor.g * vertexMul.g * texColor.g * lit * 255.0f, 0.0f, 255.0f ) );
+                    Uint8 bcol = Uint8( std::clamp( materialColor.b * vertexMul.b * texColor.b * lit * 255.0f, 0.0f, 255.0f ) );
+                    putPix( engineContext, x, y, rgb( r, g, bcol ) );
+                    meshDepthBuffer[ pix ] = z;
+                }
+            }
+        }
+    }
+}
+
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
@@ -2289,12 +3189,17 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
+    static std::vector<float> meshDepthBuffer;
+    meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
+    renderWorldModels( engineContext, meshDepthBuffer );
+
 
 
 	// Props (billboarded)
     for (size_t i = 0; i < engineContext.props.size(); ++i)
     {
         const auto &prop = engineContext.props[ i ];
+        if (prop.scale <= 0.0f) continue;
         const auto &texture = engineContext.propImages[ prop.textureID ];
 
         // Camera space
@@ -2600,6 +3505,9 @@ static void render( Engine &engineContext, float dt ) {
     {
         drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "CAMP LOGS HOLD CLUES FOR THE WARDEN STATUE", rgb( 170, 180, 210 ), 1, 1, 1, false );
     }
+
+    drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
+
 
     int nearbyKey = getNearbyKeyPickup( engineContext );
     if (!overlayBusy && nearbyKey >= 0 && !g_codeEntryActive)
@@ -3252,6 +4160,10 @@ int main( int argc, char **argv ) {
                             {
                                 engineContext.props[ k.propIndex ].scale = 0.0f;
                             }
+                            if (k.modelIndex >= 0 && k.modelIndex < (int)g_worldModels.size())
+                            {
+                                g_worldModels[ k.modelIndex ].visible = false;
+                            }
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
                             playPickup(levels[engineContext.currentLevel].folder);
                             triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
@@ -3268,6 +4180,10 @@ int main( int argc, char **argv ) {
                             if (n.propIndex >= 0 && n.propIndex < (int)engineContext.props.size())
                             {
                                 engineContext.props[ n.propIndex ].scale = 0.0f;
+                            }
+                            if (n.modelIndex >= 0 && n.modelIndex < (int)g_worldModels.size())
+                            {
+                                g_worldModels[ n.modelIndex ].visible = false;
                             }
                             showAccessPopup( "Collected note: " + n.title, 2200 );
 							playPaperRustle( levels[ engineContext.currentLevel ].folder );

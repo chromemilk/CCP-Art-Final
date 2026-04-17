@@ -67,6 +67,8 @@ struct Prop
     std::string kind;
     std::string filename; // original bmp filename
     float scale = 1.0f;
+    bool prefersModel = false;
+    std::string modelAssetPath;
 };
 
 
@@ -568,6 +570,18 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
         return idx;
         };
 
+    const fs::path projectRoot = base.parent_path().parent_path();
+    const fs::path modelRoot = projectRoot / "assets";
+    auto modelPathForKind = [&]( const std::string &kind )->std::string {
+        if (kind == "PLANT") return (modelRoot / "Plant.glb").string();
+        if (kind == "VASE1") return (modelRoot / "Vase1.glb").string();
+        if (kind == "VASE2") return (modelRoot / "Vase2.glb").string();
+        if (kind == "VASE3") return (modelRoot / "Vase3.glb").string();
+        if (kind == "TRASHCAN") return (modelRoot / "Trashcan.glb").string();
+        if (kind == "BENCH") return (modelRoot / "Bench.glb").string();
+        return {};
+        };
+
     std::string line; int lineTrack = 0;
     while (std::getline( propsFileStream, line ))
     {
@@ -610,6 +624,8 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
             prop.kind = kind;
             prop.filename = bmp;
             prop.scale = scale;
+            prop.modelAssetPath = modelPathForKind( kind );
+            prop.prefersModel = !prop.modelAssetPath.empty();
             outProps.push_back( prop );
         }
         else if (kind == "ROPE")
@@ -625,6 +641,8 @@ static bool loadProps( const std::string &path, std::vector<Prop> &outProps, std
             prop.textureID = getBillboardTextureIndex( bmp );
             prop.kind = kind;
             prop.filename = bmp;
+            prop.modelAssetPath = modelPathForKind( kind );
+            prop.prefersModel = !prop.modelAssetPath.empty();
             outProps.push_back( prop );
         }
     }
