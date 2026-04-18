@@ -9,6 +9,8 @@
 #include <memory>
 #include <limits>
 #include <functional>
+#include <fstream>
+#include <sstream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -153,10 +155,369 @@ struct WorldModelInstance
     float spinSpeed = 0.0f;
     Uint32 tint = rgb( 170, 170, 170 );
     bool visible = true;
+    bool editorPlaced = false;
+    std::string editorAssetName;
+    float editorTargetScale = 1.0f;
 };
 
 static std::unordered_map<std::string, std::shared_ptr<CpuModel>> g_cpuModelCache;
 static std::vector<WorldModelInstance> g_worldModels;
+
+static std::shared_ptr<CpuModel> loadCpuModel( const std::string &modelPath );
+static float modelScaleOverride( const std::string &modelPath );
+static int addWorldModelInstance(
+    const std::string &modelPath,
+    float x,
+    float y,
+    float scale,
+    Uint32 tint,
+    float yaw,
+    float pitch,
+    float roll,
+    bool spinYaw,
+    float spinSpeed,
+    float heightOffset );
+
+struct EditorAssetDef
+{
+    std::string label;
+    std::string assetName;
+    float worldSize = 0.7f;
+    Uint32 tint = rgb( 170, 170, 170 );
+    float pitch = 0.0f;
+};
+
+static std::string g_currentLevelFolder;
+static bool g_levelEditorMode = false;
+static int g_editorAssetIndex = 0;
+static int g_editorSelectedModel = -1;
+static constexpr const char* kEditorModelsFile = "editor_models.txt";
+static std::vector<EditorAssetDef> g_editorAssetCatalog;
+static Uint32 g_editorCatalogLastScanTick = 0;
+static constexpr Uint32 kEditorCatalogRefreshMs = 5000;
+
+static std::string resolveAssetModelPath( const std::string &assetName );
+static std::filesystem::path editorModelsPathForLevel();
+static std::filesystem::path findAssetsRoot();
+static void refreshEditorAssetCatalog( bool force = false );
+
+static const std::vector<EditorAssetDef> &editorAssetCatalog() {
+    if (g_editorAssetCatalog.empty())
+    {
+        refreshEditorAssetCatalog( true );
+    }
+    return g_editorAssetCatalog;
+}
+
+static std::string toLowerCopy( std::string s ) {
+    for (char &c : s) c = char( std::tolower( unsigned char( c ) ) );
+    return s;
+}
+
+static EditorAssetDef makeEditorAssetDefForName( const std::string &assetName ) {
+    EditorAssetDef out;
+    out.assetName = assetName;
+    out.label = std::filesystem::path( assetName ).stem().string();
+
+    const std::string lower = toLowerCopy( out.label );
+    out.worldSize = 0.78f;
+    out.tint = rgb( 170, 170, 170 );
+    out.pitch = 0.0f;
+
+    if (lower.find( "plant" ) != std::string::npos) { out.worldSize = 0.95f; out.tint = rgb( 255, 255, 255 ); }
+    else if (lower.find( "trash" ) != std::string::npos || lower.find( "can" ) != std::string::npos) { out.worldSize = 0.80f; out.tint = rgb( 140, 145, 150 ); }
+    else if (lower.find( "bench" ) != std::string::npos) { out.worldSize = 0.72f; out.tint = rgb( 126, 96, 64 ); }
+    else if (lower.find( "vase" ) != std::string::npos) { out.worldSize = 0.62f; out.tint = rgb( 188, 168, 130 ); }
+    else if (lower.find( "pedestal" ) != std::string::npos) { out.worldSize = 0.78f; out.tint = rgb( 164, 156, 142 ); }
+    else if (lower.find( "safe" ) != std::string::npos) { out.worldSize = 0.72f; out.tint = rgb( 150, 160, 174 ); }
+    else if (lower.find( "desk" ) != std::string::npos) { out.worldSize = 0.82f; out.tint = rgb( 170, 150, 130 ); }
+    else if (lower.find( "shelf" ) != std::string::npos) { out.worldSize = 0.82f; out.tint = rgb( 170, 160, 140 ); }
+    else if (lower.find( "couch" ) != std::string::npos) { out.worldSize = 0.82f; out.tint = rgb( 130, 112, 78 ); }
+    else if (lower.find( "box" ) != std::string::npos) { out.worldSize = 0.82f; out.tint = rgb( 184, 130, 98 ); }
+    else if (lower.find( "paper" ) != std::string::npos) { out.worldSize = 0.22f; out.tint = rgb( 224, 214, 188 ); }
+    else if (lower.find( "note" ) != std::string::npos) { out.worldSize = 0.25f; out.tint = rgb( 225, 214, 180 ); out.pitch = -1.5707963f; }
+
+    return out;
+}
+
+static std::filesystem::path findAssetsRoot() {
+    namespace fs = std::filesystem;
+    fs::path start = fs::current_path();
+    for (int i = 0; i < 7; ++i)
+    {
+        fs::path a = start / "assets";
+        if (fs::exists( a ) && fs::is_directory( a )) return a;
+        fs::path b = start / "CCP Art Final" / "assets";
+        if (fs::exists( b ) && fs::is_directory( b )) return b;
+        if (!start.has_parent_path()) break;
+        fs::path parent = start.parent_path();
+        if (parent == start) break;
+        start = parent;
+    }
+    return fs::current_path() / "assets";
+}
+
+static void refreshEditorAssetCatalog( bool force ) {
+    const Uint32 now = SDL_GetTicks();
+    if (!force && (now - g_editorCatalogLastScanTick) < kEditorCatalogRefreshMs)
+    {
+        return;
+    }
+    g_editorCatalogLastScanTick = now;
+
+    std::filesystem::path assetsRoot = findAssetsRoot();
+    std::vector<EditorAssetDef> scanned;
+    if (std::filesystem::exists( assetsRoot ) && std::filesystem::is_directory( assetsRoot ))
+    {
+        for (const auto &entry : std::filesystem::recursive_directory_iterator( assetsRoot ))
+        {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = toLowerCopy( entry.path().extension().string() );
+            if (ext != ".glb" && ext != ".gltf") continue;
+
+            std::string relName;
+            std::error_code ec;
+            auto rel = std::filesystem::relative( entry.path(), assetsRoot, ec );
+            relName = ec ? entry.path().filename().string() : rel.generic_string();
+            scanned.push_back( makeEditorAssetDefForName( relName ) );
+        }
+    }
+
+    std::sort( scanned.begin(), scanned.end(), []( const EditorAssetDef &a, const EditorAssetDef &b ) {
+        return a.label < b.label;
+    } );
+
+    scanned.erase( std::unique( scanned.begin(), scanned.end(), []( const EditorAssetDef &a, const EditorAssetDef &b ) {
+        return a.assetName == b.assetName;
+    } ), scanned.end() );
+
+    if (scanned.empty())
+    {
+        scanned = {
+            makeEditorAssetDefForName( "Plant.glb" ),
+            makeEditorAssetDefForName( "Trashcan.glb" ),
+            makeEditorAssetDefForName( "Bench.glb" ),
+            makeEditorAssetDefForName( "Vase1.glb" ),
+            makeEditorAssetDefForName( "Vase2.glb" ),
+            makeEditorAssetDefForName( "Vase3.glb" ),
+            makeEditorAssetDefForName( "Pedestal.glb" ),
+            makeEditorAssetDefForName( "Safe.glb" ),
+            makeEditorAssetDefForName( "Full Desk.glb" ),
+            makeEditorAssetDefForName( "Shelf.glb" ),
+            makeEditorAssetDefForName( "Couch.glb" ),
+            makeEditorAssetDefForName( "Boxes.glb" ),
+            makeEditorAssetDefForName( "Scattered Paper.glb" ),
+            makeEditorAssetDefForName( "Note.glb" )
+        };
+    }
+
+    g_editorAssetCatalog = std::move( scanned );
+    if (!g_editorAssetCatalog.empty())
+    {
+        g_editorAssetIndex = std::clamp( g_editorAssetIndex, 0, (int)g_editorAssetCatalog.size() - 1 );
+    }
+    else
+    {
+        g_editorAssetIndex = 0;
+    }
+}
+
+static void saveEditorModelsForLevel() {
+    std::filesystem::path outPath = editorModelsPathForLevel();
+    std::ofstream out( outPath.string(), std::ios::trunc );
+    if (!out.is_open())
+    {
+        return;
+    }
+
+    out << "# asset|x|y|z|size|yaw|pitch|roll|r|g|b\n";
+    out.setf( std::ios::fixed );
+    out.precision( 4 );
+
+    for (const auto &inst : g_worldModels)
+    {
+        if (!inst.visible || !inst.editorPlaced || inst.editorAssetName.empty()) continue;
+
+        out
+            << inst.editorAssetName << "|"
+            << inst.x << "|"
+            << inst.y << "|"
+            << inst.heightOffset << "|"
+            << inst.editorTargetScale << "|"
+            << inst.yaw << "|"
+            << inst.pitch << "|"
+            << inst.roll << "|"
+            << int( (inst.tint >> 16) & 255 ) << "|"
+            << int( (inst.tint >> 8) & 255 ) << "|"
+            << int( inst.tint & 255 ) << "\n";
+    }
+}
+
+static void loadEditorModelsForLevel() {
+    std::filesystem::path inPath = editorModelsPathForLevel();
+    std::ifstream in( inPath.string() );
+    if (!in.is_open())
+    {
+        return;
+    }
+
+    std::string line;
+    while (std::getline( in, line ))
+    {
+        if (line.empty() || line[ 0 ] == '#') continue;
+
+        std::vector<std::string> parts;
+        std::stringstream ss( line );
+        std::string part;
+        while (std::getline( ss, part, '|' )) parts.push_back( part );
+        if (parts.size() < 11) continue;
+
+        const std::string assetName = parts[ 0 ];
+
+        float x = std::stof( parts[ 1 ] );
+        float y = std::stof( parts[ 2 ] );
+        float z = std::stof( parts[ 3 ] );
+        float size = std::stof( parts[ 4 ] );
+        float yaw = std::stof( parts[ 5 ] );
+        float pitch = std::stof( parts[ 6 ] );
+        float roll = std::stof( parts[ 7 ] );
+        int r = std::clamp( std::stoi( parts[ 8 ] ), 0, 255 );
+        int g = std::clamp( std::stoi( parts[ 9 ] ), 0, 255 );
+        int b = std::clamp( std::stoi( parts[ 10 ] ), 0, 255 );
+
+        int idx = addWorldModelInstance(
+            resolveAssetModelPath( assetName ),
+            x,
+            y,
+            size,
+            rgb( Uint8( r ), Uint8( g ), Uint8( b ) ),
+            yaw,
+            pitch,
+            roll,
+            false,
+            0.0f,
+            z );
+
+        if (idx >= 0 && idx < (int)g_worldModels.size())
+        {
+            g_worldModels[ idx ].editorPlaced = true;
+            g_worldModels[ idx ].editorAssetName = assetName;
+            g_worldModels[ idx ].editorTargetScale = size;
+        }
+    }
+}
+
+static int placeEditorModel( Engine &engineContext ) {
+    refreshEditorAssetCatalog();
+    const auto &catalog = editorAssetCatalog();
+    if (catalog.empty()) return -1;
+
+    g_editorAssetIndex = (g_editorAssetIndex % (int)catalog.size() + (int)catalog.size()) % (int)catalog.size();
+    const auto &asset = catalog[ g_editorAssetIndex ];
+
+    const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
+
+    auto snapHalf = []( float v )->float {
+        if (std::fabs( v ) < 0.0001f) return 0.0f;
+        return std::round( v * 2.0f ) * 0.5f;
+    };
+
+    int idx = addWorldModelInstance(
+        resolveAssetModelPath( asset.assetName ),
+        snapHalf( engineContext.positionX ),
+        snapHalf( engineContext.positionY ),
+        asset.worldSize,
+        asset.tint,
+        yaw,
+        asset.pitch,
+        0.0f,
+        false,
+        0.0f,
+        0.0f );
+
+    if (idx >= 0 && idx < (int)g_worldModels.size())
+    {
+        g_worldModels[ idx ].editorPlaced = true;
+        g_worldModels[ idx ].editorAssetName = asset.assetName;
+        g_worldModels[ idx ].editorTargetScale = asset.worldSize;
+        g_editorSelectedModel = idx;
+    }
+    return idx;
+}
+
+static void deleteSelectedEditorModel() {
+    if (g_editorSelectedModel < 0 || g_editorSelectedModel >= (int)g_worldModels.size()) return;
+    if (!g_worldModels[ g_editorSelectedModel ].editorPlaced) return;
+    g_worldModels.erase( g_worldModels.begin() + g_editorSelectedModel );
+    g_editorSelectedModel = -1;
+}
+
+static void nudgeSelectedEditorModel( float dx, float dy, float dz, float dYaw, float dPitch, float dRoll, float dSize ) {
+    if (g_editorSelectedModel < 0 || g_editorSelectedModel >= (int)g_worldModels.size()) return;
+    auto &m = g_worldModels[ g_editorSelectedModel ];
+    if (!m.editorPlaced) return;
+
+    m.x += dx;
+    m.y += dy;
+    m.heightOffset = std::clamp( m.heightOffset + dz, -2.0f, 4.0f );
+
+    auto snapNearHalfOrZero = []( float v )->float {
+        if (std::fabs( v ) < 0.0001f) return 0.0f;
+        const float halfRounded = std::round( v * 2.0f ) * 0.5f;
+        if (std::fabs( v - halfRounded ) <= 0.03f) return halfRounded;
+        return v;
+    };
+
+    m.x = snapNearHalfOrZero( m.x );
+    m.y = snapNearHalfOrZero( m.y );
+    m.heightOffset = snapNearHalfOrZero( m.heightOffset );
+
+    m.yaw += dYaw;
+    m.pitch += dPitch;
+    m.roll += dRoll;
+
+    if (std::fabs( dSize ) > 0.0f)
+    {
+        m.editorTargetScale = std::clamp( m.editorTargetScale + dSize, 0.05f, 3.0f );
+        auto reload = loadCpuModel( resolveAssetModelPath( m.editorAssetName ) );
+        if (reload)
+        {
+            const float modelSizeX = std::max( 0.0001f, std::fabs( reload->boundsMax.x - reload->boundsMin.x ) );
+            const float modelSizeY = std::max( 0.0001f, std::fabs( reload->boundsMax.y - reload->boundsMin.y ) );
+            const float modelSizeZ = std::max( 0.0001f, std::fabs( reload->boundsMax.z - reload->boundsMin.z ) );
+            const float modelReferenceSize = std::max( { modelSizeX, modelSizeY, modelSizeZ } );
+            const float overrideMul = modelScaleOverride( resolveAssetModelPath( m.editorAssetName ) );
+            m.scale = std::clamp( (m.editorTargetScale / modelReferenceSize) * overrideMul, 0.01f, 2.0f );
+        }
+    }
+}
+
+static std::filesystem::path editorModelsPathForLevel() {
+    if (g_currentLevelFolder.empty())
+    {
+        return std::filesystem::path( kEditorModelsFile );
+    }
+    return std::filesystem::path( g_currentLevelFolder ) / kEditorModelsFile;
+}
+
+static int findNearestEditorModel( Engine const &engineContext, float radius = 3.0f ) {
+    float best = radius * radius;
+    int hit = -1;
+    for (int i = 0; i < (int)g_worldModels.size(); ++i)
+    {
+        const auto &m = g_worldModels[ i ];
+        if (!m.visible || !m.editorPlaced) continue;
+        float dx = m.x - engineContext.positionX;
+        float dy = m.y - engineContext.positionY;
+        float d2 = dx * dx + dy * dy;
+        if (d2 <= best)
+        {
+            best = d2;
+            hit = i;
+        }
+    }
+    return hit;
+}
 
 static std::string resolveAssetModelPath( const std::string &assetName ) {
     namespace fs = std::filesystem;
@@ -734,6 +1095,7 @@ static int addWorldModelInstance(
     inst.roll = roll;
     inst.spinYaw = spinYaw;
     inst.spinSpeed = spinSpeed;
+    inst.editorTargetScale = targetWorldSize;
     int index = (int)g_worldModels.size();
     g_worldModels.push_back( std::move( inst ) );
     return index;
@@ -1677,6 +2039,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.quads.clear();
     engineContext.benches3D.clear();
     g_worldModels.clear();
+    g_editorSelectedModel = -1;
 	engineContext.hasWallCracks = false;
     engineContext.hasFloorCracks = false;
     engineContext.caveMode = false;
@@ -1686,6 +2049,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.hasWallOverlay = false;
 
     fs::path folder = level.folder;
+    g_currentLevelFolder = folder.string();
+    refreshEditorAssetCatalog( true );
     /*
     {
         BoxProp box;
@@ -1890,6 +2255,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
             engineContext.caveAmbient = 0.03f;
         }
     }
+
+    loadEditorModelsForLevel();
 
     // Spawn & camera
     engineContext.positionX = level.spawnX;
@@ -2513,6 +2880,49 @@ static void renderCompass( Engine &engineContext ) {
     }
 }
 
+static void renderLevelEditorOverlay( Engine &engineContext ) {
+    if (!g_levelEditorMode) return;
+
+    refreshEditorAssetCatalog();
+
+    const auto &catalog = editorAssetCatalog();
+    if (catalog.empty()) return;
+
+    int w = 560;
+    int h = 166;
+    int x = 14;
+    int y = RENDER_H - h - 14;
+    drawTextBox( engineContext, x, y, w, h, rgb( 10, 10, 14 ), rgb( 90, 170, 210 ) );
+
+    const auto &asset = catalog[ g_editorAssetIndex % (int)catalog.size() ];
+    drawString16x16( engineContext, x + 12, y + 10, "LEVEL EDITOR MODE", rgb( 140, 215, 255 ), w - 24, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 34, "ASSET: " + asset.label + " (" + asset.assetName + ")", rgb( 220, 220, 220 ), 2, 1, 1, false );
+
+    if (g_editorSelectedModel >= 0 && g_editorSelectedModel < (int)g_worldModels.size() && g_worldModels[ g_editorSelectedModel ].editorPlaced)
+    {
+        const auto &m = g_worldModels[ g_editorSelectedModel ];
+        std::ostringstream tr;
+        tr.setf( std::ios::fixed );
+        tr.precision( 2 );
+        tr << "SELECTED @ X " << m.x << "  Y " << m.y << "  Z " << m.heightOffset;
+        drawStringTinyScaled( engineContext, x + 12, y + 50, tr.str(), rgb( 190, 220, 170 ), 2, 1, 1, false );
+
+        std::ostringstream rot;
+        rot.setf( std::ios::fixed );
+        rot.precision( 2 );
+        rot << "ROT Y/P/R " << m.yaw << " / " << m.pitch << " / " << m.roll << "  SIZE " << m.editorTargetScale;
+        drawStringTinyScaled( engineContext, x + 12, y + 64, rot.str(), rgb( 190, 220, 170 ), 2, 1, 1, false );
+    }
+    else
+    {
+        drawStringTinyScaled( engineContext, x + 12, y + 50, "NO SELECTED MODEL", rgb( 200, 190, 150 ), 2, 1, 1, false );
+    }
+
+    drawStringTinyScaled( engineContext, x + 12, y + 88, "F2 TO EXIT | [ ] CYCLE ASSET | ENTER PLACE | TAB SELECT | DEL DELETE", rgb( 170, 170, 190 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 104, "WASD X/Y  R/F Z  Q/E YAW  Z/X PITCH  C/V ROLL  -/= SIZE", rgb( 170, 170, 190 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 120, "CTRL+S SAVE TO editor_models.txt (current level)", rgb( 170, 170, 190 ), 1, 1, 1, false );
+}
+
 static void renderEndingScreen( Engine &engineContext ) {
     int w = RENDER_W - 120;
     int h = RENDER_H - 80;
@@ -2724,7 +3134,7 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
-    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive;
+    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode;
 
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
@@ -3612,6 +4022,8 @@ static void render( Engine &engineContext, float dt ) {
     
     renderCaveHUD( engineContext );
 
+    renderLevelEditorOverlay( engineContext );
+
     if (!overlayBusy) renderAccessPopup( engineContext );
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
@@ -3962,6 +4374,121 @@ int main( int argc, char **argv ) {
                 {
                     if (g_levelTransition.active)
                     {
+                        continue;
+                    }
+
+                    if (ev.key.key == SDLK_F2)
+                    {
+                        g_levelEditorMode = !g_levelEditorMode;
+                        if (g_levelEditorMode)
+                        {
+                            g_notesOpen = false;
+                            g_codeEntryActive = false;
+                            g_caveQuizActive = false;
+                            g_editorSelectedModel = findNearestEditorModel( engineContext, 6.0f );
+                            showAccessPopup( "Level editor enabled." );
+                        }
+                        else
+                        {
+                            showAccessPopup( "Level editor disabled." );
+                        }
+                        continue;
+                    }
+
+                    if (g_levelEditorMode)
+                    {
+                        const bool fine = (ev.key.mod & SDL_KMOD_SHIFT) != 0;
+                        const float moveStep = fine ? 0.01f : 0.05f;
+                        const float zStep = fine ? 0.01f : 0.05f;
+                        const float rotStep = fine ? 0.05f : 0.18f;
+                        const float sizeStep = fine ? 0.02f : 0.08f;
+
+                        if (ev.key.key == SDLK_LEFTBRACKET)
+                        {
+                            const int n = (int)editorAssetCatalog().size();
+                            g_editorAssetIndex = (g_editorAssetIndex - 1 + n) % n;
+                        }
+                        else if (ev.key.key == SDLK_RIGHTBRACKET)
+                        {
+                            const int n = (int)editorAssetCatalog().size();
+                            g_editorAssetIndex = (g_editorAssetIndex + 1) % n;
+                        }
+                        else if (ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER)
+                        {
+                            int idx = placeEditorModel( engineContext );
+                            if (idx >= 0) showAccessPopup( "Placed " + editorAssetCatalog()[ g_editorAssetIndex ].label + ".", 1200 );
+                        }
+                        else if (ev.key.key == SDLK_TAB)
+                        {
+                            g_editorSelectedModel = findNearestEditorModel( engineContext, 6.0f );
+                            if (g_editorSelectedModel < 0) showAccessPopup( "No nearby editor model." );
+                        }
+                        else if (ev.key.key == SDLK_DELETE || ev.key.key == SDLK_BACKSPACE)
+                        {
+                            deleteSelectedEditorModel();
+                            showAccessPopup( "Deleted selected model.", 1200 );
+                        }
+                        else if ((ev.key.mod & SDL_KMOD_CTRL) && (ev.key.key == SDLK_S))
+                        {
+                            saveEditorModelsForLevel();
+                            showAccessPopup( "Editor models saved.", 1500 );
+                        }
+                        else if (ev.key.key == SDLK_W)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, -moveStep, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_S)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, moveStep, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_A)
+                        {
+                            nudgeSelectedEditorModel( -moveStep, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_D)
+                        {
+                            nudgeSelectedEditorModel( moveStep, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_R)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, zStep, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_F)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, -zStep, 0.0f, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_Q)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, -rotStep, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_E)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, rotStep, 0.0f, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_Z)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, -rotStep, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_X)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, rotStep, 0.0f, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_C)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -rotStep, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_V)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, rotStep, 0.0f );
+                        }
+                        else if (ev.key.key == SDLK_MINUS)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -sizeStep );
+                        }
+                        else if (ev.key.key == SDLK_EQUALS)
+                        {
+                            nudgeSelectedEditorModel( 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, sizeStep );
+                        }
                         continue;
                     }
 
@@ -4398,7 +4925,7 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
