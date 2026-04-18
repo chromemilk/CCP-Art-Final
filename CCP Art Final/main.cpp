@@ -519,6 +519,32 @@ static int findNearestEditorModel( Engine const &engineContext, float radius = 3
     return hit;
 }
 
+static bool pointBlockedByWorldModel( float px, float py, float playerRadius ) {
+    for (const auto &inst : g_worldModels)
+    {
+        if (!inst.visible || !inst.model) continue;
+
+        // Keep small floating/spinning pickups interactive.
+        if (inst.spinYaw) continue;
+        if (inst.heightOffset > 0.35f) continue;
+
+        const float sx = std::max( 0.0001f, std::fabs( inst.model->boundsMax.x - inst.model->boundsMin.x ) );
+        const float sz = std::max( 0.0001f, std::fabs( inst.model->boundsMax.z - inst.model->boundsMin.z ) );
+        const float halfX = 0.5f * sx * inst.scale;
+        const float halfZ = 0.5f * sz * inst.scale;
+        const float modelRadius = std::max( 0.12f, std::max( halfX, halfZ ) );
+
+        const float dx = px - inst.x;
+        const float dy = py - inst.y;
+        const float hitRadius = modelRadius + playerRadius;
+        if ((dx * dx + dy * dy) < (hitRadius * hitRadius))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static std::string resolveAssetModelPath( const std::string &assetName ) {
     namespace fs = std::filesystem;
     fs::path start = fs::current_path();
@@ -4990,6 +5016,8 @@ int main( int argc, char **argv ) {
                 if (mx < 0 || my < 0 || mx >= engineContext.map.width || my >= engineContext.map.height) return false;
                 int t = engineContext.map.tiles[ my * engineContext.map.width + mx ];
                 if (t != 0) return false;
+
+                if (pointBlockedByWorldModel( x, y, 0.1f )) return false;
 
 
                 /*
