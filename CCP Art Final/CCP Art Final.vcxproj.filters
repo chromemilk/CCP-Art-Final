@@ -249,5 +249,6 @@
     <Text Include="levels\entrance\map.txt" />
     <Text Include="levels\transition\props.txt" />
     <Text Include="levels\entrance\props.txt" />
+    <Text Include="levels\museum_upper\editor_models_level_2_map.txt" />
   </ItemGroup>
 </Project>

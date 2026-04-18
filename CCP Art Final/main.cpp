@@ -45,6 +45,7 @@ struct RoomLock
     LockType type = LockType::KEY;
     std::string requirement;
     bool unlocked = false;
+    Levels level = Levels::MUSEUM;
 };
 
 struct KeyPickup
@@ -55,6 +56,7 @@ struct KeyPickup
     bool collected = false;
     int propIndex = -1;
     int modelIndex = -1;
+    Levels level = Levels::MUSEUM;
 };
 
 struct CaveQuizQuestion
@@ -73,6 +75,7 @@ struct ClueNote
     bool collected = false;
     int propIndex = -1;
     int modelIndex = -1;
+    Levels level = Levels::MUSEUM;
 };
 
 struct SafePuzzle
@@ -119,6 +122,8 @@ static int g_symbolEntryIndex = -1;
 static int g_symbolState[3] = {0,0,0};
 static int g_symbolFocus = 0;
 static bool g_notesOpen = false;
+static int g_notesSelected = 0;
+static int g_notesBodyScroll = 0;
 static bool g_caveFinalNoteCollected = false;
 static int g_notesCollectedRun = 0;
 static float g_runElapsedSeconds = 0.0f;
@@ -127,6 +132,8 @@ static bool g_caveQuizPassed = false;
 static int g_caveQuizQuestionIndex = 0;
 static std::vector<CaveQuizQuestion> g_caveQuiz;
 static bool g_museumPuzzleInitialized = false;
+static bool g_restorationWingUnlocked = false;
+static bool g_unlockAllDoorsOverride = false;
 
 struct CpuModel
 {
@@ -191,7 +198,8 @@ static std::string g_currentLevelFolder;
 static bool g_levelEditorMode = false;
 static int g_editorAssetIndex = 0;
 static int g_editorSelectedModel = -1;
-static constexpr const char* kEditorModelsFile = "editor_models.txt";
+static constexpr const char* kEditorModelsLegacyFile = "editor_models.txt";
+static std::string g_currentEditorModelsFile = kEditorModelsLegacyFile;
 static std::vector<EditorAssetDef> g_editorAssetCatalog;
 static Uint32 g_editorCatalogLastScanTick = 0;
 static constexpr Uint32 kEditorCatalogRefreshMs = 5000;
@@ -200,6 +208,12 @@ static std::string resolveAssetModelPath( const std::string &assetName );
 static std::filesystem::path editorModelsPathForLevel();
 static std::filesystem::path findAssetsRoot();
 static void refreshEditorAssetCatalog( bool force = false );
+
+static std::string makeEditorModelsFileNameForLevel( int levelId, const std::string &mapFile ) {
+    std::string stem = std::filesystem::path( mapFile.empty() ? "map.txt" : mapFile ).stem().string();
+    if (stem.empty()) stem = "map";
+    return "editor_models_level_" + std::to_string( levelId ) + "_" + stem + ".txt";
+}
 
 static const std::vector<EditorAssetDef> &editorAssetCatalog() {
     if (g_editorAssetCatalog.empty())
@@ -324,6 +338,12 @@ static void refreshEditorAssetCatalog( bool force ) {
 
 static void saveEditorModelsForLevel() {
     std::filesystem::path outPath = editorModelsPathForLevel();
+    if (outPath.has_parent_path())
+    {
+        std::error_code ec;
+        std::filesystem::create_directories( outPath.parent_path(), ec );
+    }
+
     std::ofstream out( outPath.string(), std::ios::trunc );
     if (!out.is_open())
     {
@@ -358,7 +378,18 @@ static void loadEditorModelsForLevel() {
     std::ifstream in( inPath.string() );
     if (!in.is_open())
     {
-        return;
+        std::filesystem::path legacy = g_currentLevelFolder.empty()
+            ? std::filesystem::path( kEditorModelsLegacyFile )
+            : (std::filesystem::path( g_currentLevelFolder ) / kEditorModelsLegacyFile);
+
+        if (legacy != inPath)
+        {
+            in.open( legacy.string() );
+        }
+        if (!in.is_open())
+        {
+            return;
+        }
     }
 
     std::string line;
@@ -493,11 +524,12 @@ static void nudgeSelectedEditorModel( float dx, float dy, float dz, float dYaw, 
 }
 
 static std::filesystem::path editorModelsPathForLevel() {
+    const std::string fileName = g_currentEditorModelsFile.empty() ? std::string( kEditorModelsLegacyFile ) : g_currentEditorModelsFile;
     if (g_currentLevelFolder.empty())
     {
-        return std::filesystem::path( kEditorModelsFile );
+        return std::filesystem::path( fileName );
     }
-    return std::filesystem::path( g_currentLevelFolder ) / kEditorModelsFile;
+    return std::filesystem::path( g_currentLevelFolder ) / fileName;
 }
 
 static int findNearestEditorModel( Engine const &engineContext, float radius = 3.0f ) {
@@ -1199,6 +1231,38 @@ static bool isMuseumLikeLevel( Levels level ) {
     return level == Levels::MUSEUM || level == Levels::MUSEUM_UPPER;
 }
 
+static bool hasRestorationPigments() {
+    return g_playerKeys.contains( "BLACK PIGMENT" ) &&
+        g_playerKeys.contains( "BLUE PIGMENT" ) &&
+        g_playerKeys.contains( "RED PIGMENT" );
+}
+
+static bool isRestorationGateDoorTile( int tx, int ty ) {
+    return tx == 16 && ty == 9;
+}
+
+static void applyUnlockAllDoorsOverride( Engine &engineContext ) {
+    for (auto &lock : g_roomLocks)
+    {
+        lock.unlocked = true;
+        int idx = lock.ty * engineContext.map.width + lock.tx;
+        if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2)
+        {
+            engineContext.map.tiles[ idx ] = 0;
+        }
+    }
+
+    for (auto &tile : engineContext.map.tiles)
+    {
+        if (tile == 2)
+        {
+            tile = 0;
+        }
+    }
+
+    g_restorationWingUnlocked = true;
+}
+
 static void beginLevelTransition( Levels target, float seconds = 1.05f ) {
     g_levelTransition.active = true;
     g_levelTransition.switched = false;
@@ -1420,13 +1484,21 @@ static NotePickupVisual addNotePickupModel( Engine &engineContext, float x, floa
     return out;
 }
 
-static ClueNote makeClueNote( Engine &engineContext, const std::string &title, const std::string &body, float x, float y ) {
+static ClueNote makeClueNote( Engine &engineContext, const std::string &title, const std::string &body, float x, float y, Levels level = Levels::MUSEUM ) {
     ClueNote note;
     note.title = title;
     note.body = body;
     note.x = x;
     note.y = y;
     note.collected = false;
+    note.level = level;
+
+    if (level != engineContext.currentLevel)
+    {
+        note.propIndex = -1;
+        note.modelIndex = -1;
+        return note;
+    }
 
     NotePickupVisual vis = addNotePickupModel( engineContext, x, y, title );
     note.propIndex = vis.propIndex;
@@ -1434,13 +1506,27 @@ static ClueNote makeClueNote( Engine &engineContext, const std::string &title, c
     return note;
 }
 
-static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset ) {
-    int spriteIndex = addKeyPickupSprite( engineContext, x, y, keyName, keyColor );
-    if (spriteIndex >= 0 && spriteIndex < (int)engineContext.props.size())
+static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset, Levels level = Levels::MUSEUM ) {
+    KeyPickup out;
+    out.keyName = keyName;
+    out.x = x;
+    out.y = y;
+    out.collected = false;
+    out.level = level;
+
+    if (level != engineContext.currentLevel)
     {
-        engineContext.props[ spriteIndex ].scale = 0.0f;
+        return out;
     }
 
+    float roll = -1.5707963f;
+
+    if (keyName == "BLACK PIGMENT" || keyName == "BLUE PIGMENT" || keyName == "RED PIGMENT")
+    {
+        roll = 0.0f;
+	}
+
+    int spriteIndex = addKeyPickupSprite( engineContext, x, y, keyName, keyColor );
     int modelIndex = addWorldModelInstance(
         resolveAssetModelPath( modelAsset ),
         x,
@@ -1449,16 +1535,16 @@ static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::strin
         keyColor,
         0.0f,
         0.0f,
-        -1.5707963f,
+        roll,
         true,
         1.2f,
         0.2f);
 
-    KeyPickup out;
-    out.keyName = keyName;
-    out.x = x;
-    out.y = y;
-    out.collected = false;
+    if (spriteIndex >= 0 && spriteIndex < (int)engineContext.props.size() && modelIndex >= 0)
+    {
+        engineContext.props[ spriteIndex ].scale = 0.0f;
+    }
+
     out.propIndex = spriteIndex;
     out.modelIndex = modelIndex;
     return out;
@@ -1797,18 +1883,21 @@ static void addPedestal3D( Engine &engineContext, float x, float y ) {
     g_pedestalBoxIndices.push_back( addWorldModelInstance( resolveAssetModelPath( "Pedestal.glb" ), x, y, 0.46f, rgb( 164, 156, 142 ), 0, 0, false, 0, -0.05f) );
 }
 
-static void initMuseumPuzzle( Engine &engineContext ) {
+static void initMuseumPuzzle(Engine& engineContext) {
     g_roomLocks = {
         // Doors blocking the main 4 wings:
-        {6, 9, "West Wing", LockType::KEY, "BRONZE KEY", false},
-        {10, 6, "North Wing", LockType::CODE, "0300", false},
-        {16, 9, "East Wing", LockType::KEY, "GOLD KEY", false},
-        {10, 12, "South Wing", LockType::CODE, "7391", false},
+        {6, 9, "West Wing", LockType::KEY, "BRONZE KEY", false, Levels::MUSEUM},
+        {10, 6, "North Wing", LockType::CODE, "0300", false, Levels::MUSEUM},
+        {16, 9, "East Wing", LockType::KEY, "GOLD KEY", false, Levels::MUSEUM},
+        {10, 12, "South Wing", LockType::CODE, "7391", false, Levels::MUSEUM},
         // Doors blocking the new 4 corner rooms:
-        {5, 2, "NW Archives", LockType::KEY, "BRONZE KEY", false}, // From NW
-        {14, 3, "NE Vault", LockType::KEY, "IRON KEY", false}, // From NW
-        {5, 15, "SW Crypt", LockType::KEY, "SILVER KEY", false}, // From SW
-        {17, 13, "SE Office", LockType::KEY, "BRONZE KEY", false} // From East
+        {5, 2, "NW Archives", LockType::KEY, "BRONZE KEY", false, Levels::MUSEUM}, // From NW
+        {14, 3, "NE Vault", LockType::KEY, "IRON KEY", false, Levels::MUSEUM}, // From NW
+        {5, 15, "SW Crypt", LockType::KEY, "SILVER KEY", false, Levels::MUSEUM}, // From SW
+        {17, 13, "SE Office", LockType::KEY, "BRONZE KEY", false, Levels::MUSEUM}, // From East
+        // Second-floor puzzle gates
+        {6, 9, "Infinite Archive", LockType::CODE, "1911", false, Levels::MUSEUM_UPPER},
+        {10, 6, "Taxidermy Studio", LockType::CODE, "0402", false, Levels::MUSEUM_UPPER}
     };
 
     g_playerKeys.clear();
@@ -1827,91 +1916,119 @@ static void initMuseumPuzzle( Engine &engineContext ) {
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
+    g_restorationWingUnlocked = false;
 
     if (!g_stairWallOverlayReady)
     {
-        buildStairWallOverlay( g_stairWallOverlay );
+        buildStairWallOverlay(g_stairWallOverlay);
         g_stairWallOverlayReady = true;
     }
 
     g_keyPickups.clear();
-    // Bronze Key in main atrium start
-    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BRONZE KEY", 8.1f, 7.7f, rgb( 180, 120, 40 ), "Bronze Key.glb" ) );
-    // Silver Key in North Wing
-    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "SILVER KEY", 10.5f, 3.5f, rgb( 190, 190, 200 ), "Silver Key.glb" ) );
-    // Fallback Gold Key in North Wing so progression cannot dead-end
-   // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
 
-    g_safes.clear();
-    g_safeBoxIndices.clear();
-    // Safe in SE Office
-    g_safes.push_back({"Director's Safe", "2026", 18.7f, 16.7f, false, "GOLD KEY"});
-    addSafe3D( engineContext, 18.7f, 16.7f);
+    if (engineContext.currentLevel == Levels::MUSEUM) {
+        // Bronze Key in main atrium start
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 8.1f, 7.7f, rgb(180, 120, 40), "Bronze Key.glb"));
+        // Silver Key in North Wing
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "SILVER KEY", 10.5f, 3.5f, rgb(190, 190, 200), "Silver Key.glb"));
+       
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLACK PIGMENT", 4.5f, 4.5f, rgb(70, 70, 85), "BlackPigment.glb", Levels::MUSEUM_UPPER));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLUE PIGMENT", 18.5f, 9.5f, rgb(90, 140, 220), "BluePigment.glb", Levels::MUSEUM_UPPER));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "RED PIGMENT", 12.5f, 15.5f, rgb(215, 75, 70), "RedPigment.glb", Levels::MUSEUM_UPPER));
+        // Fallback Gold Key in North Wing so progression cannot dead-end
+       // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
 
-    g_symbols.clear();
-    g_pedestalBoxIndices.clear();
-    // Pedestal in NW Archives
-    g_symbols.push_back({"Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY"}); // WOLF(1) SERPENT(3) OWL(0)
-    addPedestal3D( engineContext, 3.5f, 3.5f );
+        g_safes.clear();
+        g_safeBoxIndices.clear();
+        // Safe in SE Office
+        g_safes.push_back({ "Director's Safe", "2026", 18.7f, 16.7f, false, "GOLD KEY" });
+        addSafe3D(engineContext, 18.7f, 16.7f);
 
-    // Director room furnishing + decor models
-    addWorldModelInstance( resolveAssetModelPath( "Full Desk.glb" ), 16.36f, 16.55f, 0.8f, rgb( 170, 150, 130 ), 3.1415926f, 0, 0 , false, 0, -0.05f);
-    addWorldModelInstance( resolveAssetModelPath( "Shelf.glb" ), 18.6f, 14.2f, 0.8f, rgb( 170, 160, 140 ), -1.5707963f, 0, 0, false, 0, -0.05f);
-  //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.24f, 14.48f, 0.14f, rgb( 230, 218, 184 ), -1.5707963f, -1.5707963f );
-  //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.38f, 14.52f, 0.13f, rgb( 228, 216, 180 ), -1.5707963f, -1.5707963f );
-    addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.5f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
-    addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
-    addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
+        g_symbols.clear();
+        g_pedestalBoxIndices.clear();
+        // Pedestal in NW Archives
+        g_symbols.push_back({ "Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY" }); // WOLF(1) SERPENT(3) OWL(0)
+        addPedestal3D(engineContext, 3.5f, 3.5f);
+
+        // Director room furnishing + decor models
+        addWorldModelInstance(resolveAssetModelPath("Full Desk.glb"), 16.36f, 16.55f, 0.8f, rgb(170, 150, 130), 3.1415926f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Shelf.glb"), 18.6f, 14.2f, 0.8f, rgb(170, 160, 140), -1.5707963f, 0, 0, false, 0, -0.05f);
+        //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.24f, 14.48f, 0.14f, rgb( 230, 218, 184 ), -1.5707963f, -1.5707963f );
+        //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.38f, 14.52f, 0.13f, rgb( 228, 216, 180 ), -1.5707963f, -1.5707963f );
+        addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.5f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
+        addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
+        addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
 
 
-    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
 
-    // Scattered floor paper props (1-3)
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 16.4f, 14.9f, 0.22f, rgb( 224, 214, 188 ), 0.45f, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.1f, 14.4f, 0.20f, rgb( 220, 210, 182 ), -0.20f, 0, 0, false, 0, -0.05f);
-    addWorldModelInstance( resolveAssetModelPath( "Scattered Paper.glb" ), 17.8f, 15.0f, 0.18f, rgb( 226, 216, 190 ), 0.95f, 0, 0, false, 0, -0.05f);
-    g_clueNotes.clear();
-    // Atrium note
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Janitor's Log",
-        "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
-        15.5f, 11.5f ) );
-    // West Wing Note
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Archivist Notebook",
-        "The NW Archives pedestal requires the predator, the deceiver, and the wise one.",
-        3.5f, 8.5f ) );
-    // West Wing progression note (guarantees early North Wing access)
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Security Log",
-        "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
-        4.5f, 10.5f ) );
-    // SW Crypt Note
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Director Memo",
-        "The SE Office safe code is current year. It contains the Gold Key.",
-        3.5f, 15.5f ) );
-    // East Wing Note
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Final Code Clue",
-        "The South Wing emergency code is 7391.",
-        18.5f, 9.5f ) );
-    // North Wing fallback note so South code is always obtainable
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Emergency Override Slip",
-        "If wing routing fails, South Wing emergency code is 7391.",
-        8.5f, 4.5f ) );
-    // NE Vault lore note so the room is still meaningful after progression rebalance
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Vault Ledger",
-        "Iron access approved. Reserve artifacts moved to East Wing transfer corridor.",
-        17.5f, 2.5f ) );
-
+        // Scattered floor paper props (1-3)
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 16.4f, 14.9f, 0.22f, rgb(224, 214, 188), 0.45f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.1f, 14.4f, 0.20f, rgb(220, 210, 182), -0.20f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.8f, 15.0f, 0.18f, rgb(226, 216, 190), 0.95f, 0, 0, false, 0, -0.05f);
+        g_clueNotes.clear();
+        // Atrium note
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Janitor's Log",
+            "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
+            15.5f, 11.5f));
+        // West Wing Note
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Archivist Notebook",
+            "The NW Archives pedestal requires the predator, the deceiver, and the wise one.",
+            3.5f, 8.5f));
+        // West Wing progression note (guarantees early North Wing access)
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Security Log",
+            "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
+            4.5f, 10.5f));
+        // SW Crypt Note
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Director Memo",
+            "The SE Office safe code is current year. It contains the Gold Key.",
+            3.5f, 15.5f));
+        // East Wing Note
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Final Code Clue",
+            "The South Wing emergency code is 7391.",
+            18.5f, 9.5f));
+        // North Wing fallback note so South code is always obtainable
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Emergency Override Slip",
+            "If wing routing fails, South Wing emergency code is 7391.",
+            8.5f, 4.5f));
+        // NE Vault lore note so the room is still meaningful after progression rebalance
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Vault Ledger",
+            "Iron access approved. Reserve artifacts moved to East Wing transfer corridor.",
+            17.5f, 2.5f));
+        // Restoration Wing lore notes
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Spilled Solvent",
+            "The red stains in the Secret Room won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital.",
+            4.5f, 10.5f,
+            Levels::MUSEUM_UPPER));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Entry #402",
+            "The resolution is too low. I can still see the fear in her eyes. I need a higher polygon count if I am to achieve immortality for us both. Taxidermy lock code: 0402.",
+            12.5f, 15.5f,
+            Levels::MUSEUM_UPPER));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Scratched Mirror",
+            "I looked in the mirror today and saw wireframes. My skin is becoming a texture. Help.",
+            4.5f, 4.5f,
+            Levels::MUSEUM_UPPER));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Archive Assistant Letter",
+            "If the metronome goes quiet, do not turn right. The Infinite Archive loops and the doors remember your footsteps. Archive gate code: 1911.",
+            18.5f, 9.5f,
+            Levels::MUSEUM_UPPER));
+    }
     g_museumPuzzleInitialized = true;
 }
 
@@ -1984,14 +2101,68 @@ g_codeEntryBuffer.clear();
     g_caveQuiz.clear();
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
+    g_restorationWingUnlocked = false;
 }
 
-static int findDoorLockIndex( int tx, int ty ) {
+static int findDoorLockIndex( Levels level, int tx, int ty ) {
     for (int i = 0; i < (int)g_roomLocks.size(); ++i)
     {
-        if (g_roomLocks[ i ].tx == tx && g_roomLocks[ i ].ty == ty) return i;
+        if (g_roomLocks[ i ].level == level && g_roomLocks[ i ].tx == tx && g_roomLocks[ i ].ty == ty) return i;
     }
     return -1;
+}
+
+static Uint32 keyColorForName( const std::string &keyName ) {
+    if (keyName == "BRONZE KEY") return rgb( 180, 120, 40 );
+    if (keyName == "SILVER KEY") return rgb( 190, 190, 200 );
+    if (keyName == "GOLD KEY") return rgb( 255, 215, 0 );
+    if (keyName == "IRON KEY") return rgb( 135, 145, 155 );
+    if (keyName == "BLACK PIGMENT") return rgb( 70, 70, 85 );
+    if (keyName == "BLUE PIGMENT") return rgb( 90, 140, 220 );
+    if (keyName == "RED PIGMENT") return rgb( 215, 75, 70 );
+    return rgb( 220, 210, 180 );
+}
+
+static std::string keyModelForName( const std::string &keyName ) {
+    if (keyName == "BRONZE KEY") return "Bronze Key.glb";
+    if (keyName == "SILVER KEY") return "Silver Key.glb";
+    if (keyName == "GOLD KEY") return "Gold Key.glb";
+    if (keyName == "IRON KEY") return "Iron Key.glb";
+    if (keyName == "BLACK PIGMENT") return "BlackPigment.glb";
+    if (keyName == "BLUE PIGMENT") return "BluePigment.glb";
+    if (keyName == "RED PIGMENT") return "RedPigment.glb";
+    return "Note.glb";
+}
+
+static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Levels level ) {
+    for (auto &k : g_keyPickups)
+    {
+        k.propIndex = -1;
+        k.modelIndex = -1;
+        if (k.collected || k.level != level) continue;
+
+        KeyPickup vis = addKeyPickupModelProxy(
+            engineContext,
+            k.keyName,
+            k.x,
+            k.y,
+            keyColorForName( k.keyName ),
+            keyModelForName( k.keyName ),
+            k.level );
+        k.propIndex = vis.propIndex;
+        k.modelIndex = vis.modelIndex;
+    }
+
+    for (auto &n : g_clueNotes)
+    {
+        n.propIndex = -1;
+        n.modelIndex = -1;
+        if (n.collected || n.level != level) continue;
+
+        NotePickupVisual vis = addNotePickupModel( engineContext, n.x, n.y, n.title );
+        n.propIndex = vis.propIndex;
+        n.modelIndex = vis.modelIndex;
+    }
 }
 
 static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty ) {
@@ -2008,6 +2179,7 @@ static int getNearbyKeyPickup( Engine const &engineContext, float radius = 0.9f 
     {
         const auto &k = g_keyPickups[ i ];
         if (k.collected) continue;
+        if (k.level != engineContext.currentLevel) continue;
         float dx = engineContext.positionX - k.x;
         float dy = engineContext.positionY - k.y;
         if (dx * dx + dy * dy <= radiusSq) return i;
@@ -2021,6 +2193,7 @@ static int getNearbyClueNote( Engine const &engineContext, float radius = 0.9f )
     {
         const auto &n = g_clueNotes[ i ];
         if (n.collected) continue;
+        if (n.level != engineContext.currentLevel) continue;
         float dx = engineContext.positionX - n.x;
         float dy = engineContext.positionY - n.y;
         if (dx * dx + dy * dy <= radiusSq) return i;
@@ -2054,6 +2227,20 @@ static int getNearbySymbol( Engine const &engineContext, float radius = 1.6f ) {
     return -1;
 }
 
+static void hideWorldModelsNear( float x, float y, float radius = 0.50f ) {
+    const float radiusSq = radius * radius;
+    for (auto &m : g_worldModels)
+    {
+        if (!m.visible) continue;
+        float dx = m.x - x;
+        float dy = m.y - y;
+        if ((dx * dx + dy * dy) <= radiusSq)
+        {
+            m.visible = false;
+        }
+    }
+}
+
 static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     namespace fs = std::filesystem;
 
@@ -2076,6 +2263,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     fs::path folder = level.folder;
     g_currentLevelFolder = folder.string();
+    g_currentEditorModelsFile = makeEditorModelsFileNameForLevel( level.levelId, level.mapFile );
     refreshEditorAssetCatalog( true );
     /*
     {
@@ -2228,6 +2416,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
             mesuemObjectives.viewedArtworks.clear();
             mesuemObjectives.totalArtworksToFind = (int)engineContext.artworks.size();
         }
+
+        rebuildMuseumInteractableVisualsForLevel( engineContext, (Levels)level.levelId );
     }
     else
     {
@@ -2280,6 +2470,11 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
             engineContext.lightFalloff = 1.5f;
             engineContext.caveAmbient = 0.03f;
         }
+    }
+
+    if (g_unlockAllDoorsOverride)
+    {
+        applyUnlockAllDoorsOverride( engineContext );
     }
 
     loadEditorModelsForLevel();
@@ -2653,33 +2848,60 @@ void renderGalleryCard( Engine &engineContext ) {
     float px = engineContext.positionX;
     float py = engineContext.positionY;
 
-    std::string wingName = "Central Atrium";
-    std::string wingDesc = "Hub & Information";
+    std::string wingName;
+    std::string wingDesc;
 
-    // Detect wings based on the 23x19 grid layout
-    // North Wing: Y < 7, X between 7 and 15
-    if (py < 7.0f && px >= 7.0f && px <= 15.0f)
+    if (engineContext.currentLevel == Levels::MUSEUM_UPPER)
     {
-        wingName = "North Wing";
-        wingDesc = "Baroque & Dutch Golden Age";
+        wingName = "Restoration Floor Hub";
+        wingDesc = "Taxidermy Studio & Infinite Archive";
+
+        if (py < 7.0f && px >= 7.0f && px <= 15.0f)
+        {
+            wingName = "Taxidermy Studio";
+            wingDesc = "Specimen Processing & Pigment Extraction";
+        }
+        else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
+        {
+            wingName = "Solvent Vault";
+            wingDesc = "Chemical Storage & Restoration Logs";
+        }
+        else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
+        {
+            wingName = "Infinite Archive";
+            wingDesc = "Looping Corridor & Metronome Guide";
+        }
+        else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
+        {
+            wingName = "Masterpiece Skylight";
+            wingDesc = "Observation Chamber & Final Seal";
+        }
     }
-    // South Wing: Y > 12, X between 7 and 15
-    else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
+    else
     {
-        wingName = "South Wing";
-        wingDesc = "Prehistoric & Egyptian";
-    }
-    // West Wing: X < 7, Y between 7 and 12
-    else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
-    {
-        wingName = "West Wing";
-        wingDesc = "Antiquity & Roman Empire";
-    }
-    // East Wing: X > 15, Y between 7 and 12
-    else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
-    {
-        wingName = "East Wing";
-        wingDesc = "Northern Renaissance";
+        wingName = "Central Atrium";
+        wingDesc = "Public Hub & Information";
+
+        if (py < 7.0f && px >= 7.0f && px <= 15.0f)
+        {
+            wingName = "North Wing";
+            wingDesc = "Baroque & Dutch Golden Age";
+        }
+        else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
+        {
+            wingName = "South Wing";
+            wingDesc = "Prehistoric & Egyptian";
+        }
+        else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
+        {
+            wingName = "West Wing";
+            wingDesc = "Antiquity & Roman Empire";
+        }
+        else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
+        {
+            wingName = "East Wing";
+            wingDesc = "Northern Renaissance";
+        }
     }
 
     int titleW = (int)wingName.length() * 11;
@@ -2834,36 +3056,117 @@ static void renderSymbolEntry( Engine &engineContext ) {
     drawStringTinyScaled( engineContext, x + 16, y + 170, "ENTER TO SUBMIT, ESC TO EXIT", rgb( 120, 120, 140 ), 1, 1, 1, false );
 }
 
+static std::vector<std::string> wrapNoteTextLines( const std::string &text, int maxCharsPerLine ) {
+    std::vector<std::string> out;
+    std::istringstream paragraphs( text );
+    std::string paragraph;
+
+    while (std::getline( paragraphs, paragraph, '\n' ))
+    {
+        if (paragraph.empty())
+        {
+            out.push_back( "" );
+            continue;
+        }
+
+        std::istringstream words( paragraph );
+        std::string word;
+        std::string line;
+        while (words >> word)
+        {
+            if (line.empty())
+            {
+                line = word;
+            }
+            else if ((int)(line.size() + 1 + word.size()) <= maxCharsPerLine)
+            {
+                line += " " + word;
+            }
+            else
+            {
+                out.push_back( line );
+                line = word;
+            }
+        }
+        if (!line.empty()) out.push_back( line );
+    }
+
+    if (out.empty()) out.push_back( "" );
+    return out;
+}
+
 static void renderNotesScreen( Engine &engineContext ) {
     if (!g_notesOpen) return;
 
-    int panelW = RENDER_W - 120;
-    int panelH = RENDER_H - 100;
+    int panelW = RENDER_W - 90;
+    int panelH = RENDER_H - 70;
     int x = (RENDER_W - panelW) / 2;
     int y = (RENDER_H - panelH) / 2;
 
     drawTextBox( engineContext, x, y, panelW, panelH, rgb( 14, 12, 10 ), rgb( 170, 145, 95 ) );
     drawString16x16( engineContext, x + 18, y + 16, "FIELD NOTES", rgb( 240, 210, 140 ), panelW - 36, 1, 1, false );
-    drawStringTinyScaled( engineContext, x + panelW - 170, y + 22, "N/ESC CLOSE", rgb( 145, 135, 110 ), 2, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + panelW - 290, y + 22, "UP/DOWN SELECT  PGUP/PGDN SCROLL  N/ESC CLOSE", rgb( 145, 135, 110 ), 1, 1, 1, false );
 
-    int cy = y + 52;
+    int listX = x + 16;
+    int listY = y + 52;
+    int listW = 290;
+    int listH = panelH - 66;
+
+    int bodyX = listX + listW + 12;
+    int bodyY = listY;
+    int bodyW = panelW - (bodyX - x) - 16;
+    int bodyH = listH;
+
+    drawTextBox( engineContext, listX, listY, listW, listH, rgb( 10, 10, 12 ), rgb( 110, 96, 70 ) );
+    drawTextBox( engineContext, bodyX, bodyY, bodyW, bodyH, rgb( 10, 10, 12 ), rgb( 110, 96, 70 ) );
+
     if (g_foundNotes.empty())
     {
-        drawString16x16( engineContext, x + 18, cy + 12, "No clues collected yet.", rgb( 210, 210, 210 ), panelW - 36, 1, 1, false );
+        drawString16x16( engineContext, listX + 12, listY + 14, "No clues collected yet.", rgb( 210, 210, 210 ), listW - 24, 1, 1, false );
         return;
     }
 
-    for (int noteIdx : g_foundNotes)
+    g_notesSelected = std::clamp( g_notesSelected, 0, (int)g_foundNotes.size() - 1 );
+    int listLineY = listY + 10;
+    const int listLineStep = 18;
+    for (int i = 0; i < (int)g_foundNotes.size(); ++i)
     {
+        int noteIdx = g_foundNotes[ i ];
         if (noteIdx < 0 || noteIdx >= (int)g_clueNotes.size()) continue;
         const auto &note = g_clueNotes[ noteIdx ];
 
-        drawString16x16( engineContext, x + 18, cy, note.title, rgb( 255, 232, 170 ), panelW - 36, 1, 1, false );
-        cy += 20;
-        cy = drawWrappedText( engineContext, x + 24, cy, note.body, rgb( 220, 220, 215 ), panelW - 48 );
-        cy += 14;
-        if (cy > y + panelH - 30) break;
+        bool selected = (i == g_notesSelected);
+        if (selected)
+        {
+            drawTextBox( engineContext, listX + 6, listLineY - 2, listW - 12, 16, rgb( 42, 34, 20 ), rgb( 170, 145, 90 ) );
+        }
+
+        drawStringTinyScaled( engineContext, listX + 10, listLineY, note.title, selected ? rgb( 250, 226, 165 ) : rgb( 210, 210, 210 ), 1, 1, 1, false );
+        listLineY += listLineStep;
+        if (listLineY > listY + listH - 14) break;
     }
+
+    int selectedNoteIdx = g_foundNotes[ g_notesSelected ];
+    if (selectedNoteIdx < 0 || selectedNoteIdx >= (int)g_clueNotes.size()) return;
+
+    const auto &selected = g_clueNotes[ selectedNoteIdx ];
+    drawString16x16( engineContext, bodyX + 12, bodyY + 10, selected.title, rgb( 255, 232, 170 ), bodyW - 24, 1, 1, false );
+
+    const int maxChars = std::max( 20, (bodyW - 24) / 6 );
+    std::vector<std::string> wrapped = wrapNoteTextLines( selected.body, maxChars );
+    const int visibleLines = std::max( 1, (bodyH - 50) / 12 );
+    const int maxScroll = std::max( 0, (int)wrapped.size() - visibleLines );
+    g_notesBodyScroll = std::clamp( g_notesBodyScroll, 0, maxScroll );
+
+    int textY = bodyY + 34;
+    for (int i = g_notesBodyScroll; i < (int)wrapped.size() && i < g_notesBodyScroll + visibleLines; ++i)
+    {
+        drawStringTinyScaled( engineContext, bodyX + 12, textY, wrapped[ i ], rgb( 220, 220, 215 ), 1, 1, 1, false );
+        textY += 12;
+    }
+
+    std::string scroll = "LINE " + std::to_string( std::min( (int)wrapped.size(), g_notesBodyScroll + 1 ) ) + "/" + std::to_string( std::max( 1, (int)wrapped.size() ) );
+    drawStringTinyScaled( engineContext, bodyX + bodyW - 95, bodyY + bodyH - 14, scroll, rgb( 165, 155, 130 ), 1, 1, 1, false );
 }
 
 static void renderCompass( Engine &engineContext ) {
@@ -2946,7 +3249,7 @@ static void renderLevelEditorOverlay( Engine &engineContext ) {
 
     drawStringTinyScaled( engineContext, x + 12, y + 88, "F2 TO EXIT | [ ] CYCLE ASSET | ENTER PLACE | TAB SELECT | DEL DELETE", rgb( 170, 170, 190 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 104, "WASD X/Y  R/F Z  Q/E YAW  Z/X PITCH  C/V ROLL  -/= SIZE", rgb( 170, 170, 190 ), 1, 1, 1, false );
-    drawStringTinyScaled( engineContext, x + 12, y + 120, "CTRL+S SAVE TO editor_models.txt (current level)", rgb( 170, 170, 190 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 120, "CTRL+S SAVE TO " + g_currentEditorModelsFile + " (current level)", rgb( 170, 170, 190 ), 1, 1, 1, false );
 }
 
 static void renderEndingScreen( Engine &engineContext ) {
@@ -4002,15 +4305,22 @@ static void render( Engine &engineContext, float dt ) {
     }
 
     int doorTx = 0, doorTy = 0;
-    if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, doorTx, doorTy ))
+    if (isMuseumLikeLevel( engineContext.currentLevel ) && getDoorAheadTile( engineContext, doorTx, doorTy ))
     {
-        int lockIndex = findDoorLockIndex( doorTx, doorTy );
+        int lockIndex = findDoorLockIndex( engineContext.currentLevel, doorTx, doorTy );
         if (!overlayBusy && lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked && !g_codeEntryActive)
         {
             const auto &lock = g_roomLocks[ lockIndex ];
             std::string req = (lock.type == LockType::KEY) ? ("[F] Use " + lock.requirement) : "[F] Enter 4-Digit Code";
             drawString16x16( engineContext, (RENDER_W / 2) - 110, (RENDER_H / 2) + 65, req, rgb( 255, 210, 100 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
         }
+    }
+    if (engineContext.currentLevel == Levels::MUSEUM_UPPER && getDoorAheadTile( engineContext, doorTx, doorTy ) && isRestorationGateDoorTile( doorTx, doorTy ) && !g_restorationWingUnlocked)
+    {
+        std::string req = hasRestorationPigments()
+            ? "[F] UNSEAL RESTORATION WING"
+            : "[F] NEED BLACK, BLUE, RED PIGMENT";
+        drawString16x16( engineContext, (RENDER_W / 2) - 155, (RENDER_H / 2) + 65, req, rgb( 255, 170, 170 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     const Artwork *art = nullptr;
@@ -4421,6 +4731,14 @@ int main( int argc, char **argv ) {
                         continue;
                     }
 
+                    if (ev.key.key == SDLK_F3)
+                    {
+                        g_unlockAllDoorsOverride = true;
+                        applyUnlockAllDoorsOverride( engineContext );
+                        showAccessPopup( "Door override enabled. All doors unlocked.", 2200 );
+                        continue;
+                    }
+
                     if (g_levelEditorMode)
                     {
                         const bool fine = (ev.key.mod & SDL_KMOD_SHIFT) != 0;
@@ -4523,6 +4841,31 @@ int main( int argc, char **argv ) {
                         if (ev.key.key == SDLK_N || ev.key.key == SDLK_ESCAPE)
                         {
                             g_notesOpen = false;
+                        }
+                        else if (!g_foundNotes.empty())
+                        {
+                            if (ev.key.key == SDLK_UP)
+                            {
+                                g_notesSelected = std::max( 0, g_notesSelected - 1 );
+                                g_notesBodyScroll = 0;
+                            }
+                            else if (ev.key.key == SDLK_DOWN)
+                            {
+                                g_notesSelected = std::min( (int)g_foundNotes.size() - 1, g_notesSelected + 1 );
+                                g_notesBodyScroll = 0;
+                            }
+                            else if (ev.key.key == SDLK_PAGEUP || ev.key.key == SDLK_W)
+                            {
+                                g_notesBodyScroll = std::max( 0, g_notesBodyScroll - 2 );
+                            }
+                            else if (ev.key.key == SDLK_PAGEDOWN || ev.key.key == SDLK_S)
+                            {
+                                g_notesBodyScroll += 2;
+                            }
+                            else if (ev.key.key == SDLK_HOME)
+                            {
+                                g_notesBodyScroll = 0;
+                            }
                         }
                         continue;
                     }
@@ -4687,6 +5030,11 @@ int main( int argc, char **argv ) {
                     else if (ev.key.key == SDLK_N)
                     {
                         g_notesOpen = !g_notesOpen;
+                        if (g_notesOpen)
+                        {
+                            g_notesSelected = std::clamp( g_notesSelected, 0, std::max( 0, (int)g_foundNotes.size() - 1 ) );
+                            g_notesBodyScroll = 0;
+                        }
                     }
                     else if (ev.key.key == SDLK_F1)
                     {
@@ -4729,6 +5077,7 @@ int main( int argc, char **argv ) {
                             {
                                 g_worldModels[ k.modelIndex ].visible = false;
                             }
+                            hideWorldModelsNear( k.x, k.y );
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
                             playPickup(levels[engineContext.currentLevel].folder);
                             triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
@@ -4750,6 +5099,7 @@ int main( int argc, char **argv ) {
                             {
                                 g_worldModels[ n.modelIndex ].visible = false;
                             }
+                            hideWorldModelsNear( n.x, n.y );
                             showAccessPopup( "Collected note: " + n.title, 2200 );
 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
                             triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
@@ -4820,8 +5170,30 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
+                        int tx = 0;
+                        int ty = 0;
+                        if (engineContext.currentLevel == Levels::MUSEUM_UPPER && getDoorAheadTile( engineContext, tx, ty ) && isRestorationGateDoorTile( tx, ty ) && !g_restorationWingUnlocked)
+                        {
+                            if (hasRestorationPigments())
+                            {
+                                g_restorationWingUnlocked = true;
+                                int idx = ty * engineContext.map.width + tx;
+                                if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2)
+                                {
+                                    engineContext.map.tiles[ idx ] = 0;
+                                }
+                                showAccessPopup( "Taxidermy seal broken. Restoration Wing unlocked.", 2400 );
+                                triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORATION WING UNSEALED", 1.0f );
+                            }
+                            else
+                            {
+                                showAccessPopup( "Seal active. Gather Black, Blue, and Red Pigment.", 2300 );
+                            }
+                            continue;
+                        }
+
                         int nearbySafe = getNearbySafe( engineContext );
-                        if (nearbySafe >= 0)
+                        if (engineContext.currentLevel == Levels::MUSEUM && nearbySafe >= 0)
                         {
                             g_codeEntryActive = true;
                             g_safeEntryIndex = nearbySafe;
@@ -4832,7 +5204,7 @@ int main( int argc, char **argv ) {
                         }
 
                         int nearbySymbol = getNearbySymbol( engineContext );
-                        if (nearbySymbol >= 0)
+                        if (engineContext.currentLevel == Levels::MUSEUM && nearbySymbol >= 0)
                         {
                             g_codeEntryActive = true;
                             g_symbolEntryIndex = nearbySymbol;
@@ -4843,11 +5215,9 @@ int main( int argc, char **argv ) {
                             continue;
                         }
 
-                        int tx = 0;
-                        int ty = 0;
-                        if (engineContext.currentLevel == Levels::MUSEUM && getDoorAheadTile( engineContext, tx, ty ))
+                        if (isMuseumLikeLevel( engineContext.currentLevel ) && getDoorAheadTile( engineContext, tx, ty ))
                         {
-                            int lockIndex = findDoorLockIndex( tx, ty );
+                            int lockIndex = findDoorLockIndex( engineContext.currentLevel, tx, ty );
                             if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked)
                             {
                                 auto &lock = g_roomLocks[ lockIndex ];
