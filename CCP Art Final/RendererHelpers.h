@@ -1256,7 +1256,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
             int lineWidth = (int)(line.length() + word.length() + 1) * charW;
             if (lineWidth > maxWidth && !line.empty())
             {
-                drawStringTinyScaled( engineContext, x, currentY, line, color, 1 );
+                drawStringTinyScaled( engineContext, x, currentY, line, color, 2);
                 currentY += lineH;
                 line = word + " ";
             }
@@ -1273,7 +1273,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
     }
     if (!line.empty())
     {
-        drawStringTinyScaled( engineContext, x, currentY, line, color, 1 );
+        drawStringTinyScaled( engineContext, x, currentY, line, color, 2 );
         currentY += lineH;
     }
     return currentY; // Returns the Y position for the next block of text

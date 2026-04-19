@@ -135,6 +135,30 @@ static bool g_museumPuzzleInitialized = false;
 static bool g_restorationWingUnlocked = false;
 static bool g_unlockAllDoorsOverride = false;
 
+struct WeaponPickup
+{
+    std::string weaponName;
+    float x = 0.f;
+    float y = 0.f;
+    bool collected = false;
+    int modelIndex = -1;
+    Levels level = Levels::MUSEUM;
+};
+
+struct CombatState
+{
+    bool active = false;
+    bool hasRevolver = false;
+    int loadedAmmo = 0;
+    int reserveAmmo = 0;
+};
+
+struct DialogueLine
+{
+    std::string text;
+    float duration = 3.0f;
+};
+
 struct CpuModel
 {
     std::vector<glm::vec3> vertices;
@@ -185,6 +209,177 @@ static int addWorldModelInstance(
     float spinSpeed,
     float heightOffset );
 
+class DialogueSystem
+{
+public:
+    void start( std::vector<DialogueLine> lines ) {
+        queue = std::move( lines );
+        index = 0;
+        lineTimer = queue.empty() ? 0.0f : std::max( 0.1f, queue[ 0 ].duration );
+        active = !queue.empty();
+    }
+
+    void update( float dt ) {
+        if (!active || queue.empty()) return;
+
+        lineTimer -= dt;
+        while (lineTimer <= 0.0f && active)
+        {
+            ++index;
+            if (index >= queue.size())
+            {
+                clear();
+                return;
+            }
+            lineTimer += std::max( 0.1f, queue[ index ].duration );
+        }
+    }
+
+    bool isActive() const {
+        return active;
+    }
+
+    const std::string &currentText() const {
+        static const std::string kEmpty;
+        if (!active || queue.empty() || index >= queue.size()) return kEmpty;
+        return queue[ index ].text;
+    }
+
+    void clear() {
+        queue.clear();
+        index = 0;
+        lineTimer = 0.0f;
+        active = false;
+    }
+
+private:
+    std::vector<DialogueLine> queue;
+    size_t index = 0;
+    float lineTimer = 0.0f;
+    bool active = false;
+};
+
+class CutsceneController
+{
+public:
+    bool isPhoneCutsceneActive() const {
+        return phoneCutsceneActive;
+    }
+
+    bool canTriggerPhoneCutscene() const {
+        return !phoneCutsceneTriggered && !phoneCutsceneActive;
+    }
+
+    void triggerPhoneCutscene( Engine &engineContext, DialogueSystem &dialogue, const std::string &phoneAssetPath ) {
+        if (!canTriggerPhoneCutscene()) return;
+
+        phoneCutsceneActive = true;
+        elapsed = 0.0f;
+        phoneCutsceneTriggered = true;
+
+        const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
+        const float px = engineContext.positionX + engineContext.directionX * kPhoneForward;
+        const float py = engineContext.positionY + engineContext.directionY * kPhoneForward;
+
+        phoneModelIndex = addWorldModelInstance(
+            phoneAssetPath,
+            px,
+            py,
+            0.22f,
+            rgb( 210, 210, 220 ),
+            yaw + kPhoneYawOffset,
+            kPhonePitch,
+            kPhoneRoll,
+            false,
+            0.0f,
+            kPhoneHeight );
+
+        dialogue.start( {
+            {"Huh, that's weird... it was just at 100%. Wait... where am I, where is everyone? Ugh my head hurts", 6.5f}
+            } );
+    }
+
+    void update( Engine &engineContext, DialogueSystem &dialogue, float dt ) {
+        if (!phoneCutsceneActive) return;
+
+        elapsed += dt;
+
+        if (phoneModelIndex >= 0 && phoneModelIndex < (int)g_worldModels.size())
+        {
+            const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
+            g_worldModels[ phoneModelIndex ].x = engineContext.positionX + engineContext.directionX * kPhoneForward;
+            g_worldModels[ phoneModelIndex ].y = engineContext.positionY + engineContext.directionY * kPhoneForward;
+            g_worldModels[ phoneModelIndex ].yaw = yaw + kPhoneYawOffset;
+            g_worldModels[ phoneModelIndex ].pitch = kPhonePitch;
+            g_worldModels[ phoneModelIndex ].roll = kPhoneRoll;
+            g_worldModels[ phoneModelIndex ].heightOffset = kPhoneHeight;
+        }
+
+        if (elapsed >= durationSeconds && !dialogue.isActive())
+        {
+            stop( engineContext );
+            mesuemObjectives.setMainObjective( "Figure out what happened." );
+        }
+    }
+
+    float forcedPitchOffset() const {
+        return phoneCutsceneActive ? 74.0f : 0.0f;
+    }
+
+    void reset() {
+        phoneCutsceneActive = false;
+        phoneCutsceneTriggered = false;
+        elapsed = 0.0f;
+        phoneModelIndex = -1;
+    }
+
+private:
+    void stop( Engine &engineContext ) {
+        phoneCutsceneActive = false;
+        elapsed = 0.0f;
+        if (phoneModelIndex >= 0 && phoneModelIndex < (int)g_worldModels.size())
+        {
+            g_worldModels[ phoneModelIndex ].visible = false;
+        }
+        phoneModelIndex = -1;
+        engineContext.pitchOffset = 0.0f;
+    }
+
+    bool phoneCutsceneActive = false;
+    bool phoneCutsceneTriggered = false;
+    float elapsed = 0.0f;
+    float durationSeconds = 6.5f;
+    int phoneModelIndex = -1;
+    static constexpr float kPhoneForward = 0.45f;
+    static constexpr float kPhoneHeight = 0.45f;
+    static constexpr float kPhoneYawOffset = 1.5707963f;
+    static constexpr float kPhonePitch = -0.1f;
+    static constexpr float kPhoneRoll = 0.0f;
+};
+
+static WeaponPickup g_revolverPickup;
+static CombatState g_combatState;
+static bool g_directorDeskUnlocked = false;
+static DialogueSystem g_dialogue;
+static CutsceneController g_cutsceneController;
+static bool g_showHeldWeapon = true;
+static int g_heldRevolverModelIndex = -1;
+static bool g_revolverAiming = false;
+static float g_revolverShotCooldown = 0.0f;
+static float g_revolverRecoilTimer = 0.0f;
+static bool g_revolverInspectCutsceneActive = false;
+static float g_revolverInspectCutsceneTimer = 0.0f;
+static constexpr float kRevolverInspectCutsceneDuration = 3.5f;
+static int g_revolverInspectModelIndex = -1;
+static float g_revolverInspectBaseYaw = 0.0f;
+static std::string g_weaponSoundBaseFolder;
+static sf::SoundBuffer g_gunshotBuffer;
+static sf::SoundBuffer g_shellDropBuffer;
+static bool g_weaponSoundBuffersReady = false;
+static std::vector<std::shared_ptr<sf::Sound>> g_activeWeaponSounds;
+static std::vector<float> g_pendingShellDropTimers;
+static constexpr float kRevolverFacingYawOffset = 1.5f;
+
 struct EditorAssetDef
 {
     std::string label;
@@ -213,6 +408,35 @@ static std::string makeEditorModelsFileNameForLevel( int levelId, const std::str
     std::string stem = std::filesystem::path( mapFile.empty() ? "map.txt" : mapFile ).stem().string();
     if (stem.empty()) stem = "map";
     return "editor_models_level_" + std::to_string( levelId ) + "_" + stem + ".txt";
+}
+
+static void refreshWeaponSoundBuffers( const std::string &baseFolder ) {
+    if (g_weaponSoundBuffersReady && g_weaponSoundBaseFolder == baseFolder) return;
+
+    g_weaponSoundBaseFolder = baseFolder;
+    g_weaponSoundBuffersReady = false;
+
+    const std::string gunshotPath = baseFolder + "\\gunshot.wav";
+    const std::string shellDropPath = baseFolder + "\\shelldrop.wav";
+
+    const bool gunOk = g_gunshotBuffer.loadFromFile( gunshotPath );
+    const bool shellOk = g_shellDropBuffer.loadFromFile( shellDropPath );
+    g_weaponSoundBuffersReady = gunOk && shellOk;
+}
+
+static void playWeaponBufferedSound( const sf::SoundBuffer &buffer, float volume = 100.0f ) {
+    auto snd = std::make_shared<sf::Sound>( buffer );
+    snd->setVolume( volume );
+    snd->play();
+    g_activeWeaponSounds.push_back( snd );
+}
+
+static void playRevolverShotSequence( const std::string &baseFolder ) {
+    refreshWeaponSoundBuffers( baseFolder );
+    if (!g_weaponSoundBuffersReady) return;
+
+    playWeaponBufferedSound( g_gunshotBuffer, 100.0f );
+    g_pendingShellDropTimers.push_back( 0.34f );
 }
 
 static const std::vector<EditorAssetDef> &editorAssetCatalog() {
@@ -448,15 +672,15 @@ static int placeEditorModel( Engine &engineContext ) {
 
     const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
 
-    auto snapHalf = []( float v )->float {
-        if (std::fabs( v ) < 0.0001f) return 0.0f;
-        return std::round( v * 2.0f ) * 0.5f;
-    };
+    constexpr float kEditorSpawnForward = 1.0f;
+    constexpr float kEditorSpawnEyeLevel = 0.52f;
+    const float spawnX = engineContext.positionX + engineContext.directionX * kEditorSpawnForward;
+    const float spawnY = engineContext.positionY + engineContext.directionY * kEditorSpawnForward;
 
     int idx = addWorldModelInstance(
         resolveAssetModelPath( asset.assetName ),
-        snapHalf( engineContext.positionX ),
-        snapHalf( engineContext.positionY ),
+        spawnX,
+        spawnY,
         asset.worldSize,
         asset.tint,
         yaw,
@@ -464,7 +688,7 @@ static int placeEditorModel( Engine &engineContext ) {
         0.0f,
         false,
         0.0f,
-        0.0f );
+        kEditorSpawnEyeLevel );
 
     if (idx >= 0 && idx < (int)g_worldModels.size())
     {
@@ -552,8 +776,11 @@ static int findNearestEditorModel( Engine const &engineContext, float radius = 3
 }
 
 static bool pointBlockedByWorldModel( float px, float py, float playerRadius ) {
-    for (const auto &inst : g_worldModels)
+    for (int i = 0; i < (int)g_worldModels.size(); ++i)
     {
+        if (i == g_heldRevolverModelIndex || i == g_revolverInspectModelIndex) continue;
+
+        const auto &inst = g_worldModels[ i ];
         if (!inst.visible || !inst.model) continue;
 
         // Keep small floating/spinning pickups interactive.
@@ -1237,6 +1464,115 @@ static bool hasRestorationPigments() {
         g_playerKeys.contains( "RED PIGMENT" );
 }
 
+static std::string resolveFirstExistingAsset( std::initializer_list<const char *> assetCandidates ) {
+    for (const char *candidate : assetCandidates)
+    {
+        const std::string path = resolveAssetModelPath( candidate );
+        if (std::filesystem::exists( path ))
+        {
+            return path;
+        }
+    }
+    return resolveAssetModelPath( *assetCandidates.begin() );
+}
+
+static bool isPlayerNearDirectorDesk( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::MUSEUM) return false;
+    return isPlayerNearPoint( engineContext, 16.36f, 16.55f, 1.45f );
+}
+
+static bool isRevolverNearby( Engine const &engineContext, float radius = 1.0f ) {
+    if (g_revolverPickup.collected) return false;
+    if (g_revolverPickup.level != engineContext.currentLevel) return false;
+    float dx = engineContext.positionX - g_revolverPickup.x;
+    float dy = engineContext.positionY - g_revolverPickup.y;
+    return (dx * dx + dy * dy) <= (radius * radius);
+}
+
+static void updateHeldRevolverModel( Engine &engineContext ) {
+    const bool shouldShow =
+        g_combatState.active &&
+        g_combatState.hasRevolver &&
+        g_showHeldWeapon &&
+        !g_cutsceneController.isPhoneCutsceneActive() &&
+        !g_revolverInspectCutsceneActive;
+
+    if (!shouldShow)
+    {
+        if (g_heldRevolverModelIndex >= 0 && g_heldRevolverModelIndex < (int)g_worldModels.size())
+        {
+            g_worldModels[ g_heldRevolverModelIndex ].visible = false;
+        }
+        return;
+    }
+
+    const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
+    const float rightX = -engineContext.directionY;
+    const float rightY = engineContext.directionX;
+
+    const float recoil01 = std::clamp( g_revolverRecoilTimer / 0.14f, 0.0f, 1.0f );
+    const float recoilKick = recoil01 * recoil01;
+
+    float forward = 0.34f;
+    float right = 0.20f;
+    float height = 0.30f;
+    float pitch = 0.06f;
+    float roll = -0.22f;
+
+    if (g_revolverAiming)
+    {
+        forward = 0.42f;
+        right = 0.01f;
+        height = 0.28f;
+        pitch = 0.02f;
+        roll = -0.04f;
+    }
+
+    if (g_revolverInspectCutsceneActive)
+    {
+        forward = 0.56f;
+        right = 0.04f;
+        height = 0.38f;
+        pitch = 0.38f;
+        roll = -0.16f;
+    }
+
+    forward -= 0.08f * recoilKick;
+    height += 0.02f * recoilKick;
+    pitch -= 0.65f * recoilKick;
+
+    const float px = engineContext.positionX + engineContext.directionX * forward + rightX * right;
+    const float py = engineContext.positionY + engineContext.directionY * forward + rightY * right;
+
+    if (g_heldRevolverModelIndex < 0 || g_heldRevolverModelIndex >= (int)g_worldModels.size())
+    {
+        g_heldRevolverModelIndex = addWorldModelInstance(
+            resolveFirstExistingAsset( { "Revolver.glb", "revolver.glb", "SurgicalKnife.glb" } ),
+            px,
+            py,
+            0.25f,
+            rgb( 175, 180, 190 ),
+            -yaw + kRevolverFacingYawOffset,
+            pitch,
+            roll,
+            false,
+            0.0f,
+            height );
+    }
+
+    if (g_heldRevolverModelIndex >= 0 && g_heldRevolverModelIndex < (int)g_worldModels.size())
+    {
+        auto &held = g_worldModels[ g_heldRevolverModelIndex ];
+        held.visible = true;
+        held.x = px;
+        held.y = py;
+        held.yaw = -yaw + kRevolverFacingYawOffset;
+        held.pitch = pitch;
+        held.roll = roll;
+        held.heightOffset = height;
+    }
+}
+
 static bool isRestorationGateDoorTile( int tx, int ty ) {
     return tx == 16 && ty == 9;
 }
@@ -1292,7 +1628,7 @@ static void renderCaveQuiz( Engine &engineContext ) {
     int y = (RENDER_H - panelH) / 2;
 
     drawTextBox( engineContext, x, y, panelW, panelH, rgb( 12, 12, 16 ), rgb( 180, 150, 60 ) );
-    std::string header = "WARDEN STATUE TRIAL " + std::to_string( g_caveQuizQuestionIndex + 1 ) + "/" + std::to_string( g_caveQuiz.size() );
+    std::string header = "Warden Statue " + std::to_string( g_caveQuizQuestionIndex + 1 ) + "/" + std::to_string( g_caveQuiz.size() );
     drawString16x16( engineContext, x + 16, y + 14, header, rgb( 255, 225, 120 ), panelW - 32, 1, 1, false );
 
     int cy = y + 46;
@@ -1306,7 +1642,7 @@ static void renderCaveQuiz( Engine &engineContext ) {
         cy += 24;
     }
 
-    drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "PRESS 1-4 TO ANSWER   ESC TO CANCEL", rgb( 130, 130, 145 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "Press 1-4 To Answer   ESC To Cancel", rgb( 130, 130, 145 ), 1, 1, 1, false );
 }
 
 static void renderInteractionAnimation( Engine &engineContext ) {
@@ -1355,7 +1691,7 @@ static void renderInteractionAnimation( Engine &engineContext ) {
 
         if (p > 0.72f)
         {
-            drawStringTinyScaled( engineContext, x + w - 176, y + h - 16, "TURNING...", rgb( 220, 190, 120 ), 1, 1, 1, false );
+            drawStringTinyScaled( engineContext, x + w - 176, y + h - 16, "Turning...", rgb( 220, 190, 120 ), 1, 1, 1, false );
         }
     }
     else if (g_interactionAnim.type == InteractionAnimType::NOTE_COLLECT)
@@ -1363,7 +1699,7 @@ static void renderInteractionAnimation( Engine &engineContext ) {
         int nx = x + 40;
         int ny = stageY + 6;
         drawTextBox( engineContext, nx, ny, 72, 40, rgb( 210, 198, 164 ), rgb( 120, 96, 64 ) );
-        drawStringTinyScaled( engineContext, nx + 10, ny + 12, "NOTE", rgb( 70, 55, 36 ), 1, 1, 1, false );
+        drawStringTinyScaled( engineContext, nx + 10, ny + 12, "Note", rgb( 70, 55, 36 ), 1, 1, 1, false );
     }
     else if (g_interactionAnim.type == InteractionAnimType::ITEM_PICKUP)
     {
@@ -1917,6 +2253,22 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
     g_restorationWingUnlocked = false;
+    g_directorDeskUnlocked = false;
+    g_combatState = {};
+    g_showHeldWeapon = true;
+    g_revolverPickup = {};
+    g_heldRevolverModelIndex = -1;
+    g_revolverAiming = false;
+    g_revolverShotCooldown = 0.0f;
+    g_revolverRecoilTimer = 0.0f;
+    g_revolverInspectCutsceneActive = false;
+    g_revolverInspectCutsceneTimer = 0.0f;
+    g_revolverInspectModelIndex = -1;
+    g_revolverInspectBaseYaw = 0.0f;
+    g_activeWeaponSounds.clear();
+    g_pendingShellDropTimers.clear();
+    g_cutsceneController.reset();
+    g_dialogue.clear();
 
     if (!g_stairWallOverlayReady)
     {
@@ -1932,9 +2284,11 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // Silver Key in North Wing
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "SILVER KEY", 10.5f, 3.5f, rgb(190, 190, 200), "Silver Key.glb"));
        
+        // Upper-floor pigment hunt (one pigment per distinct room)
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLACK PIGMENT", 4.5f, 4.5f, rgb(70, 70, 85), "BlackPigment.glb", Levels::MUSEUM_UPPER));
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLUE PIGMENT", 18.5f, 9.5f, rgb(90, 140, 220), "BluePigment.glb", Levels::MUSEUM_UPPER));
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "RED PIGMENT", 12.5f, 15.5f, rgb(215, 75, 70), "RedPigment.glb", Levels::MUSEUM_UPPER));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLUE PIGMENT", 18.5f, 4.5f, rgb(90, 140, 220), "BluePigment.glb", Levels::MUSEUM_UPPER));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "RED PIGMENT", 18.5f, 15.5f, rgb(215, 75, 70), "RedPigment.glb", Levels::MUSEUM_UPPER));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "DIRECTOR'S KEY", 4.5f, 15.5f, rgb(210, 170, 95), "Bronze Key.glb"));
         // Fallback Gold Key in North Wing so progression cannot dead-end
        // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
 
@@ -1960,6 +2314,13 @@ static void initMuseumPuzzle(Engine& engineContext) {
         addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
         addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
         addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
+
+        g_revolverPickup.weaponName = "REVOLVER";
+        g_revolverPickup.x = 17.95f;
+        g_revolverPickup.y = 16.1f;
+        g_revolverPickup.level = Levels::MUSEUM;
+        g_revolverPickup.collected = true;
+        g_revolverPickup.modelIndex = -1;
 
 
         addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
@@ -2002,6 +2363,18 @@ static void initMuseumPuzzle(Engine& engineContext) {
             "Emergency Override Slip",
             "If wing routing fails, South Wing emergency code is 7391.",
             8.5f, 4.5f));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Conservation Log A",
+            "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
+            9.5f, 8.4f));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Conservation Log B",
+            "A perfect exhibit is one breath held forever. Preservation is mercy, not violence.",
+            12.8f, 9.2f));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Conservation Log C",
+            "Stillness is purity. If they move, they suffer. If they freeze, they become art.",
+            10.2f, 11.6f));
         // NE Vault lore note so the room is still meaningful after progression rebalance
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Vault Ledger",
@@ -2010,66 +2383,81 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // Restoration Wing lore notes
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Spilled Solvent",
-            "The red stains in the Secret Room won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital.",
-            4.5f, 10.5f,
+            "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. Wait, I haven't seen anyone in a while. Where are they? How did I get here?",
+            10.5f, 15.5f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Entry #402",
-            "The resolution is too low. I can still see the fear in her eyes. I need a higher polygon count if I am to achieve immortality for us both. Taxidermy lock code: 0402.",
-            12.5f, 15.5f,
+            "I can still see the fear in his eyes. The color drained from her body. The texture abandoned his face. He went limp. The Director's requests are becoming too much. ",
+            10.5f, 4.5f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
-            "Scratched Mirror",
-            "I looked in the mirror today and saw wireframes. My skin is becoming a texture. Help.",
-            4.5f, 4.5f,
+            "Scientist Note",
+            "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now...",
+            4.5f, 9.5f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Archive Assistant Letter",
-            "If the metronome goes quiet, do not turn right. The Infinite Archive loops and the doors remember your footsteps. Archive gate code: 1911.",
+            "Look away. If you look it in the eye it will take you.",
             18.5f, 9.5f,
+            Levels::MUSEUM_UPPER));
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Special Exhibit Intake Receipt",
+            "NEW ACQUISITION // SUBJECT: YOU\nCondition: Conscious, disoriented, highly expressive under stress.\nCurator notes: Frame after identity fracture. Keep still. Preserve the moment forever.",
+            12.0f, 9.3f,
             Levels::MUSEUM_UPPER));
     }
     g_museumPuzzleInitialized = true;
 }
-
 static void initCaveQuiz() {
     g_caveQuiz.clear();
-    g_caveQuiz.push_back( {
-        "Which period is generally associated with Rembrandt's The Night Watch?",
-        {"Baroque", "Neoclassical", "Medieval", "Romantic"},
+
+    // Q1 focuses on the Director's twisted philosophy (Conservation Log B)
+    g_caveQuiz.push_back({
+        "According to the Director, what makes the perfect exhibit?",
+        {"One breath held forever", "A flawless recreation of history", "Abstract interpretation", "Pure, untouched marble"},
         0
-        } );
-    g_caveQuiz.push_back( {
-        "Roman portraiture is best known for emphasizing what?",
-        {"Idealized perfection", "Abstract geometry", "Realistic likeness", "Pure symbolism"},
+        });
+
+    // Q2 focuses on the conversion process (Conservation Log C)
+    g_caveQuiz.push_back({
+        "At what exact moment does the subject finally become art?",
+        {"When the frame is sealed", "When the solvent is applied", "When they freeze", "When the public arrives"},
         2
-        } );
-    g_caveQuiz.push_back( {
-        "Renaissance artists were strongly influenced by the revival of which cultures?",
-        {"Mayan and Aztec", "Greek and Roman", "Norse and Celtic", "Persian and Mughal"},
+        });
+
+    // Q3 focuses on the player's own grim realization (Intake Receipt)
+    g_caveQuiz.push_back({
+        "What is the physical condition of the newest acquisition?",
+        {"Mummified in ash", "Conscious and disoriented", "Preserved in formaldehyde", "Asleep and unfeeling"},
         1
-        } );
+        });
 }
 
-static void initCaveFinalObjective( Engine &engineContext ) {
+static void initCaveFinalObjective(Engine& engineContext) {
     g_clueNotes.clear();
     g_foundNotes.clear();
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Camp Note: Warden Test",
-        "The cave statue asks 3 questions: Baroque, Roman realism, and Renaissance revival.",
-        2.8f, 2.3f ) );
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Visitor Memo",
-        "Remember: Roman portrait busts focused on truthful features, not idealized beauty.",
-        4.8f, 3.8f ) );
-    g_clueNotes.push_back( makeClueNote( engineContext,
-        "Archivist Card",
-        "Renaissance is the rebirth of Greek and Roman learning. Keep that for the final statue.",
-        6.2f, 2.1f ) );
-    g_clueNotes.push_back( makeClueNote( engineContext,
+
+    g_clueNotes.push_back(makeClueNote(engineContext,
+        "Scribbled Warning",
+        "The Warden statue tests those who try to leave. You must understand the Director's madness to pass. Remember: he wants one breath held forever.",
+        2.8f, 2.3f));
+
+    g_clueNotes.push_back(makeClueNote(engineContext,
+        "Assistant's Regret",
+        "I couldn't watch them suffer anymore. But the Director insists... stillness is purity. They only truly become art when they freeze.",
+        4.8f, 3.8f));
+
+    g_clueNotes.push_back(makeClueNote(engineContext,
+        "Torn Intake Log",
+        "I found the paperwork for the newest acquisition. It's... it's you. The notes say you are 'conscious and disoriented'. Don't let them catch you.",
+        6.2f, 2.1f));
+
+    g_clueNotes.push_back(makeClueNote(engineContext,
         "Last Journal Fragment",
-        "You are beneath the museum in buried foundation tunnels.\nThe gallery was built over a much older site.",
-        8.5f, 5.2f ) );
+        "You aren't escaping the museum... you're descending into the slaughterhouse it was built upon. The exhibits upstairs aren't statues. They're the ones who stopped moving.",
+        8.5f, 5.2f));
+
     g_caveFinalNoteCollected = false;
     g_caveQuizActive = false;
     g_caveQuizPassed = false;
@@ -2102,6 +2490,22 @@ g_codeEntryBuffer.clear();
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
     g_restorationWingUnlocked = false;
+    g_directorDeskUnlocked = false;
+    g_revolverPickup = {};
+    g_combatState = {};
+    g_showHeldWeapon = true;
+    g_heldRevolverModelIndex = -1;
+    g_revolverAiming = false;
+    g_revolverShotCooldown = 0.0f;
+    g_revolverRecoilTimer = 0.0f;
+    g_revolverInspectCutsceneActive = false;
+    g_revolverInspectCutsceneTimer = 0.0f;
+    g_revolverInspectModelIndex = -1;
+    g_revolverInspectBaseYaw = 0.0f;
+    g_activeWeaponSounds.clear();
+    g_pendingShellDropTimers.clear();
+    g_dialogue.clear();
+    g_cutsceneController.reset();
 }
 
 static int findDoorLockIndex( Levels level, int tx, int ty ) {
@@ -2120,6 +2524,7 @@ static Uint32 keyColorForName( const std::string &keyName ) {
     if (keyName == "BLACK PIGMENT") return rgb( 70, 70, 85 );
     if (keyName == "BLUE PIGMENT") return rgb( 90, 140, 220 );
     if (keyName == "RED PIGMENT") return rgb( 215, 75, 70 );
+    if (keyName == "DIRECTOR'S KEY") return rgb( 210, 170, 95 );
     return rgb( 220, 210, 180 );
 }
 
@@ -2131,6 +2536,7 @@ static std::string keyModelForName( const std::string &keyName ) {
     if (keyName == "BLACK PIGMENT") return "BlackPigment.glb";
     if (keyName == "BLUE PIGMENT") return "BluePigment.glb";
     if (keyName == "RED PIGMENT") return "RedPigment.glb";
+    if (keyName == "DIRECTOR'S KEY") return "Bronze Key.glb";
     return "Note.glb";
 }
 
@@ -2162,6 +2568,39 @@ static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Lev
         NotePickupVisual vis = addNotePickupModel( engineContext, n.x, n.y, n.title );
         n.propIndex = vis.propIndex;
         n.modelIndex = vis.modelIndex;
+    }
+
+    if (g_revolverPickup.collected)
+    {
+        g_revolverPickup.modelIndex = -1;
+    }
+    else if (g_revolverPickup.level == level)
+    {
+        bool needsSpawn = true;
+        if (g_revolverPickup.modelIndex >= 0 && g_revolverPickup.modelIndex < (int)g_worldModels.size())
+        {
+            needsSpawn = false;
+        }
+
+        if (needsSpawn)
+        {
+            g_revolverPickup.modelIndex = addWorldModelInstance(
+                resolveFirstExistingAsset( { "Revolver.glb", "revolver.glb", "SurgicalKnife.glb" } ),
+                g_revolverPickup.x,
+                g_revolverPickup.y,
+                0.18f,
+                rgb( 165, 170, 180 ),
+                0.0f,
+                0.0f,
+                -1.5707963f,
+                true,
+                1.0f,
+                0.20f );
+        }
+    }
+    else
+    {
+        g_revolverPickup.modelIndex = -1;
     }
 }
 
@@ -2252,6 +2691,13 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.quads.clear();
     engineContext.benches3D.clear();
     g_worldModels.clear();
+    g_heldRevolverModelIndex = -1;
+    g_revolverInspectModelIndex = -1;
+    g_revolverInspectBaseYaw = 0.0f;
+    g_revolverAiming = false;
+    g_revolverRecoilTimer = 0.0f;
+    g_activeWeaponSounds.clear();
+    g_pendingShellDropTimers.clear();
     g_editorSelectedModel = -1;
 	engineContext.hasWallCracks = false;
     engineContext.hasFloorCracks = false;
@@ -2854,11 +3300,11 @@ void renderGalleryCard( Engine &engineContext ) {
     if (engineContext.currentLevel == Levels::MUSEUM_UPPER)
     {
         wingName = "Restoration Floor Hub";
-        wingDesc = "Taxidermy Studio & Infinite Archive";
+        wingDesc = "Research Facility";
 
         if (py < 7.0f && px >= 7.0f && px <= 15.0f)
         {
-            wingName = "Taxidermy Studio";
+            wingName = "Studio";
             wingDesc = "Specimen Processing & Pigment Extraction";
         }
         else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
@@ -2868,8 +3314,8 @@ void renderGalleryCard( Engine &engineContext ) {
         }
         else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
         {
-            wingName = "Infinite Archive";
-            wingDesc = "Looping Corridor & Metronome Guide";
+            wingName = "Archive";
+            wingDesc = "Corridor";
         }
         else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
         {
@@ -2957,6 +3403,11 @@ void renderObjectives( Engine &engineContext ) {
     // Progress Text
     std::string progText = std::to_string( mesuemObjectives.viewedArtworks.size() ) + "/" + std::to_string( mesuemObjectives.totalArtworksToFind );
     drawStringTinyScaled( engineContext, barX + barWidth - 30, barY - 12, progText, colText, 1 );
+
+    if (!mesuemObjectives.mainObjective.empty())
+    {
+        drawStringTinyScaled( engineContext, x + 10, y + height - 8, mesuemObjectives.mainObjective, rgb( 190, 190, 205 ), 1, 1, 1, false );
+    }
 }
 
 static void renderCaveHUD( Engine &engineContext ) {
@@ -2971,8 +3422,42 @@ static void renderCaveHUD( Engine &engineContext ) {
     int mins = (int)g_caveTimerSeconds / 60;
     int secs = (int)g_caveTimerSeconds % 60;
     char buf[ 32 ];
-    snprintf( buf, sizeof( buf ), "OXYGEN %02d:%02d", mins, secs );
+    snprintf( buf, sizeof( buf ), "Oxygen Time Left %02d:%02d", mins, secs );
     drawString16x16( engineContext, x + 12, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
+}
+
+static void renderDialogueSubtitle( Engine &engineContext ) {
+    if (!g_dialogue.isActive()) return;
+
+    const std::string text = g_dialogue.currentText();
+    if (text.empty()) return;
+
+    int w = 760;
+    int h = 50;
+    int x = (RENDER_W - w) / 2;
+    int y = RENDER_H - h - 30;
+
+    drawTextBox( engineContext, x, y, w, h, rgb( 8, 8, 12 ), rgb( 130, 130, 150 ) );
+    drawWrappedText( engineContext, x + 14, y + 18, text, rgb( 235, 235, 235 ), w - 28 );
+}
+
+static void renderCombatHUD( Engine &engineContext ) {
+    if (!g_combatState.active || !g_combatState.hasRevolver) return;
+
+    int w = 200;
+    int h = 50;
+    int x = 12;
+    int y = RENDER_H - h - 12;
+
+    drawTextBox( engineContext, x, y, w, h, rgb( 10, 10, 14 ), rgb( 150, 150, 165 ) );
+    drawStringTinyScaled( engineContext, x + 12, y + 12, "Revolver", rgb( 220, 220, 225 ), 2, 1, 1, false );
+    std::string ammo = std::to_string( g_combatState.loadedAmmo ) + " / " + std::to_string( g_combatState.reserveAmmo );
+    drawString16x16( engineContext, x + 98, y + 20, ammo, rgb( 255, 215, 120 ), w - 104, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 34, "H To Holster", rgb( 170, 170, 185 ), 1, 1, 1, false );
+}
+
+static void renderHeldRevolver( Engine &engineContext ) {
+    (void)engineContext;
 }
 
 static void renderAccessPopup( Engine &engineContext ) {
@@ -3021,7 +3506,7 @@ static void renderSafeEntry( Engine &engineContext ) {
     int y = (RENDER_H - h) / 2;
     drawTextBox( engineContext, x, y, w, h, rgb( 15, 10, 10 ), rgb( 150, 150, 150 ) );
 
-    drawString16x16( engineContext, x + 16, y + 14, "DIAL SAFE CODE", rgb( 210, 210, 210 ), w - 32, 1, 1, false );
+    drawString16x16( engineContext, x + 16, y + 14, "SAFE CODE", rgb( 210, 210, 210 ), w - 32, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 16, y + 42, safe.safeName, rgb( 170, 170, 185 ), 2, 1, 1, false );
     drawTextBox( engineContext, x + 16, y + 65, w - 32, 34, rgb( 0, 0, 0 ), rgb( 70, 70, 70 ) );
     drawString16x16( engineContext, x + 30, y + 74, g_codeEntryBuffer.empty() ? "----" : g_codeEntryBuffer, rgb( 220, 220, 230 ), w - 60, 1, 1, false );
@@ -3247,8 +3732,8 @@ static void renderLevelEditorOverlay( Engine &engineContext ) {
         drawStringTinyScaled( engineContext, x + 12, y + 50, "NO SELECTED MODEL", rgb( 200, 190, 150 ), 2, 1, 1, false );
     }
 
-    drawStringTinyScaled( engineContext, x + 12, y + 88, "F2 TO EXIT | [ ] CYCLE ASSET | ENTER PLACE | TAB SELECT | DEL DELETE", rgb( 170, 170, 190 ), 1, 1, 1, false );
-    drawStringTinyScaled( engineContext, x + 12, y + 104, "WASD X/Y  R/F Z  Q/E YAW  Z/X PITCH  C/V ROLL  -/= SIZE", rgb( 170, 170, 190 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 88, "F2 TO EXIT [ ] CYCLE ASSET ENTER PLACE TAB SELECT DEL DELETE", rgb( 170, 170, 190 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + 12, y + 104, "MOUSE MOVE X/Y  WHEEL Z  |  WASD X/Y  R/F Z  Q/E YAW  Z/X PITCH  C/V ROLL  -/= SIZE", rgb( 170, 170, 190 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 120, "CTRL+S SAVE TO " + g_currentEditorModelsFile + " (current level)", rgb( 170, 170, 190 ), 1, 1, 1, false );
 }
 
@@ -3463,7 +3948,8 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
-    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode;
+    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
+    bool cutsceneHudSuppressed = g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
 
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
@@ -3513,6 +3999,8 @@ static void render( Engine &engineContext, float dt ) {
         float t = std::clamp( 1.0f - std::pow( dist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
         return std::max( engineContext.caveAmbient, t );
         };
+
+    updateHeldRevolverModel( engineContext );
 
     const int half = RENDER_H / 2;
     engineContext.zbuffer.assign( RENDER_W, 1e9f );
@@ -4254,7 +4742,7 @@ static void render( Engine &engineContext, float dt ) {
 
     if (!overlayBusy && engineContext.currentLevel == Levels::CAVE && !g_caveQuizPassed && !g_caveQuizActive)
     {
-        drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "CAMP LOGS HOLD CLUES FOR THE WARDEN STATUE", rgb( 170, 180, 210 ), 1, 1, 1, false );
+        drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "Logs Hold Clues", rgb( 170, 180, 210 ), 1, 1, 1, false );
     }
 
     drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
@@ -4263,25 +4751,30 @@ static void render( Engine &engineContext, float dt ) {
     int nearbyKey = getNearbyKeyPickup( engineContext );
     if (!overlayBusy && nearbyKey >= 0 && !g_codeEntryActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 45, "[E] INTERACT", rgb( 255, 240, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 45, "[E] Interact", rgb( 255, 240, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int nearbyNote = getNearbyClueNote( engineContext );
     if (!overlayBusy && nearbyNote >= 0 && !g_codeEntryActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] COLLECT NOTE", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] Collect", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int nearbySafe = getNearbySafe( engineContext );
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && nearbySafe >= 0 && !g_codeEntryActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] EXAMINE SAFE", rgb( 180, 210, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] Open Safe", rgb( 180, 210, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int nearbySymbol = getNearbySymbol( engineContext );
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && nearbySymbol >= 0 && !g_codeEntryActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] EXAMINE PEDESTAL", rgb( 250, 180, 250 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 105, (RENDER_H / 2) + 65, "[F] Examine Pedestal", rgb( 250, 180, 250 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && isPlayerNearDirectorDesk( engineContext ) && !g_directorDeskUnlocked)
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 150, (RENDER_H / 2) + 125, "[F] Unlock Director's Desk", rgb( 230, 200, 150 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (!overlayBusy && engineContext.currentLevel == Levels::CAVE && isPlayerNearCaveStatue( engineContext ) && !g_caveQuizActive)
@@ -4297,11 +4790,11 @@ static void render( Engine &engineContext, float dt ) {
 
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 140, (RENDER_H / 2) + 105, "[E] ENTER STAIRWELL TO UPPER GALLERY", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 140, (RENDER_H / 2) + 105, "[E] Go To Upper Gallery", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearPoint( engineContext, 3.5f, 9.3f, 1.1f ))
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, "[E] RETURN TO GROUND FLOOR", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, "[E] Back To Ground Floor", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int doorTx = 0, doorTy = 0;
@@ -4318,8 +4811,8 @@ static void render( Engine &engineContext, float dt ) {
     if (engineContext.currentLevel == Levels::MUSEUM_UPPER && getDoorAheadTile( engineContext, doorTx, doorTy ) && isRestorationGateDoorTile( doorTx, doorTy ) && !g_restorationWingUnlocked)
     {
         std::string req = hasRestorationPigments()
-            ? "[F] UNSEAL RESTORATION WING"
-            : "[F] NEED BLACK, BLUE, RED PIGMENT";
+            ? "[F] Unseal Restoration Wing"
+            : "[F] Need Black, Blue, Red Pigment";
         drawString16x16( engineContext, (RENDER_W / 2) - 155, (RENDER_H / 2) + 65, req, rgb( 255, 170, 170 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
@@ -4336,7 +4829,10 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    renderCompass(engineContext);
+    if (!cutsceneHudSuppressed)
+    {
+        renderCompass( engineContext );
+    }
 
 
     if (art) 
@@ -4350,17 +4846,22 @@ static void render( Engine &engineContext, float dt ) {
         renderStatueChatbox( engineContext );
     }
 
-    if (engineContext.currentLevel == Levels::MUSEUM || engineContext.currentLevel == Levels::MUSEUM_UPPER)
+    if (!cutsceneHudSuppressed && (engineContext.currentLevel == Levels::MUSEUM || engineContext.currentLevel == Levels::MUSEUM_UPPER))
     {
         renderObjectives( engineContext );
         renderGalleryCard( engineContext ); 
     }
     
     renderCaveHUD( engineContext );
+    renderHeldRevolver( engineContext );
 
     renderLevelEditorOverlay( engineContext );
 
     if (!overlayBusy) renderAccessPopup( engineContext );
+    if (!cutsceneHudSuppressed)
+    {
+        renderCombatHUD( engineContext );
+    }
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
     renderSafeEntry( engineContext );
@@ -4368,6 +4869,7 @@ static void render( Engine &engineContext, float dt ) {
     renderCaveQuiz( engineContext );
     renderInteractionAnimation( engineContext );
     renderLevelTransitionOverlay( engineContext );
+    renderDialogueSubtitle( engineContext );
 
     
 }
@@ -4509,6 +5011,8 @@ int main( int argc, char **argv ) {
 
     };
 
+    const std::string phoneCutsceneAsset = resolveFirstExistingAsset( { "Phone.glb", "phone.glb", "MessageBoard.glb" } );
+
     calibrateMusicVolumeFromMic();
 
     int curLevel = engineContext.currentLevel;
@@ -4606,6 +5110,87 @@ int main( int argc, char **argv ) {
         }
 
         updateMusicStream();
+        g_dialogue.update( dt );
+        g_cutsceneController.update( engineContext, g_dialogue, dt );
+
+        g_revolverShotCooldown = std::max( 0.0f, g_revolverShotCooldown - dt );
+        g_revolverRecoilTimer = std::max( 0.0f, g_revolverRecoilTimer - dt );
+
+        for (auto &t : g_pendingShellDropTimers)
+        {
+            t -= dt;
+        }
+        for (int i = (int)g_pendingShellDropTimers.size() - 1; i >= 0; --i)
+        {
+            if (g_pendingShellDropTimers[ i ] <= 0.0f)
+            {
+                if (g_weaponSoundBuffersReady)
+                {
+                    playWeaponBufferedSound( g_shellDropBuffer, 95.0f );
+                }
+                g_pendingShellDropTimers.erase( g_pendingShellDropTimers.begin() + i );
+            }
+        }
+
+        g_activeWeaponSounds.erase(
+            std::remove_if( g_activeWeaponSounds.begin(), g_activeWeaponSounds.end(), []( const std::shared_ptr<sf::Sound> &s ) {
+                return !s || s->getStatus() == sf::SoundSource::Status::Stopped;
+            } ),
+            g_activeWeaponSounds.end() );
+
+        if (g_revolverInspectCutsceneActive)
+        {
+            g_revolverAiming = false;
+            g_revolverInspectCutsceneTimer += dt;
+            engineContext.pitchOffset = 6.0f;
+
+            const float yaw = std::atan2( engineContext.directionY, engineContext.directionX );
+            const float px = engineContext.positionX + engineContext.directionX * 0.62f;
+            const float py = engineContext.positionY + engineContext.directionY * 0.62f;
+
+            if (g_revolverInspectModelIndex < 0 || g_revolverInspectModelIndex >= (int)g_worldModels.size())
+            {
+                g_revolverInspectModelIndex = addWorldModelInstance(
+                    resolveFirstExistingAsset( { "Revolver.glb", "revolver.glb", "SurgicalKnife.glb" } ),
+                    px,
+                    py,
+                    0.24f,
+                    rgb( 185, 190, 198 ),
+                    g_revolverInspectBaseYaw,
+                    0.20f,
+                    -0.12f,
+                    true,
+                    3.4f,
+                    0.42f );
+            }
+
+            if (g_revolverInspectModelIndex >= 0 && g_revolverInspectModelIndex < (int)g_worldModels.size())
+            {
+                auto &inspectModel = g_worldModels[ g_revolverInspectModelIndex ];
+                inspectModel.visible = true;
+                inspectModel.x = px;
+                inspectModel.y = py;
+                inspectModel.heightOffset = 0.42f;
+                inspectModel.yaw = g_revolverInspectBaseYaw;
+                inspectModel.pitch = 0.20f;
+                inspectModel.roll = -0.12f;
+                inspectModel.spinYaw = true;
+                inspectModel.spinSpeed = 3.4f;
+            }
+
+            if (g_revolverInspectCutsceneTimer >= kRevolverInspectCutsceneDuration && !g_dialogue.isActive())
+            {
+                g_revolverInspectCutsceneActive = false;
+                g_revolverInspectCutsceneTimer = 0.0f;
+                engineContext.pitchOffset = 0.0f;
+                if (g_revolverInspectModelIndex >= 0 && g_revolverInspectModelIndex < (int)g_worldModels.size())
+                {
+                    g_worldModels[ g_revolverInspectModelIndex ].visible = false;
+                }
+                g_revolverInspectModelIndex = -1;
+                g_revolverInspectBaseYaw = 0.0f;
+            }
+        }
 
         if (g_interactionAnim.active)
         {
@@ -4619,6 +5204,11 @@ int main( int argc, char **argv ) {
                 g_interactionAnim.t = 0.0f;
                 engineContext.pitchOffset = 0.0f;
             }
+        }
+
+        if (g_cutsceneController.isPhoneCutsceneActive())
+        {
+            engineContext.pitchOffset = g_cutsceneController.forcedPitchOffset();
         }
 
         if (g_levelTransition.active)
@@ -4706,9 +5296,87 @@ int main( int argc, char **argv ) {
             }
             else if (currentState == STATE_GAME)
             {
+                if (g_levelEditorMode && ev.type == SDL_EVENT_MOUSE_MOTION)
+                {
+                    if (g_editorSelectedModel >= 0 && g_editorSelectedModel < (int)g_worldModels.size() && g_worldModels[ g_editorSelectedModel ].editorPlaced)
+                    {
+                        constexpr float kMouseMoveSensitivity = 0.004f;
+                        float rightX = -engineContext.directionY;
+                        float rightY = engineContext.directionX;
+                        float dx = (float)ev.motion.xrel * kMouseMoveSensitivity * rightX
+                            + (float)(-ev.motion.yrel) * kMouseMoveSensitivity * engineContext.directionX;
+                        float dy = (float)ev.motion.xrel * kMouseMoveSensitivity * rightY
+                            + (float)(-ev.motion.yrel) * kMouseMoveSensitivity * engineContext.directionY;
+                        nudgeSelectedEditorModel( dx, dy, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+                    }
+                    continue;
+                }
+
+                if (g_levelEditorMode && ev.type == SDL_EVENT_MOUSE_WHEEL)
+                {
+                    if (g_editorSelectedModel >= 0 && g_editorSelectedModel < (int)g_worldModels.size() && g_worldModels[ g_editorSelectedModel ].editorPlaced)
+                    {
+                        constexpr float kMouseWheelZStep = 0.05f;
+                        nudgeSelectedEditorModel( 0.0f, 0.0f, (float)ev.wheel.y * kMouseWheelZStep, 0.0f, 0.0f, 0.0f, 0.0f );
+                    }
+                    continue;
+                }
+
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                {
+                    const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
+
+                    if (ev.button.button == SDL_BUTTON_RIGHT)
+                    {
+                        if (!inputBlocked && g_combatState.active && g_combatState.hasRevolver)
+                        {
+                            g_revolverAiming = true;
+                        }
+                        continue;
+                    }
+
+                    if (ev.button.button == SDL_BUTTON_LEFT)
+                    {
+                        if (!inputBlocked && g_combatState.active && g_combatState.hasRevolver)
+                        {
+                            if (g_revolverShotCooldown <= 0.0f)
+                            {
+                                if (g_combatState.loadedAmmo > 0)
+                                {
+                                    g_combatState.loadedAmmo--;
+                                    g_revolverShotCooldown = 0.28f;
+                                    g_revolverRecoilTimer = 0.25f;
+                                    playRevolverShotSequence( levels[ engineContext.currentLevel ].folder );
+                                }
+                              
+                            }
+                        }
+                        continue;
+                    }
+                }
+
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP)
+                {
+                    if (ev.button.button == SDL_BUTTON_RIGHT)
+                    {
+                        g_revolverAiming = false;
+                        continue;
+                    }
+                }
+
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
                     if (g_levelTransition.active)
+                    {
+                        continue;
+                    }
+
+                    if (g_cutsceneController.isPhoneCutsceneActive())
+                    {
+                        continue;
+                    }
+
+                    if (g_revolverInspectCutsceneActive)
                     {
                         continue;
                     }
@@ -5036,6 +5704,14 @@ int main( int argc, char **argv ) {
                             g_notesBodyScroll = 0;
                         }
                     }
+                    else if (ev.key.key == SDLK_H)
+                    {
+                        if (g_combatState.active && g_combatState.hasRevolver)
+                        {
+                            g_showHeldWeapon = !g_showHeldWeapon;
+                            //showAccessPopup( g_showHeldWeapon ? "Revolver shown." : "Revolver hidden.", 1200 );
+                        }
+                    }
                     else if (ev.key.key == SDLK_F1)
                     {
                         engineContext.showHelp = !engineContext.showHelp;
@@ -5084,6 +5760,31 @@ int main( int argc, char **argv ) {
                             continue;
                         }
 
+                        if (isRevolverNearby( engineContext ))
+                        {
+                            g_revolverPickup.collected = true;
+                            if (g_revolverPickup.modelIndex >= 0 && g_revolverPickup.modelIndex < (int)g_worldModels.size())
+                            {
+                                g_worldModels[ g_revolverPickup.modelIndex ].visible = false;
+                            }
+                            hideWorldModelsNear( g_revolverPickup.x, g_revolverPickup.y, 0.9f );
+                            g_revolverPickup.modelIndex = -1;
+                            g_combatState.active = true;
+                            g_combatState.hasRevolver = true;
+                            g_combatState.loadedAmmo = 2;
+                            g_combatState.reserveAmmo = 0;
+                            g_revolverInspectCutsceneActive = true;
+                            g_revolverInspectCutsceneTimer = 0.0f;
+                            g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
+                            g_revolverAiming = false;
+                            g_dialogue.start( {
+                                {"Why would the director have this?", 2.5f}
+                                } );
+                            showAccessPopup( "Revolver acquired.", 1700 );
+                            triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
+                            continue;
+                        }
+
                         int nearbyNote = getNearbyClueNote( engineContext );
                         if (nearbyNote >= 0)
                         {
@@ -5103,6 +5804,11 @@ int main( int argc, char **argv ) {
                             showAccessPopup( "Collected note: " + n.title, 2200 );
 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
                             triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
+
+                            if (g_cutsceneController.canTriggerPhoneCutscene() && engineContext.currentLevel == Levels::MUSEUM)
+                            {
+                                g_cutsceneController.triggerPhoneCutscene( engineContext, g_dialogue, phoneCutsceneAsset );
+                            }
 
                             if (engineContext.currentLevel == Levels::CAVE)
                             {
@@ -5170,6 +5876,39 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
+                        if (isPlayerNearDirectorDesk( engineContext ) && !g_directorDeskUnlocked)
+                        {
+                            if (g_playerKeys.contains( "DIRECTOR'S KEY" ))
+                            {
+                                g_directorDeskUnlocked = true;
+                                if (!g_combatState.hasRevolver)
+                                {
+                                    g_combatState.active = true;
+                                    g_combatState.hasRevolver = true;
+                                    g_combatState.loadedAmmo = 2;
+                                    g_combatState.reserveAmmo = 0;
+                                    g_revolverInspectCutsceneActive = true;
+                                    g_revolverInspectCutsceneTimer = 0.0f;
+                                    g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
+                                    g_revolverAiming = false;
+                                    g_dialogue.start( {
+                                        {"Why would the director have this?", 2.5f}
+                                        } );
+                                    showAccessPopup( "Director's Desk unlocked. Revolver acquired.", 1900 );
+                                    triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
+                                }
+                                else
+                                {
+                                    showAccessPopup( "Director's Desk already searched.", 1800 );
+                                }
+                            }
+                            else
+                            {
+                                showAccessPopup( "The desk is locked. Director's Key required.", 2200 );
+                            }
+                            continue;
+                        }
+
                         int tx = 0;
                         int ty = 0;
                         if (engineContext.currentLevel == Levels::MUSEUM_UPPER && getDoorAheadTile( engineContext, tx, ty ) && isRestorationGateDoorTile( tx, ty ) && !g_restorationWingUnlocked)
@@ -5321,8 +6060,9 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
+            if (g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
                 float ang = -ts;
