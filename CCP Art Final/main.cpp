@@ -262,12 +262,32 @@ private:
 class CutsceneController
 {
 public:
+    bool isCameraLockActive() const {
+        return phoneCutsceneActive || scriptedPanActive;
+    }
+
     bool isPhoneCutsceneActive() const {
         return phoneCutsceneActive;
     }
 
     bool canTriggerPhoneCutscene() const {
         return !phoneCutsceneTriggered && !phoneCutsceneActive;
+    }
+
+    void triggerUpstairsGalleryCutscene( Engine &engineContext, DialogueSystem &dialogue ) {
+        if (upstairsGalleryCutsceneTriggered) return;
+        upstairsGalleryCutsceneTriggered = true;
+        triggerScriptedPanCutscene( engineContext, dialogue, "I don't remember this being here...", 1.5f, 0.3f );
+    }
+
+    void triggerStudioCutscene( Engine &engineContext, DialogueSystem &dialogue ) {
+        if (studioCutsceneTriggered) return;
+        studioCutsceneTriggered = true;
+        triggerScriptedPanCutscene( engineContext, dialogue, "What the hell happend here?", 1.f, 0.3f );
+    }
+
+    bool hasTriggeredStudioCutscene() const {
+        return studioCutsceneTriggered;
     }
 
     void triggerPhoneCutscene( Engine &engineContext, DialogueSystem &dialogue, const std::string &phoneAssetPath ) {
@@ -300,6 +320,29 @@ public:
     }
 
     void update( Engine &engineContext, DialogueSystem &dialogue, float dt ) {
+        if (scriptedPanActive)
+        {
+            scriptedPanElapsed += dt;
+
+            const float ang = scriptedPanSpeed * dt;
+            const float ndx = engineContext.directionX * std::cos( ang ) - engineContext.directionY * std::sin( ang );
+            const float ndy = engineContext.directionX * std::sin( ang ) + engineContext.directionY * std::cos( ang );
+            engineContext.directionX = ndx;
+            engineContext.directionY = ndy;
+            engineContext.planeX = -engineContext.directionY * FOV_TAN;
+            engineContext.planeY = engineContext.directionX * FOV_TAN;
+            engineContext.yaw += ang * (180.0f / 3.14159265f);
+
+            if (engineContext.yaw > 360.0f) engineContext.yaw -= 360.0f;
+            if (engineContext.yaw < 0.0f) engineContext.yaw += 360.0f;
+
+            if (scriptedPanElapsed >= scriptedPanDuration && !dialogue.isActive())
+            {
+                scriptedPanActive = false;
+                scriptedPanElapsed = 0.0f;
+            }
+        }
+
         if (!phoneCutsceneActive) return;
 
         elapsed += dt;
@@ -323,7 +366,9 @@ public:
     }
 
     float forcedPitchOffset() const {
-        return phoneCutsceneActive ? 74.0f : 0.0f;
+        if (phoneCutsceneActive) return 74.0f;
+        if (scriptedPanActive) return 2.0f;
+        return 0.0f;
     }
 
     void reset() {
@@ -331,9 +376,23 @@ public:
         phoneCutsceneTriggered = false;
         elapsed = 0.0f;
         phoneModelIndex = -1;
+        scriptedPanActive = false;
+        scriptedPanElapsed = 0.0f;
+        upstairsGalleryCutsceneTriggered = false;
+        studioCutsceneTriggered = false;
     }
 
 private:
+    void triggerScriptedPanCutscene( Engine &engineContext, DialogueSystem &dialogue, const std::string &text, float duration, float panSpeed ) {
+        if (scriptedPanActive || phoneCutsceneActive) return;
+        scriptedPanActive = true;
+        scriptedPanElapsed = 0.0f;
+        scriptedPanDuration = std::max( 0.5f, duration );
+        scriptedPanSpeed = panSpeed;
+        dialogue.start( { { text, scriptedPanDuration } } );
+        engineContext.pitchOffset = 2.0f;
+    }
+
     void stop( Engine &engineContext ) {
         phoneCutsceneActive = false;
         elapsed = 0.0f;
@@ -350,6 +409,12 @@ private:
     float elapsed = 0.0f;
     float durationSeconds = 6.5f;
     int phoneModelIndex = -1;
+    bool scriptedPanActive = false;
+    float scriptedPanElapsed = 0.0f;
+    float scriptedPanDuration = 2.8f;
+    float scriptedPanSpeed = 0.45f;
+    bool upstairsGalleryCutsceneTriggered = false;
+    bool studioCutsceneTriggered = false;
     static constexpr float kPhoneForward = 0.45f;
     static constexpr float kPhoneHeight = 0.45f;
     static constexpr float kPhoneYawOffset = 1.5707963f;
@@ -367,6 +432,7 @@ static int g_heldRevolverModelIndex = -1;
 static bool g_revolverAiming = false;
 static float g_revolverShotCooldown = 0.0f;
 static float g_revolverRecoilTimer = 0.0f;
+static constexpr float kRevolverRecoilDuration = 0.30f;
 static bool g_revolverInspectCutsceneActive = false;
 static float g_revolverInspectCutsceneTimer = 0.0f;
 static constexpr float kRevolverInspectCutsceneDuration = 3.5f;
@@ -379,6 +445,8 @@ static bool g_weaponSoundBuffersReady = false;
 static std::vector<std::shared_ptr<sf::Sound>> g_activeWeaponSounds;
 static std::vector<float> g_pendingShellDropTimers;
 static constexpr float kRevolverFacingYawOffset = 1.5f;
+static constexpr float kRevolverScreenShakeX = 16.0f;
+static constexpr float kRevolverScreenShakeY = 11.0f;
 
 struct EditorAssetDef
 {
@@ -1444,6 +1512,15 @@ enum GameState
 };
 
 static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) {
+    const bool isAcquiredMsg =
+        (msg.find( "Acquired" ) != std::string::npos) ||
+        (msg.find( "acquired" ) != std::string::npos) ||
+        (msg.find( "ACQUIRED" ) != std::string::npos);
+    if (isAcquiredMsg && (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive))
+    {
+        return;
+    }
+
     g_accessPopup = msg;
     g_accessPopupUntil = SDL_GetTicks() + durationMs;
 }
@@ -1481,6 +1558,11 @@ static bool isPlayerNearDirectorDesk( Engine const &engineContext ) {
     return isPlayerNearPoint( engineContext, 16.36f, 16.55f, 1.45f );
 }
 
+static bool isPlayerInsideUpperStudio( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::MUSEUM_UPPER) return false;
+    return engineContext.positionY < 7.0f && engineContext.positionX >= 7.0f && engineContext.positionX <= 15.0f;
+}
+
 static bool isRevolverNearby( Engine const &engineContext, float radius = 1.0f ) {
     if (g_revolverPickup.collected) return false;
     if (g_revolverPickup.level != engineContext.currentLevel) return false;
@@ -1494,7 +1576,7 @@ static void updateHeldRevolverModel( Engine &engineContext ) {
         g_combatState.active &&
         g_combatState.hasRevolver &&
         g_showHeldWeapon &&
-        !g_cutsceneController.isPhoneCutsceneActive() &&
+        !g_cutsceneController.isCameraLockActive() &&
         !g_revolverInspectCutsceneActive;
 
     if (!shouldShow)
@@ -1510,8 +1592,8 @@ static void updateHeldRevolverModel( Engine &engineContext ) {
     const float rightX = -engineContext.directionY;
     const float rightY = engineContext.directionX;
 
-    const float recoil01 = std::clamp( g_revolverRecoilTimer / 0.14f, 0.0f, 1.0f );
-    const float recoilKick = recoil01 * recoil01;
+    const float recoil01 = std::clamp( g_revolverRecoilTimer / kRevolverRecoilDuration, 0.0f, 1.0f );
+    const float recoilKick = std::pow( recoil01, 0.65f );
 
     float forward = 0.34f;
     float right = 0.20f;
@@ -1537,9 +1619,10 @@ static void updateHeldRevolverModel( Engine &engineContext ) {
         roll = -0.16f;
     }
 
-    forward -= 0.08f * recoilKick;
-    height += 0.02f * recoilKick;
-    pitch -= 0.65f * recoilKick;
+    forward -= 0.15f * recoilKick;
+    height += 0.05f * recoilKick;
+    pitch -= 1.05f * recoilKick;
+    roll += 0.14f * recoilKick;
 
     const float px = engineContext.positionX + engineContext.directionX * forward + rightX * right;
     const float py = engineContext.positionY + engineContext.directionY * forward + rightY * right;
@@ -1608,6 +1691,15 @@ static void beginLevelTransition( Levels target, float seconds = 1.05f ) {
 }
 
 static void triggerInteractionAnim( InteractionAnimType type, const std::string &label, float seconds = 0.55f ) {
+    if (type == InteractionAnimType::ITEM_PICKUP &&
+        ((label.find( "ACQUIRED" ) != std::string::npos) ||
+            (label.find( "Acquired" ) != std::string::npos) ||
+            (label.find( "acquired" ) != std::string::npos)) &&
+        (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive))
+    {
+        return;
+    }
+
     constexpr float kAnimDurationScale = 1.28f;
     g_interactionAnim.active = true;
     g_interactionAnim.t = 0.0f;
@@ -3049,6 +3141,10 @@ static int pickArtworkUnderCrosshair( Engine const &engineContext ) {
 void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Levels desiredLevel ) {
     engineContext.currentLevel = desiredLevel;
     loadLevel( engineContext, levels[ desiredLevel ] );
+    if (desiredLevel == Levels::MUSEUM_UPPER)
+    {
+        g_cutsceneController.triggerUpstairsGalleryCutscene( engineContext, g_dialogue );
+    }
 }
 
 static bool isPlayerNearStatue( Engine const &engineContext ) {
@@ -3299,18 +3395,18 @@ void renderGalleryCard( Engine &engineContext ) {
 
     if (engineContext.currentLevel == Levels::MUSEUM_UPPER)
     {
-        wingName = "Restoration Floor Hub";
+        wingName = "Restoration Hub";
         wingDesc = "Research Facility";
 
         if (py < 7.0f && px >= 7.0f && px <= 15.0f)
         {
             wingName = "Studio";
-            wingDesc = "Specimen Processing & Pigment Extraction";
+            wingDesc = "Specimen Processing";
         }
         else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
         {
             wingName = "Solvent Vault";
-            wingDesc = "Chemical Storage & Restoration Logs";
+            wingDesc = "Storage";
         }
         else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
         {
@@ -3320,13 +3416,13 @@ void renderGalleryCard( Engine &engineContext ) {
         else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
         {
             wingName = "Masterpiece Skylight";
-            wingDesc = "Observation Chamber & Final Seal";
+            wingDesc = "Observations";
         }
     }
     else
     {
         wingName = "Central Atrium";
-        wingDesc = "Public Hub & Information";
+        wingDesc = "Public Hub";
 
         if (py < 7.0f && px >= 7.0f && px <= 15.0f)
         {
@@ -3458,6 +3554,38 @@ static void renderCombatHUD( Engine &engineContext ) {
 
 static void renderHeldRevolver( Engine &engineContext ) {
     (void)engineContext;
+}
+
+static void renderRevolverShotEffects( Engine &engineContext, float intensity ) {
+    const float shotFx = std::clamp( intensity, 0.0f, 1.0f );
+    if (shotFx <= 0.001f) return;
+
+    const float flash = std::pow( shotFx, 0.42f );
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 255, 245, 230 ), 0.34f * flash );
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 255, 210, 170 ), 0.12f * flash );
+
+    const int cx = g_revolverAiming ? int( RENDER_W * 0.55f ) : int( RENDER_W * 0.66f );
+    const int cy = g_revolverAiming ? int( RENDER_H * 0.58f ) : int( RENDER_H * 0.66f );
+    const float radius = std::max( 38.0f, 185.0f * flash );
+
+    for (int y = std::max( 0, cy - int( radius ) ); y <= std::min( RENDER_H - 1, cy + int( radius ) ); ++y)
+    {
+        for (int x = std::max( 0, cx - int( radius ) ); x <= std::min( RENDER_W - 1, cx + int( radius ) ); ++x)
+        {
+            const float dx = float( x - cx );
+            const float dy = float( y - cy );
+            const float d = std::sqrt( dx * dx + dy * dy );
+            if (d > radius) continue;
+
+            const float glow = std::clamp( 1.0f - (d / radius), 0.0f, 1.0f ) * flash;
+            if (glow < 0.22f) continue;
+
+            const Uint8 r = Uint8( std::clamp( 180.0f + 58.0f * glow, 0.0f, 255.0f ) );
+            const Uint8 g = Uint8( std::clamp( 145.0f + 62.0f * glow, 0.0f, 255.0f ) );
+            const Uint8 b = Uint8( std::clamp( 116.0f + 48.0f * glow, 0.0f, 255.0f ) );
+            putPix( engineContext, x, y, rgb( r, g, b ) );
+        }
+    }
 }
 
 static void renderAccessPopup( Engine &engineContext ) {
@@ -3754,11 +3882,11 @@ static void renderEndingScreen( Engine &engineContext ) {
     drawString16x16( engineContext, x + 20, y + h - 34, "[R] Restart   [ESC] Menu", rgb( 210, 210, 210 ), w - 40, 1, 1, false );
 }
 
-static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer ) {
+static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset ) {
     if (g_worldModels.empty()) return;
 
     const float projScaleY = (RENDER_W * 0.5f);
-    const float horizon = (RENDER_H * 0.5f) + engineContext.pitchOffset;
+    const float horizon = (RENDER_H * 0.5f) + pitchOffset;
     const float camHeight = 0.52f;
     const float nearClip = 0.18f;
     const float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
@@ -3948,8 +4076,17 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
-    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
-    bool cutsceneHudSuppressed = g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
+    const float shotFx01 = std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f );
+    const float shotShakeWave = std::pow( shotFx01, 0.56f );
+    const float shakePhase = SDL_GetTicks() * 0.001f;
+    const float shotPitchShake =
+        (std::sin( shakePhase * 92.0f ) * 0.78f + std::cos( shakePhase * 141.0f ) * 0.42f) *
+        kRevolverScreenShakeY * shotShakeWave;
+    const float recoilKickPitch = shotFx01 * 6.0f;
+    const float effectivePitchOffset = engineContext.pitchOffset + shotPitchShake + recoilKickPitch;
+
+    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
+    bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
 
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
@@ -4082,7 +4219,7 @@ static void render( Engine &engineContext, float dt ) {
         // Column geometry
         int lineH = int( RENDER_H / std::max( perpWallDist, 1e-3f ) );
 
-        int bob = half + (int)engineContext.pitchOffset;
+    int bob = half + (int)effectivePitchOffset;
         int drawStart = std::max( 0, -lineH / 2 + bob );
         int drawEnd = std::min( RENDER_H - 1, lineH / 2 + bob );
         clipTop[ x ] = std::min( clipTop[ x ], drawStart );
@@ -4264,7 +4401,7 @@ static void render( Engine &engineContext, float dt ) {
     float rayDirY1 = engineContext.directionY + engineContext.planeY;
 
     const float posZ = 0.5f * RENDER_H;
-    int bob = half + (int)engineContext.pitchOffset; 
+    int bob = half + (int)effectivePitchOffset;
 
     for (int y = 0; y < RENDER_H; ++y)
     {
@@ -4430,7 +4567,7 @@ static void render( Engine &engineContext, float dt ) {
 
     static std::vector<float> meshDepthBuffer;
     meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
-    renderWorldModels( engineContext, meshDepthBuffer );
+    renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
 
 
 
@@ -4744,6 +4881,8 @@ static void render( Engine &engineContext, float dt ) {
     {
         drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "Logs Hold Clues", rgb( 170, 180, 210 ), 1, 1, 1, false );
     }
+
+    renderRevolverShotEffects( engineContext, shotFx01 );
 
     drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
 
@@ -5206,7 +5345,7 @@ int main( int argc, char **argv ) {
             }
         }
 
-        if (g_cutsceneController.isPhoneCutsceneActive())
+        if (g_cutsceneController.isCameraLockActive())
         {
             engineContext.pitchOffset = g_cutsceneController.forcedPitchOffset();
         }
@@ -5324,7 +5463,7 @@ int main( int argc, char **argv ) {
 
                 if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
                 {
-                    const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive;
+                    const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
 
                     if (ev.button.button == SDL_BUTTON_RIGHT)
                     {
@@ -5345,7 +5484,7 @@ int main( int argc, char **argv ) {
                                 {
                                     g_combatState.loadedAmmo--;
                                     g_revolverShotCooldown = 0.28f;
-                                    g_revolverRecoilTimer = 0.25f;
+                                    g_revolverRecoilTimer = kRevolverRecoilDuration;
                                     playRevolverShotSequence( levels[ engineContext.currentLevel ].folder );
                                 }
                               
@@ -5371,7 +5510,7 @@ int main( int argc, char **argv ) {
                         continue;
                     }
 
-                    if (g_cutsceneController.isPhoneCutsceneActive())
+                    if (g_cutsceneController.isCameraLockActive())
                     {
                         continue;
                     }
@@ -5614,6 +5753,9 @@ int main( int argc, char **argv ) {
                                     showAccessPopup( sym.name + " solved! Obtained " + sym.rewardKey, 2800 );
                                     g_playerKeys.insert( sym.rewardKey );
                                     triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + sym.rewardKey, 0.8f );
+                                    g_dialogue.start( {
+                                        {"How do people get these keys normally?", 2.8f}
+                                        } );
                                 }
                                 else
                                 {
@@ -5771,7 +5913,7 @@ int main( int argc, char **argv ) {
                             g_revolverPickup.modelIndex = -1;
                             g_combatState.active = true;
                             g_combatState.hasRevolver = true;
-                            g_combatState.loadedAmmo = 2;
+                            g_combatState.loadedAmmo = 6;
                             g_combatState.reserveAmmo = 0;
                             g_revolverInspectCutsceneActive = true;
                             g_revolverInspectCutsceneTimer = 0.0f;
@@ -5885,7 +6027,7 @@ int main( int argc, char **argv ) {
                                 {
                                     g_combatState.active = true;
                                     g_combatState.hasRevolver = true;
-                                    g_combatState.loadedAmmo = 2;
+                                    g_combatState.loadedAmmo = 6;
                                     g_combatState.reserveAmmo = 0;
                                     g_revolverInspectCutsceneActive = true;
                                     g_revolverInspectCutsceneTimer = 0.0f;
@@ -6060,9 +6202,9 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
-            if (g_cutsceneController.isPhoneCutsceneActive() || g_revolverInspectCutsceneActive) ts = 0.0f;
+            if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
                 float ang = -ts;
@@ -6200,6 +6342,11 @@ int main( int argc, char **argv ) {
                     }
                 }
             }
+
+            if (isPlayerInsideUpperStudio( engineContext ) && !g_cutsceneController.hasTriggeredStudioCutscene() && !g_levelTransition.active)
+            {
+                g_cutsceneController.triggerStudioCutscene( engineContext, g_dialogue );
+            }
         }
         render( engineContext, dt );
 
@@ -6214,7 +6361,23 @@ int main( int argc, char **argv ) {
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
         SDL_RenderClear( engineContext.renderer );
-        SDL_RenderTexture( engineContext.renderer, engineContext.backtexure, nullptr, nullptr );
+        const float presentShotFx = (currentState == STATE_GAME)
+            ? std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f )
+            : 0.0f;
+        SDL_FRect dstRect{
+            0.0f,
+            0.0f,
+            float( RENDER_W * WIN_SCALE ),
+            float( RENDER_H * WIN_SCALE )
+        };
+        if (presentShotFx > 0.001f)
+        {
+            const float phase = SDL_GetTicks() * 0.001f;
+            const float amp = std::pow( presentShotFx, 0.58f );
+            dstRect.x = (std::sin( phase * 96.0f ) * 0.82f + std::cos( phase * 173.0f ) * 0.51f) * kRevolverScreenShakeX * amp;
+            dstRect.y = (std::cos( phase * 109.0f ) * 0.88f + std::sin( phase * 159.0f ) * 0.47f) * kRevolverScreenShakeY * amp;
+        }
+        SDL_RenderTexture( engineContext.renderer, engineContext.backtexure, nullptr, &dstRect );
         SDL_RenderPresent( engineContext.renderer );
     }
 
