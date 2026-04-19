@@ -3534,7 +3534,7 @@ static void renderDialogueSubtitle( Engine &engineContext ) {
     int y = RENDER_H - h - 30;
 
     drawTextBox( engineContext, x, y, w, h, rgb( 8, 8, 12 ), rgb( 130, 130, 150 ) );
-    drawWrappedText( engineContext, x + 14, y + 18, text, rgb( 235, 235, 235 ), w - 28 );
+    drawWrappedText( engineContext, x + 14, y + 18, text, rgb( 235, 235, 235 ), w - 28, 2);
 }
 
 static void renderCombatHUD( Engine &engineContext ) {

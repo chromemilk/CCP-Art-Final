@@ -1240,7 +1240,7 @@ static void drawTranslucentBox( Engine &engineContext, int x, int y, int w, int 
     }
 }
 
-int drawWrappedText( Engine &engineContext, int x, int y, const std::string &text, Uint32 color, int maxWidth ) {
+int drawWrappedText( Engine &engineContext, int x, int y, const std::string &text, Uint32 color, int maxWidth, int scale = 1 ) {
     std::string word = "";
     std::string line = "";
     int currentY = y;
@@ -1256,7 +1256,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
             int lineWidth = (int)(line.length() + word.length() + 1) * charW;
             if (lineWidth > maxWidth && !line.empty())
             {
-                drawStringTinyScaled( engineContext, x, currentY, line, color, 2);
+                drawStringTinyScaled( engineContext, x, currentY, line, color, scale);
                 currentY += lineH;
                 line = word + " ";
             }
@@ -1273,7 +1273,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
     }
     if (!line.empty())
     {
-        drawStringTinyScaled( engineContext, x, currentY, line, color, 2 );
+        drawStringTinyScaled( engineContext, x, currentY, line, color, scale );
         currentY += lineH;
     }
     return currentY; // Returns the Y position for the next block of text
