@@ -3886,17 +3886,49 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
     if (g_worldModels.empty()) return;
 
     const float projScaleY = (RENDER_W * 0.5f);
+    const float projScaleX = (RENDER_W * 0.5f);
     const float horizon = (RENDER_H * 0.5f) + pitchOffset;
     const float camHeight = 0.52f;
     const float nearClip = 0.18f;
     const float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
     const glm::vec3 lightDir = glm::normalize( glm::vec3( -0.35f, 0.85f, -0.40f ) );
+    const float kViewPreload = 0.28f;
+    const float kCullingEpsilon = 0.015f;
 
     struct ProjVert { float sx = 0, sy = 0, z = -1; glm::vec3 world{0.0f}; glm::vec3 color{1.0f}; glm::vec2 uv{0.0f}; bool valid = false; };
 
     for (const auto &inst : g_worldModels)
     {
         if (!inst.visible || !inst.model || inst.model->indices.size() < 3) continue;
+
+        const glm::vec3 modelHalfExtents = glm::max( (inst.model->boundsMax - inst.model->boundsMin) * 0.5f, glm::vec3( 0.0001f ) ) * inst.scale;
+        const float modelRadius = std::max( 0.05f, glm::length( modelHalfExtents ) );
+        const float modelCenterY = inst.heightOffset + modelHalfExtents.y;
+
+        const float centerDx = inst.x - engineContext.positionX;
+        const float centerDy = inst.y - engineContext.positionY;
+        const float centerTx = invDet * (engineContext.directionY * centerDx - engineContext.directionX * centerDy);
+        const float centerTz = invDet * (-engineContext.planeY * centerDx + engineContext.planeX * centerDy);
+
+        if ((centerTz + modelRadius) <= nearClip)
+        {
+            continue;
+        }
+
+        const float txRadius = modelRadius / std::max( 0.001f, FOV_TAN );
+        const float horizontalLimit = (1.0f + kViewPreload) * std::max( centerTz, nearClip );
+        if ((centerTx - txRadius) > horizontalLimit || (centerTx + txRadius) < -horizontalLimit)
+        {
+            continue;
+        }
+
+        const float centerScreenY = horizon - ((modelCenterY - camHeight) * projScaleY / std::max( centerTz, nearClip ));
+        const float verticalRadiusPx = (projScaleY * modelRadius) / std::max( centerTz, nearClip );
+        if ((centerScreenY + verticalRadiusPx) < (-RENDER_H * kViewPreload) ||
+            (centerScreenY - verticalRadiusPx) > (RENDER_H * (1.0f + kViewPreload)))
+        {
+            continue;
+        }
 
         std::vector<ProjVert> projected;
         projected.resize( inst.model->vertices.size() );
@@ -3923,6 +3955,13 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         }
         if (!std::isfinite( modelMinY )) modelMinY = 0.0f;
 
+        bool hasProjectedVerts = false;
+        float modelMinSx = std::numeric_limits<float>::max();
+        float modelMaxSx = std::numeric_limits<float>::lowest();
+        float modelMinSy = std::numeric_limits<float>::max();
+        float modelMaxSy = std::numeric_limits<float>::lowest();
+        float modelNearestZ = std::numeric_limits<float>::max();
+
         for (size_t i = 0; i < inst.model->vertices.size(); ++i)
         {
             const glm::vec3 r = transformed[ i ];
@@ -3944,7 +3983,41 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             if (i < inst.model->colors.size()) projected[ i ].color = inst.model->colors[ i ];
             if (i < inst.model->uvs.size()) projected[ i ].uv = inst.model->uvs[ i ];
             projected[ i ].valid = true;
+
+            hasProjectedVerts = true;
+            modelMinSx = std::min( modelMinSx, projected[ i ].sx );
+            modelMaxSx = std::max( modelMaxSx, projected[ i ].sx );
+            modelMinSy = std::min( modelMinSy, projected[ i ].sy );
+            modelMaxSy = std::max( modelMaxSy, projected[ i ].sy );
+            modelNearestZ = std::min( modelNearestZ, tz );
         }
+
+        if (!hasProjectedVerts) continue;
+
+        const int modelScreenMinX = std::max( 0, (int)std::floor( modelMinSx ) );
+        const int modelScreenMaxX = std::min( RENDER_W - 1, (int)std::ceil( modelMaxSx ) );
+        const int modelScreenMinY = std::max( 0, (int)std::floor( modelMinSy ) );
+        const int modelScreenMaxY = std::min( RENDER_H - 1, (int)std::ceil( modelMaxSy ) );
+        if (modelScreenMinX > modelScreenMaxX || modelScreenMinY > modelScreenMaxY) continue;
+
+        bool occlusionRejected = true;
+        int sampleStepX = std::max( 1, (modelScreenMaxX - modelScreenMinX + 1) / 24 );
+        for (int sx = modelScreenMinX; sx <= modelScreenMaxX; sx += sampleStepX)
+        {
+            if (modelNearestZ < (engineContext.zbuffer[ sx ] - kCullingEpsilon))
+            {
+                occlusionRejected = false;
+                break;
+            }
+        }
+        if (occlusionRejected && (modelScreenMaxX != modelScreenMinX))
+        {
+            if (modelNearestZ < (engineContext.zbuffer[ modelScreenMaxX ] - kCullingEpsilon))
+            {
+                occlusionRejected = false;
+            }
+        }
+        if (occlusionRejected) continue;
 
         for (size_t i = 0; i + 2 < inst.model->indices.size(); i += 3)
         {
