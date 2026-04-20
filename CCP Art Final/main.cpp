@@ -3755,7 +3755,8 @@ static std::string normalizeMindTrapTerminalText( std::string s ) {
             (c >= 'A' && c <= 'Z') ||
             (c >= '0' && c <= '9') ||
             c == ' ' || c == '.' || c == ',' || c == '-' || c == '_' || c == '/' ||
-            c == '>' || c == '<' || c == '[' || c == ']' || c == '(' || c == ')';
+            c == '>' || c == '<' || c == '[' || c == ']' || c == '(' || c == ')' ||
+            c == ':' || c == '?' || c == '\'';
         if (!ok) c = ' ';
     }
     return s;
@@ -3770,10 +3771,11 @@ static void queueMindTrapPhasePrompt() {
 
     const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
     queueMindTrapTerminalLine( "------------------------------------------------------------" );
-    queueMindTrapTerminalLine( phase.prompt );
-    queueMindTrapTerminalLine( phase.commands[ 0 ] + "   :: " + phase.options[ 0 ] );
-    queueMindTrapTerminalLine( phase.commands[ 1 ] + "   :: " + phase.options[ 1 ] );
-    queueMindTrapTerminalLine( phase.commands[ 2 ] + "   :: " + phase.options[ 2 ] );
+    queueMindTrapTerminalLine( "MIND> " + phase.prompt );
+    queueMindTrapTerminalLine( "YOU> " + phase.options[ 0 ] );
+    queueMindTrapTerminalLine( "YOU> " + phase.options[ 1 ] );
+    queueMindTrapTerminalLine( "YOU> " + phase.options[ 2 ] );
+    queueMindTrapTerminalLine( "MIND> CHOOSE A RESPONSE" );
 
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = std::clamp( g_mindTrapSelectedOption, 0, 2 );
@@ -3821,78 +3823,78 @@ static void initMindTrapPhases() {
 
     g_mindTrapPhases = {
         {
-            "PHASE 1 // PANIC // MOTOR LOCK CONFIRMED. INPUT SIGNAL?",
+            "I AM HERE. YOU ARE PANICKING. WHAT DO YOU TRY FIRST?",
             {
                 "RUN PANIC.MOTOR",
                 "RUN PANIC.VOICE",
                 "RUN PANIC.MEMORY"
             },
             {
-                "Force limbs against the stillness",
-                "Attempt a vocal distress call",
-                "Trace the last safe memory"
+                "I PUSH AGAINST THE STILLNESS",
+                "I TRY TO CALL OUT",
+                "I HOLD ON TO THE LAST SAFE MEMORY"
             },
             {
-                "MOTION REQUEST DENIED. JOINTS RETURN 0 RESPONSE.",
-                "VOCAL CHANNEL MUTED. NO AIR VOLUME REGISTERED.",
-                "MEMORY THREAD FRAGMENTED. LOCATION TAG: MUSEUM // UNKNOWN."
+                "YOU CANNOT MOVE. THE FRAME PUSHES BACK.",
+                "NO VOICE COMES OUT. THE ROOM STAYS QUIET.",
+                "THE MEMORY SHAKES. YOU ONLY SEE FRAGMENTS OF THE MUSEUM."
             },
             -1
         },
         {
-            "PHASE 2 // AUDIT // CORE TEMP FALLING. PRESERVATION CYCLE ACTIVE.",
+            "GOOD. STAY WITH ME. YOUR BODY FEELS COLD. WHAT DO YOU DO?",
             {
                 "RUN AUDIT.REJECT",
                 "RUN AUDIT.INTERNAL",
                 "RUN AUDIT.ACCEPT"
             },
             {
-                "Reject the scan as invalid",
-                "Run an internal body check",
-                "Accept diagnostic output"
+                "I DENY WHAT I FEEL",
+                "I CHECK WHAT IS HAPPENING INSIDE",
+                "I ACCEPT WHAT THE BODY IS TELLING ME"
             },
             {
-                "ERROR: DENIAL FLAGGED AS NON-CLINICAL RESPONSE.",
-                "NERVE MAP UPDATED: COLD STABLE // PAIN SUBSIDED.",
-                "PRESERVATION STATUS: OPTIMAL. HUMAN VARIANCE MINIMAL."
+                "DENIAL BREAKS YOUR FOCUS. THE COLD GETS LOUDER.",
+                "YOU MAP THE FEELING. THE PAIN EASES A LITTLE.",
+                "ACCEPTANCE STEADIES YOU. BREATH SLOWS. NOISE FADES."
             },
             -1
         },
         {
-            "PHASE 3 // DISSOCIATION // SUBJECT REFERENCE SHIFTING.",
+            "NOW TELL ME WHO YOU ARE IN THIS MOMENT.",
             {
                 "SET IDENTITY.FIRST_PERSON",
                 "SET IDENTITY.OBJECT_VIEW",
                 "SET IDENTITY.ACQUISITION"
             },
             {
-                "Reassert ownership with 'I'",
-                "Observe body as an object",
-                "Adopt curator catalog label"
+                "I AM STILL ME",
+                "I WATCH MYSELF FROM FAR AWAY",
+                "I AM ONLY A THING TO BE KEPT"
             },
             {
-                "IDENTITY TOKEN UNSTABLE. PRONOUN LOCK FAILED.",
-                "OBSERVER MODE ENABLED. SUBJECT DISTANCE INCREASED.",
-                "CATALOG INDEX WRITTEN: ACQUISITION // DISPLAY READY."
+                "THE WORD I FLICKERS, BUT IT IS NOT GONE.",
+                "DISTANCE GROWS. YOU FEEL LIKE A WITNESS, NOT A BODY.",
+                "YOU BECOME AN ENTRY. LABELED. STORED. QUIET."
             },
             -1
         },
         {
-            "PHASE 4 // THE SYNC // FINAL DIRECTIVE: ENTER STILLNESS.",
+            "LAST STEP. THE STILLNESS IS HERE. HOW DO YOU ANSWER IT?",
             {
                 "EXEC SYNC.RESIST",
                 "EXEC SYNC.HOLD_FEAR",
                 "EXEC SYNC.SURRENDER"
             },
             {
-                "Fight the frame and refuse",
-                "Hold fear and wait for rescue",
-                "Surrender to the stillness"
+                "I FIGHT IT",
+                "I HOLD FEAR AND WAIT",
+                "I LET GO"
             },
             {
-                "RESISTANCE LOOP DETECTED. CYCLE RESTARTED.",
-                "HOPE SIGNAL EXPIRED. NO EXTERNAL HANDSHAKE FOUND.",
-                "SYNC ACCEPTED. STILLNESS IS NOW PRIMARY PROCESS."
+                "YOU PUSH BACK, BUT THE LOOP STARTS AGAIN.",
+                "YOU WAIT FOR HELP. NOTHING ANSWERS.",
+                "I HEAR YOU. STILLNESS ACCEPTS YOU."
             },
             2
         }
@@ -3938,6 +3940,7 @@ static void startMindTrapSequence( Engine &engineContext ) {
     queueMindTrapTerminalLine( "[CHECK] SENSORY FEED ............. OFFLINE" );
     queueMindTrapTerminalLine( "[CHECK] MOTOR CONTROL ............ LOCKED" );
     queueMindTrapTerminalLine( "[CHECK] PRESERVATION PROCESS ..... ACTIVE" );
+    queueMindTrapTerminalLine( "MIND> I AM YOUR INNER CONSOLE. TALK TO ME." );
     queueMindTrapTerminalLine( "" );
     queueMindTrapPhasePrompt();
 }
@@ -3951,11 +3954,10 @@ static void commitMindTrapChoice( int choiceIndex ) {
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = choiceIndex;
 
-    pushMindTrapTerminalLine( normalizeMindTrapTerminalText( "> " + phase.commands[ choiceIndex ] ) );
-    pushMindTrapTerminalLine( "[ENTER]" );
+    pushMindTrapTerminalLine( normalizeMindTrapTerminalText( "YOU> " + phase.options[ choiceIndex ] ) );
 
     g_mindTrapLastResult = phase.results[ choiceIndex ];
-    queueMindTrapTerminalLine( g_mindTrapLastResult );
+    queueMindTrapTerminalLine( "MIND> " + g_mindTrapLastResult );
     g_mindTrapResultTimer = 1.25f;
     g_mindTrapShowingResult = true;
     g_mindTrapAdvanceAfterResult = false;
@@ -3966,12 +3968,12 @@ static void commitMindTrapChoice( int choiceIndex ) {
     {
         if (choiceIndex == phase.surrenderOption)
         {
-            queueMindTrapTerminalLine( "SYNC TOKEN ACCEPTED." );
+            queueMindTrapTerminalLine( "MIND> YES. YOU STOP FIGHTING. I WILL CARRY YOU THROUGH." );
             g_mindTrapFinalizeAfterResult = true;
         }
         else
         {
-            queueMindTrapTerminalLine( "SYNC REJECTED. REQUIRED COMMAND: SURRENDER." );
+            queueMindTrapTerminalLine( "MIND> NOT YET. SPEAK THE RESPONSE THAT LETS GO." );
         }
     }
     else
@@ -4041,18 +4043,7 @@ static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef>
 }
 
 static bool isPlayerNearStatue( Engine const &engineContext ) {
-    if (engineContext.currentLevel != Levels::MUSEUM) return false;
-
-    float currentX = engineContext.positionX;
-    float currentY = engineContext.positionY;
-
-    // Location of statue
-    float statueX = 11.1;
-    float statueY = 9.5;
-
-    float tolerance = 1.0f; // 1 meter
-    float distSq = (currentX - statueX) * (currentX - statueX) + (currentY - statueY) * (currentY - statueY);
-    return (distSq <= tolerance * tolerance);
+    return false;
 }
 
 static bool isPlayerNearCaveStatue( Engine const &engineContext ) {
@@ -4096,7 +4087,7 @@ void renderStatueChatbox( Engine &engineContext ) {
     }
     else
     {
-        actualText = "The next level is loading... please be patient";
+        actualText = "All works logged. Proceed to the upper gallery diagnostic terminal.";
     }
 
     drawString16x16( engineContext, textX, textY, actualText, rgb( 210, 210, 210 ), textWidth, letterSpacing, lineSpacing, true );
@@ -4106,7 +4097,7 @@ void renderStatueChatbox( Engine &engineContext ) {
     const int hintLineSpacing = 5;
     const int hintAdvX = fontW + hintLetterSpacing; 
 
-    std::string hint = "Wait a few seconds...";
+    std::string hint = "Press E to close";
 
     int hintX = x + width - (hint.length() * hintAdvX) - 40;
 
@@ -8307,10 +8298,6 @@ int main( int argc, char **argv ) {
                 if (now - engineContext.statueChatStartTick > 8000)
                 {
                     engineContext.statueChatActive = false; // Reset state
-                    if (mesuemObjectives.allCompleted() == true)
-                    {
-                        handleLevelChange( engineContext, levels, Levels::TRANSITION );
-                    }
                 }
             }
             {
