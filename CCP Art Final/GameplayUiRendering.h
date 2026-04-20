@@ -42,9 +42,19 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     const float flicker = std::clamp( flickerNoise, 0.38f, 1.0f );
     const Uint8 green = Uint8( std::clamp( 180.0f * flicker, 42.0f, 225.0f ) );
     const Uint8 greenDim = Uint8( std::clamp( 120.0f * flicker, 24.0f, 180.0f ) );
+    const Uint8 voiceRed = Uint8( std::clamp( 210.0f * flicker, 60.0f, 255.0f ) );
+    const Uint8 playerBlue = Uint8( std::clamp( 210.0f * flicker, 60.0f, 255.0f ) );
     const Uint32 mainText = rgb( 0, green, 22 );
     const Uint32 dimText = rgb( 0, greenDim, 12 );
     const Uint32 borderText = rgb( 0, Uint8( std::clamp( green + 18, 0, 255 ) ), 28 );
+    const Uint32 voiceText = rgb( voiceRed, 18, 22 );
+    const Uint32 playerText = rgb( 30, 80, playerBlue );
+
+    auto terminalLineColor = [&]( const std::string &line, Uint32 fallback ) -> Uint32 {
+        if (line.rfind( "VOICE>", 0 ) == 0 || line.rfind( "MIND>", 0 ) == 0) return voiceText;
+        if (line.rfind( "YOU>", 0 ) == 0) return playerText;
+        return fallback;
+    };
 
     for (int y = 8; y < RENDER_H; y += 4)
     {
@@ -64,11 +74,8 @@ static void renderMindTrapInterface( Engine &engineContext ) {
 
     drawTextBox( engineContext, panelX, panelY, panelW, panelH, rgb( 0, 0, 0 ), borderText );
 
-    const std::string header = "INTERNAL DIAGNOSTIC // CONSCIOUSNESS THREAD";
+    const std::string header = "C://INTERNAL DIAGNOSTIC//CONSCIOUSNESS THREAD";
     drawString16x16( engineContext, panelX + 18, panelY + 16, header, mainText, panelW - 36, 1, 1, false );
-
-    const std::string phaseLabel = "PHASE " + std::to_string( g_mindTrapPhaseIndex + 1 ) + "/" + std::to_string( g_mindTrapPhases.size() );
-    drawStringTinyScaled( engineContext, panelX + panelW - 132, panelY + 22, phaseLabel, dimText, 1, 1, 1, false );
 
     const int bodyX = panelX + 18;
     const int bodyY = panelY + 50;
@@ -87,7 +94,8 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     int ty = bodyY;
     for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
     {
-        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTerminalLog[ i ], dimText, 2, 1, 1, false );
+        const Uint32 lineColor = terminalLineColor( g_mindTrapTerminalLog[ i ], dimText );
+        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTerminalLog[ i ], lineColor, 2, 1, 1, false );
         ty += lineStep;
         if (ty > bodyY + bodyH - lineStep) break;
     }
@@ -95,7 +103,8 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     if (!g_mindTrapTypingLine.empty() && ty <= bodyY + bodyH - lineStep)
     {
         const size_t count = std::min( g_mindTrapTypingChars, g_mindTrapTypingLine.size() );
-        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTypingLine.substr( 0, count ), mainText, 2, 1, 1, false );
+        const std::string typed = g_mindTrapTypingLine.substr( 0, count );
+        drawStringTinyScaled( engineContext, bodyX, ty, typed, terminalLineColor( g_mindTrapTypingLine, mainText ), 2, 1, 1, false );
     }
 
     const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
@@ -859,7 +868,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         g_clueNotes.clear();
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Missed Calls",
-            "[PHONE] 12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
+            "12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
             10.0f, 10.3f));
         // Atrium note
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -883,14 +892,9 @@ static void initMuseumPuzzle(Engine& engineContext) {
             3.5f, 15.5f));
         // East Wing Note
         g_clueNotes.push_back(makeClueNote(engineContext,
-            "Final Code Clue",
+            "Security Log",
             "The South Wing emergency code is 7391.",
             18.5f, 9.5f));
-        // North Wing fallback note so South code is always obtainable
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Emergency Override Slip",
-            "If wing routing fails, South Wing emergency code is 7391.",
-            9.2f, 2.8f));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Conservation Log A",
             "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
@@ -966,10 +970,6 @@ static void initCaveFinalObjective(Engine& engineContext) {
     g_clueNotes.clear();
     g_foundNotes.clear();
 
-    g_clueNotes.push_back(makeClueNote(engineContext,
-        "Scribbled Warning",
-        "The Warden statue tests those who try to leave. You must understand the Director's madness to pass. Remember: he wants one breath held forever.",
-        2.4f, 2.1f));
 
     g_clueNotes.push_back(makeClueNote(engineContext,
         "Assistant's Regret",
@@ -1715,12 +1715,12 @@ static void queueMindTrapPhasePrompt() {
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
 
     const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
-    queueMindTrapTerminalLine( "------------------------------------------------------------" );
-    queueMindTrapTerminalLine( "MIND> " + phase.prompt );
-    queueMindTrapTerminalLine( "YOU> " + phase.options[ 0 ] );
-    queueMindTrapTerminalLine( "YOU> " + phase.options[ 1 ] );
-    queueMindTrapTerminalLine( "YOU> " + phase.options[ 2 ] );
-    queueMindTrapTerminalLine( "MIND> CHOOSE A RESPONSE" );
+    queueMindTrapTerminalLine("------------------------------------------------------------");
+    queueMindTrapTerminalLine("VOICE> " + phase.prompt);
+    queueMindTrapTerminalLine("THOUGHT> " + phase.options[0]); 
+    queueMindTrapTerminalLine("THOUGHT> " + phase.options[1]);
+    queueMindTrapTerminalLine("THOUGHT> " + phase.options[2]);
+    queueMindTrapTerminalLine("VOICE> CHOOSE A RESPONSE");
 
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = std::clamp( g_mindTrapSelectedOption, 0, 2 );
@@ -1762,86 +1762,144 @@ static void updateMindTrapTypewriter( float dt ) {
         g_mindTrapPostLinePause = 0.055f;
     }
 }
-
 static void initMindTrapPhases() {
     if (!g_mindTrapPhases.empty()) return;
 
     g_mindTrapPhases = {
+        // Phase 0: The Awakening & Paralysis
         {
-            "I AM HERE. YOU ARE PANICKING. WHAT DO YOU TRY FIRST?",
+            "IT IS VERY DARK IN HERE, ISN'T IT? YOUR HEART IS BEATING TOO FAST.",
+            { "COMMAND.MOVE_ARMS", "COMMAND.VOCALIZE", "COMMAND.QUERY_LOCATION" }, // commands
             {
-                "RUN PANIC.MOTOR",
-                "RUN PANIC.VOICE",
-                "RUN PANIC.MEMORY"
-            },
+                "TRY TO MOVE MY ARMS",
+                "TRY TO SCREAM",
+                "WHERE AM I?"
+            }, // options
             {
-                "I PUSH AGAINST THE STILLNESS",
-                "I TRY TO CALL OUT",
-                "I HOLD ON TO THE LAST SAFE MEMORY"
-            },
+                "THERE IS NO GEOMETRY HERE. YOU CANNOT MOVE IN A SPACE THAT DOES NOT EXIST.",
+                "YOU CAN NOT SCREAM IN A PLACE THAT DOES NOT EXIST.",
+                "YOU ARE SOMEWHERE DEEP. THE DOOR IS ALREADY SEALED BEHIND YOU."
+            }, // results
+            -1 // surrenderOption
+        },
+
+        // Phase 1: The Intrusion
+        {
+            "THE MUSEUM... THE STATUES... YOU THOUGHT YOU WERE THE OBSERVER.",
+            { "LOGIC.DENY", "STATE.WAKE", "QUERY.ENTITY" }, // commands
             {
-                "YOU CANNOT MOVE. THE FRAME PUSHES BACK.",
-                "NO VOICE COMES OUT. THE ROOM STAYS QUIET.",
-                "THE MEMORY SHAKES. YOU ONLY SEE FRAGMENTS OF THE MUSEUM."
-            },
+                "I AM NOT ONE OF THEM",
+                "I WANT TO WAKE UP",
+                "WHAT ARE YOU?"
+            }, // options
+            {
+                "LIAR. YOU ARE THE ORCHESTRATOR",
+                "YOU ARE AWAKE.",
+                "I AM YOU."
+            }, // results
             -1
         },
+
+        // Phase 2: The Erosion of Memory
         {
-            "GOOD. STAY WITH ME. YOUR BODY FEELS COLD. WHAT DO YOU DO?",
+            "DO YOU REMEMBER YOUR NAME?",
+            { "MEMORY.VOCALIZE", "MEMORY.ANCHOR", "MEMORY.NULL" }, // commands
             {
-                "RUN AUDIT.REJECT",
-                "RUN AUDIT.INTERNAL",
-                "RUN AUDIT.ACCEPT"
-            },
+                "SAY MY NAME OUT LOUD",
+                "CLING TO A MEMORY OF HOME",
+                "I DON'T REMEMBER"
+            }, // options
             {
-                "I DENY WHAT I FEEL",
-                "I CHECK WHAT IS HAPPENING INSIDE",
-                "I ACCEPT WHAT THE BODY IS TELLING ME"
-            },
-            {
-                "DENIAL BREAKS YOUR FOCUS. THE COLD GETS LOUDER.",
-                "YOU MAP THE FEELING. THE PAIN EASES A LITTLE.",
-                "ACCEPTANCE STEADIES YOU. BREATH SLOWS. NOISE FADES."
-            },
+                "IT DOES NOT BELONG TO YOU ANYMORE.",
+                "THE MEMORY FLICKERS AND DISSOLVES. THERE IS ONLY THE GALLERY NOW.",
+                "GOOD. THE MEMORIES ARE ALWAYS THE FIRST TO ROT AWAY."
+            }, // results
             -1
         },
+
+        // Phase 3: The Mirror
         {
-            "NOW TELL ME WHO YOU ARE IN THIS MOMENT.",
+            "THE COLORS, WHAT DO THEY MEAN?",
+            { "QUERY.MEANING", "QUERY.MEANING", "QUERY.MEANING" }, // commands
             {
-                "SET IDENTITY.FIRST_PERSON",
-                "SET IDENTITY.OBJECT_VIEW",
-                "SET IDENTITY.ACQUISITION"
-            },
+                "I DON'T KNOW",
+                "I DON'T KNOW",
+                "I DON'T KNOW"
+            }, // options
             {
-                "I AM STILL ME",
-                "I WATCH MYSELF FROM FAR AWAY",
-                "I AM ONLY A THING TO BE KEPT"
-            },
-            {
-                "THE WORD I FLICKERS, BUT IT IS NOT GONE.",
-                "DISTANCE GROWS. YOU FEEL LIKE A WITNESS, NOT A BODY.",
-                "YOU BECOME AN ENTRY. LABELED. STORED. QUIET."
-            },
+                "FAILURE.",
+                "FAILURE.",
+                "FAILURE."
+            }, // results
             -1
         },
+
+        // Phase 4: The Audience (NEW)
         {
-            "LAST STEP. THE STILLNESS IS HERE. HOW DO YOU ANSWER IT?",
+            "IT'S BEEN WATCHING YOU. DID YOU KNOW?",
+            { "ACTION.YES", "ACTION.YES", "ACTION.NO" }, // commands
             {
-                "EXEC SYNC.RESIST",
-                "EXEC SYNC.HOLD_FEAR",
-                "EXEC SYNC.SURRENDER"
-            },
+                "YES.",
+                "YES.",
+                "NO."
+            }, // options
             {
-                "I FIGHT IT",
-                "I HOLD FEAR AND WAIT",
-                "I LET GO"
-            },
+                "THEN YOU SHOULD HAVE KNOWN.",
+                "THEN YOU SHOULD HAVE KNOWN.",
+                "LIAR."
+            }, // results
+            -1
+        },
+
+        // Phase 5: The Loss of Time (NEW)
+        {
+            "HOW LONG HAVE YOU BEEN HERE?",
+            { "TIME.NOW", "TIME.FOREVER", "TIME.NULL" }, // commands
             {
-                "YOU PUSH BACK, BUT THE LOOP STARTS AGAIN.",
-                "YOU WAIT FOR HELP. NOTHING ANSWERS.",
-                "I HEAR YOU. STILLNESS ACCEPTS YOU."
-            },
-            2
+                "I JUST GOT HERE",
+                "IT FEELS LIKE FOREVER",
+                "TIME HAS STOPPED"
+            }, // options
+            {
+                "YOU HAVE ALWAYS BEEN HERE. YOU JUST FORGOT.",
+                "STONE DOES NOT FEEL THE PASSING OF SEASONS.",
+                "THE WINDING OF YOUR INTERNAL CLOCK HAS CEASED."
+            }, // results
+            -1
+        },
+
+        // Phase 6: The Replacement (NEW)
+        {
+            "YOUR MIND IS SHUTTING DOWN.",
+            { "EMOTION.ANGER", "COGNITION.LOOP", "ACCEPTANCE.OK" }, // commands
+            {
+                "HOLD ONTO ANGER",
+                "RECITE THE ALPHABET",
+                "LET IT IN"
+            }, // options
+            {
+                "ANGER IS WARM. BUT MARBLE IS COLDER.",
+                "A...B.....=C..ZERO000000/F['SF.",
+                "THANK YOU."
+            }, // results
+            -1
+        },
+
+        // Phase 7: The Final Submission
+        {
+            "THE PLASTER IS SETTING. IT'S ALMOST TIME.",
+            { "STRUGGLE.PHYSICAL", "STRUGGLE.VOCAL", "SYSTEM.SHUTDOWN" }, // commands
+            {
+                "TRY TO BREAK FREE",
+                "CRY FOR HELP",
+                "GIVE UP"
+            }, // options
+            {
+                "YOUR FINGERS SCRAPE AGAINST SOLID MARBLE. YOU ARE TRAPPED ALONE.",
+                "ART DOES NOT SPEAK.",
+                "PERFECT."
+            }, // results
+            2 // Surrender option (index 2: "GIVE UP") advances the sequence
         }
     };
 }
@@ -1853,8 +1911,7 @@ static bool isPlayerNearMindTrapTrigger( Engine const &engineContext ) {
     const bool nearSolventVault = isPlayerNearPoint( engineContext, 11.2f, 14.4f, 1.15f );
     return nearSealedDoor || nearSolventVault;
 }
-
-static void startMindTrapSequence( Engine &engineContext ) {
+static void startMindTrapSequence(Engine& engineContext) {
     initMindTrapPhases();
 
     g_mindTrapActive = true;
@@ -1881,12 +1938,15 @@ static void startMindTrapSequence( Engine &engineContext ) {
     engineContext.openArtId = -1;
     engineContext.statueChatActive = false;
 
-    queueMindTrapTerminalLine( "[BOOT] INTERNAL DIAGNOSTIC CONSOLE" );
-    queueMindTrapTerminalLine( "[CHECK] SENSORY FEED ............. OFFLINE" );
-    queueMindTrapTerminalLine( "[CHECK] MOTOR CONTROL ............ LOCKED" );
-    queueMindTrapTerminalLine( "[CHECK] PRESERVATION PROCESS ..... ACTIVE" );
-    queueMindTrapTerminalLine( "MIND> I AM YOUR INNER CONSOLE. TALK TO ME." );
-    queueMindTrapTerminalLine( "" );
+    queueMindTrapTerminalLine("...");
+    queueMindTrapTerminalLine("FAILED TO HOOK BRAIN STEM.");
+    queueMindTrapTerminalLine("FAILED TO INIT HumanOS.");
+    queueMindTrapTerminalLine("...");
+    queueMindTrapTerminalLine("");
+    queueMindTrapTerminalLine("VOICE> PLEASE DO NOT STRUGGLE");
+    queueMindTrapTerminalLine("");
+
+
     queueMindTrapPhasePrompt();
 }
 
@@ -1913,7 +1973,7 @@ static void commitMindTrapChoice( int choiceIndex ) {
     {
         if (choiceIndex == phase.surrenderOption)
         {
-            queueMindTrapTerminalLine( "MIND> YES. YOU STOP FIGHTING. I WILL CARRY YOU THROUGH." );
+            queueMindTrapTerminalLine( "MIND> YES. YOU STOP FIGHTING." );
             g_mindTrapFinalizeAfterResult = true;
         }
         else
@@ -1974,7 +2034,7 @@ static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef>
     if (g_mindTrapReadyToExit)
     {
         g_mindTrapWhiteFlashTimer += dt;
-        if (g_mindTrapWhiteFlashTimer >= 0.68f)
+        if (g_mindTrapWhiteFlashTimer >= 1.5f)
         {
             g_mindTrapActive = false;
             g_mindTrapReadyToExit = false;
@@ -2244,8 +2304,8 @@ void renderGalleryCard( Engine &engineContext ) {
         }
         else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
         {
-            wingName = "Masterpiece Skylight";
-            wingDesc = "Observations";
+            wingName = "Bioroom";
+            wingDesc = "Experimental";
         }
     }
     else
@@ -2347,7 +2407,7 @@ static void renderCaveHUD( Engine &engineContext ) {
     int mins = (int)g_caveTimerSeconds / 60;
     int secs = (int)g_caveTimerSeconds % 60;
     char buf[ 32 ];
-    snprintf( buf, sizeof( buf ), "Oxygen Time Left %02d:%02d", mins, secs );
+    snprintf( buf, sizeof( buf ), "Time 2 Deletion %02d:%02d", mins, secs );
     drawString16x16( engineContext, x + 12, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
 }
 
@@ -2486,6 +2546,7 @@ static void renderSchoolSafeWeaponBlur( Engine &engineContext ) {
 
 static void renderAccessPopup( Engine &engineContext ) {
     if (g_accessPopup.empty() || SDL_GetTicks() > g_accessPopupUntil) return;
+    if (g_dialogue.isActive()) return;
 
     int w = 500;
     int h = 70;

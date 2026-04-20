@@ -18,13 +18,13 @@ public:
     void triggerUpstairsGalleryCutscene( Engine &engineContext, DialogueSystem &dialogue ) {
         if (upstairsGalleryCutsceneTriggered) return;
         upstairsGalleryCutsceneTriggered = true;
-        triggerScriptedPanCutscene( engineContext, dialogue, "I don't remember this being here...", 1.5f, 0.3f );
+        triggerScriptedPanCutscene( engineContext, dialogue, "I don't remember this being here...", 3.5f, 0.06f );
     }
 
     void triggerStudioCutscene( Engine &engineContext, DialogueSystem &dialogue ) {
         if (studioCutsceneTriggered) return;
         studioCutsceneTriggered = true;
-        triggerScriptedPanCutscene( engineContext, dialogue, "What the hell happend here?", 1.f, 0.3f );
+        triggerScriptedPanCutscene( engineContext, dialogue, "What the hell happened here?", 3.5f, 0.02f );
     }
 
     bool hasTriggeredStudioCutscene() const {

@@ -74,6 +74,15 @@
     <ClInclude Include="ModelLoadingTools.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="GameplaySystems.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ObjectiveSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GameplayUiRendering.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Media Include="levels\museum\A_Night_To_Remember_Laufey.mp3" />

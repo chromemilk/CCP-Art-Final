@@ -140,12 +140,15 @@
     <ClInclude Include="EditorModelTools.h" />
     <ClInclude Include="GameDataTypes.h" />
     <ClInclude Include="GameEngine.h" />
+    <ClInclude Include="GameplaySystems.h" />
+    <ClInclude Include="GameplayUiRendering.h" />
     <ClInclude Include="GpuPropSystem.h" />
     <ClInclude Include="Includes.h" />
     <ClInclude Include="MapHelpers.h" />
     <ClInclude Include="MathHelpers.h" />
     <ClInclude Include="ModelLoadingTools.h" />
     <ClInclude Include="MusicSystem.h" />
+    <ClInclude Include="ObjectiveSystem.h" />
     <ClInclude Include="PhysicsHelpers.h" />
     <ClInclude Include="RendererHelpers.h" />
     <ClInclude Include="Settings.h" />
