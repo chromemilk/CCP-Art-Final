@@ -143,6 +143,18 @@ static bool g_unlockAllDoorsOverride = false;
 static bool g_wakeCutsceneActive = false;
 static float g_wakeCutsceneTimer = 0.0f;
 static constexpr float kWakeCutsceneDuration = 6.5f;
+static bool g_generatorNeedsGasLinePlayed = false;
+static bool g_gasCanCollected = false;
+static bool g_generatorFueled = false;
+static int g_generatorModelIndex = -1;
+static int g_gasCanModelIndex = -1;
+static bool g_powerRestoreFlickerActive = false;
+static float g_powerRestoreFlickerTimer = 0.0f;
+static constexpr float kPowerRestoreFlickerDuration = 0.85f;
+static constexpr float kMuseumGeneratorX = 7.41f;
+static constexpr float kMuseumGeneratorY = 7.19f;
+static constexpr float kMuseumGasCanX = 16.1f;
+static constexpr float kMuseumGasCanY = 2.1f;
 
 struct WeaponPickup
 {
@@ -948,7 +960,16 @@ static bool pointBlockedByWorldModel( float px, float py, float playerRadius ) {
         const float sz = std::max( 0.0001f, std::fabs( inst.model->boundsMax.z - inst.model->boundsMin.z ) );
         const float halfX = 0.5f * sx * inst.scale;
         const float halfZ = 0.5f * sz * inst.scale;
-        const float modelRadius = std::max( 0.12f, std::max( halfX, halfZ ) );
+        const float rawRadius = std::max( 0.12f, std::max( halfX, halfZ ) );
+
+        // Some imported models can report oversized bounds, creating huge invisible blockers.
+        if (rawRadius > 2.2f)
+        {
+            continue;
+        }
+
+        const float intendedRadius = std::clamp( inst.editorTargetScale * 0.55f, 0.12f, 1.0f );
+        const float modelRadius = std::min( rawRadius, intendedRadius );
 
         const float dx = px - inst.x;
         const float dy = py - inst.y;
@@ -1768,6 +1789,29 @@ static bool isPlayerNearPoint( Engine const &engineContext, float px, float py, 
 
 static bool isMuseumLikeLevel( Levels level ) {
     return level == Levels::MUSEUM || level == Levels::MUSEUM_UPPER;
+}
+
+static bool museumPowerFlickerLowPhase() {
+    if (!g_powerRestoreFlickerActive) return false;
+    const float t = g_powerRestoreFlickerTimer;
+    return
+        (t >= 0.06f && t <= 0.11f) ||
+        (t >= 0.18f && t <= 0.24f) ||
+        (t >= 0.33f && t <= 0.39f);
+}
+
+static float museumPowerLightMultiplierForLevel( Levels level ) {
+    if (!isMuseumLikeLevel( level )) return 1.0f;
+    if (!g_generatorFueled) return 0.56f;
+    if (museumPowerFlickerLowPhase()) return 0.44f;
+    return 1.12f;
+}
+
+static float museumPowerDarknessAddForLevel( Levels level ) {
+    if (!isMuseumLikeLevel( level )) return 0.0f;
+    if (!g_generatorFueled) return 0.14f;
+    if (museumPowerFlickerLowPhase()) return 0.12f;
+    return -0.06f;
 }
 
 static bool hasRestorationPigments() {
@@ -2596,6 +2640,13 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_pendingShellDropTimers.clear();
     resetWhisperAmbience();
     g_firstLockedDoorDialogueShown = false;
+    g_generatorNeedsGasLinePlayed = false;
+    g_gasCanCollected = false;
+    g_generatorFueled = false;
+    g_generatorModelIndex = -1;
+    g_gasCanModelIndex = -1;
+    g_powerRestoreFlickerActive = false;
+    g_powerRestoreFlickerTimer = 0.0f;
     g_cutsceneController.reset();
     g_dialogue.clear();
 
@@ -2609,7 +2660,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
 
     if (engineContext.currentLevel == Levels::MUSEUM) {
         // Bronze Key in main atrium start
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 8.1f, 7.7f, rgb(180, 120, 40), "Bronze Key.glb"));
+        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 15.f, 8.f, rgb(180, 120, 40), "Bronze Key.glb"));
         // Silver Key in North Wing
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "SILVER KEY", 10.5f, 3.5f, rgb(190, 190, 200), "Silver Key.glb"));
        
@@ -2839,6 +2890,13 @@ g_codeEntryBuffer.clear();
     g_pendingShellDropTimers.clear();
     resetWhisperAmbience();
     g_firstLockedDoorDialogueShown = false;
+    g_generatorNeedsGasLinePlayed = false;
+    g_gasCanCollected = false;
+    g_generatorFueled = false;
+    g_generatorModelIndex = -1;
+    g_gasCanModelIndex = -1;
+    g_powerRestoreFlickerActive = false;
+    g_powerRestoreFlickerTimer = 0.0f;
     g_dialogue.clear();
     g_cutsceneController.reset();
 }
@@ -2873,6 +2931,53 @@ static std::string keyModelForName( const std::string &keyName ) {
     if (keyName == "RED PIGMENT") return "RedPigment.glb";
     if (keyName == "DIRECTOR'S KEY") return "Bronze Key.glb";
     return "Note.glb";
+}
+
+static bool isPlayerNearGenerator( Engine const &engineContext, float radius = 1.25f ) {
+    if (engineContext.currentLevel != Levels::MUSEUM) return false;
+    return isPlayerNearPoint( engineContext, kMuseumGeneratorX, kMuseumGeneratorY, radius );
+}
+
+static bool isPlayerNearGasCan( Engine const &engineContext, float radius = 0.95f ) {
+    if (engineContext.currentLevel != Levels::MUSEUM) return false;
+    if (g_gasCanCollected || g_generatorFueled) return false;
+    return isPlayerNearPoint( engineContext, kMuseumGasCanX, kMuseumGasCanY, radius );
+}
+
+static void rebuildMuseumPowerInteractablesForLevel( Engine &engineContext, Levels level ) {
+    g_generatorModelIndex = -1;
+    g_gasCanModelIndex = -1;
+
+    if (level != Levels::MUSEUM) return;
+
+    g_generatorModelIndex = addWorldModelInstance(
+        resolveFirstExistingAsset( { "Generator.glb", "generator.glb", "PowerGenerator.glb", "AirConditioner.glb" } ),
+        kMuseumGeneratorX,
+        kMuseumGeneratorY,
+        0.70f,
+        g_generatorFueled ? rgb( 225, 225, 205 ) : rgb( 130, 130, 130 ),
+        -3.13,
+        0.0f,
+        0.0f,
+        false,
+        0.0f,
+        -0.10f );
+
+    if (!g_generatorFueled && !g_gasCanCollected)
+    {
+        g_gasCanModelIndex = addWorldModelInstance(
+            resolveFirstExistingAsset( { "GasCan.glb", "Gas Can.glb", "gascan.glb", "MopBucket.glb" } ),
+            kMuseumGasCanX,
+            kMuseumGasCanY,
+            0.3f,
+            rgb( 208, 58, 52 ),
+            1.5f,
+            0.0f,
+            0.0f,
+            false,
+            0.9f,
+            -0.05f );
+    }
 }
 
 static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Levels level ) {
@@ -2937,6 +3042,8 @@ static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Lev
     {
         g_revolverPickup.modelIndex = -1;
     }
+
+    rebuildMuseumPowerInteractablesForLevel( engineContext, level );
 }
 
 static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty ) {
@@ -4226,6 +4333,7 @@ static void renderWorldModelsRange(
     int yEndExclusive ) {
     if (yStartInclusive >= yEndExclusive) return;
 
+    const float museumPowerMul = museumPowerLightMultiplierForLevel( engineContext.currentLevel );
     const float projScaleY = (RENDER_W * 0.5f);
     const float horizon = (RENDER_H * 0.5f) + pitchOffset;
     const float camHeight = 0.52f;
@@ -4470,9 +4578,9 @@ static void renderWorldModelsRange(
             }
 
             const float lit = std::clamp( 0.16f + 0.90f * (lambert * distanceShade), 0.16f, 1.00f );
-            const int shadeR256 = toFixed256( materialColor.r * vertexMul.r * lit );
-            const int shadeG256 = toFixed256( materialColor.g * vertexMul.g * lit );
-            const int shadeB256 = toFixed256( materialColor.b * vertexMul.b * lit );
+            const int shadeR256 = toFixed256( materialColor.r * vertexMul.r * lit * museumPowerMul );
+            const int shadeG256 = toFixed256( materialColor.g * vertexMul.g * lit * museumPowerMul );
+            const int shadeB256 = toFixed256( materialColor.b * vertexMul.b * lit * museumPowerMul );
             const Uint32 solidColor = rgb(
                 Uint8( (255 * shadeR256) >> 8 ),
                 Uint8( (255 * shadeG256) >> 8 ),
@@ -4759,6 +4867,7 @@ static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
     if (!isGpuModelRenderingEnabled()) return;
     if (!engineContext.renderer || g_worldModels.empty()) return;
 
+    const float museumPowerMul = museumPowerLightMultiplierForLevel( engineContext.currentLevel );
     const float projScaleY = (RENDER_W * 0.5f);
     const float horizon = (RENDER_H * 0.5f) + pitchOffset;
     const float camHeight = 0.52f;
@@ -4919,7 +5028,7 @@ static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
 
             const glm::vec3 rgb = glm::clamp(
                 baseColor * vAvg * glm::vec3( tr, tg, tb ) *
-                std::clamp( lambert * shade * engineContext.ambianceMul * g_horrorLightingMul, 0.10f, 1.0f ),
+                std::clamp( lambert * shade * engineContext.ambianceMul * g_horrorLightingMul * museumPowerMul, 0.10f, 1.0f ),
                 glm::vec3( 0.0f ), glm::vec3( 1.0f ) );
             const SDL_FColor col{ rgb.r, rgb.g, rgb.b, 1.0f };
 
@@ -4976,6 +5085,9 @@ static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
 static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
+    const float museumPowerMul = museumPowerLightMultiplierForLevel( engineContext.currentLevel );
+    const float museumDarknessAdd = museumPowerDarknessAddForLevel( engineContext.currentLevel );
+
     const float shotFx01 = std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f );
     const float shotShakeWave = std::pow( shotFx01, 0.56f );
     const float shakePhase = SDL_GetTicks() * 0.001f;
@@ -5026,9 +5138,9 @@ static void render( Engine &engineContext, float dt ) {
         float tg = float( (engineContext.ambianceTint >> 8) & 255 ) / 255.0f;
         float tb = float( engineContext.ambianceTint & 255 ) / 255.0f;
         const float horrorMul = std::clamp( g_horrorLightingMul, 0.35f, 1.0f );
-        Uint8 r = Uint8( std::clamp( float( (shaded >> 16) & 255 ) * tr * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
-        Uint8 g = Uint8( std::clamp( float( (shaded >> 8) & 255 ) * tg * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
-        Uint8 b = Uint8( std::clamp( float( shaded & 255 ) * tb * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
+        Uint8 r = Uint8( std::clamp( float( (shaded >> 16) & 255 ) * tr * engineContext.ambianceMul * horrorMul * museumPowerMul, 0.0f, 255.0f ) );
+        Uint8 g = Uint8( std::clamp( float( (shaded >> 8) & 255 ) * tg * engineContext.ambianceMul * horrorMul * museumPowerMul, 0.0f, 255.0f ) );
+        Uint8 b = Uint8( std::clamp( float( shaded & 255 ) * tb * engineContext.ambianceMul * horrorMul * museumPowerMul, 0.0f, 255.0f ) );
         return rgb( r, g, b );
         };
 
@@ -5807,7 +5919,14 @@ static void render( Engine &engineContext, float dt ) {
     renderRevolverShotEffects( engineContext, shotFx01 );
     renderSchoolSafeWeaponBlur( engineContext );
 
-    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), g_horrorDarknessOverlay + (engineContext.caveMode ? 0.05f : 0.0f) );
+    drawTranslucentBox(
+        engineContext,
+        0,
+        0,
+        RENDER_W,
+        RENDER_H,
+        rgb( 0, 0, 0 ),
+        std::clamp( g_horrorDarknessOverlay + (engineContext.caveMode ? 0.05f : 0.0f) + museumDarknessAdd, 0.0f, 0.58f ) );
 
     if (g_wakeCutsceneActive)
     {
@@ -5848,6 +5967,25 @@ static void render( Engine &engineContext, float dt ) {
     if (!overlayBusy && nearbyNote >= 0 && !g_codeEntryActive)
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 95, (RENDER_H / 2) + 85, "[E] Collect", rgb( 220, 225, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearGasCan( engineContext ))
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 122, (RENDER_H / 2) + 125, "[E] Pick Up Gas Can", rgb( 235, 215, 140 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+    }
+
+    if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearGenerator( engineContext ))
+    {
+        std::string prompt = "[E] Check Generator";
+        if (g_generatorFueled)
+        {
+            prompt = "Generator Running";
+        }
+        else if (g_gasCanCollected)
+        {
+            prompt = "[E] Fill Generator";
+        }
+        drawString16x16( engineContext, (RENDER_W / 2) - 122, (RENDER_H / 2) + 145, prompt, rgb( 255, 240, 170 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     int nearbySafe = getNearbySafe( engineContext );
@@ -6343,7 +6481,7 @@ int main( int argc, char **argv ) {
         }
         // Input
         SDL_Event ev;
-        float actualSpeed;
+        float actualSpeed = MOVE_SPEED;
 
         static float walkTime = 0.f;
         bool stepTriggered = false;
@@ -6483,6 +6621,16 @@ int main( int argc, char **argv ) {
             }
         }
 
+        if (g_powerRestoreFlickerActive)
+        {
+            g_powerRestoreFlickerTimer += dt;
+            if (g_powerRestoreFlickerTimer >= kPowerRestoreFlickerDuration)
+            {
+                g_powerRestoreFlickerActive = false;
+                g_powerRestoreFlickerTimer = 0.0f;
+            }
+        }
+
         if (g_cutsceneController.isCameraLockActive())
         {
             engineContext.pitchOffset = g_cutsceneController.forcedPitchOffset();
@@ -6514,13 +6662,13 @@ int main( int argc, char **argv ) {
             {
                 g_wakeCutsceneActive = false;
                 g_wakeCutsceneTimer = 0.0f;
+                g_cutsceneController.reset();
                 engineContext.pitchOffset = 0.0f;
             }
         }
 
         while (SDL_PollEvent( &ev ))
         {
-            actualSpeed = MOVE_SPEED;
             if (ev.type == SDL_EVENT_QUIT)
             {
                 running = false;
@@ -7080,6 +7228,60 @@ int main( int argc, char **argv ) {
                             continue;
                         }
 
+                        if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearGasCan( engineContext ))
+                        {
+                            g_gasCanCollected = true;
+                            if (g_gasCanModelIndex >= 0 && g_gasCanModelIndex < (int)g_worldModels.size())
+                            {
+                                g_worldModels[ g_gasCanModelIndex ].visible = false;
+                            }
+                            showAccessPopup( "Acquired gas can.", 1700 );
+                            triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED GAS CAN", 0.55f );
+                            continue;
+                        }
+
+                        if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearGenerator( engineContext ))
+                        {
+                            if (g_generatorFueled)
+                            {
+                                showAccessPopup( "Generator is humming.", 1200 );
+                                continue;
+                            }
+
+                            if (!g_gasCanCollected)
+                            {
+                                if (!g_generatorNeedsGasLinePlayed)
+                                {
+                                    g_generatorNeedsGasLinePlayed = true;
+                                    g_dialogue.start( {
+                                        {"Looks like it needs some gas", 2.4f}
+                                        } );
+                                }
+                                else
+                                {
+                                    showAccessPopup( "Generator is empty. Need gas can.", 1800 );
+                                }
+                                continue;
+                            }
+
+                            g_generatorFueled = true;
+                            g_gasCanCollected = false;
+                            g_powerRestoreFlickerActive = true;
+                            g_powerRestoreFlickerTimer = 0.0f;
+
+                            if (g_generatorModelIndex >= 0 && g_generatorModelIndex < (int)g_worldModels.size())
+                            {
+                                g_worldModels[ g_generatorModelIndex ].tint = rgb( 225, 225, 205 );
+                            }
+
+                            showAccessPopup( "Generator fueled. Power restored.", 2500 );
+                            triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORING POWER", 0.85f );
+                            g_dialogue.start( {
+                                {"That should get the lights back on", 2.1f}
+                                } );
+                            continue;
+                        }
+
                         int nearbyKey = getNearbyKeyPickup( engineContext );
                         if (nearbyKey >= 0)
                         {
@@ -7346,10 +7548,6 @@ int main( int argc, char **argv ) {
                             handleLevelChange( engineContext, levels, Levels::CAVE );
                         }
                     }
-                    else if (ev.key.scancode == SDL_SCANCODE_LSHIFT)
-                    {
-                        actualSpeed += 0.8f;
-                    }
                     else if (ev.key.scancode == SDL_SCANCODE_P)
                     {
                         float2 pos( engineContext.positionX, engineContext.positionY );
@@ -7407,6 +7605,10 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
+            if (ks[ SDL_SCANCODE_LSHIFT ])
+            {
+                ms += 0.8f * dt;
+            }
             if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ts = 0.0f;
@@ -7474,7 +7676,7 @@ int main( int argc, char **argv ) {
                 int t = engineContext.map.tiles[ my * engineContext.map.width + mx ];
                 if (t != 0) return false;
 
-                if (pointBlockedByWorldModel( x, y, 0.1f )) return false;
+             if (pointBlockedByWorldModel( x, y, 0.1f )) return false;
 
 
                 /*
