@@ -135,11 +135,16 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Constants.h" />
+    <ClInclude Include="CutsceneController.h" />
+    <ClInclude Include="DialogueSystem.h" />
+    <ClInclude Include="EditorModelTools.h" />
+    <ClInclude Include="GameDataTypes.h" />
     <ClInclude Include="GameEngine.h" />
     <ClInclude Include="GpuPropSystem.h" />
     <ClInclude Include="Includes.h" />
     <ClInclude Include="MapHelpers.h" />
     <ClInclude Include="MathHelpers.h" />
+    <ClInclude Include="ModelLoadingTools.h" />
     <ClInclude Include="MusicSystem.h" />
     <ClInclude Include="PhysicsHelpers.h" />
     <ClInclude Include="RendererHelpers.h" />
