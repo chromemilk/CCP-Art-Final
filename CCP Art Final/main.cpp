@@ -9,6 +9,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <array>
+#include <deque>
 #include <memory>
 #include <limits>
 #include <functional>
@@ -70,6 +71,15 @@ struct CaveQuizQuestion
     std::string question;
     std::array<std::string, 4> options;
     int correctOption = 0;
+};
+
+struct MindTrapPhase
+{
+    std::string prompt;
+    std::array<std::string, 3> commands;
+    std::array<std::string, 3> options;
+    std::array<std::string, 3> results;
+    int surrenderOption = -1;
 };
 
 struct ClueNote
@@ -137,6 +147,30 @@ static bool g_caveQuizActive = false;
 static bool g_caveQuizPassed = false;
 static int g_caveQuizQuestionIndex = 0;
 static std::vector<CaveQuizQuestion> g_caveQuiz;
+static std::vector<MindTrapPhase> g_mindTrapPhases;
+static bool g_mindTrapActive = false;
+static bool g_mindTrapTriggerConsumed = false;
+static int g_mindTrapPhaseIndex = 0;
+static bool g_mindTrapShowingResult = false;
+static std::string g_mindTrapLastResult;
+static float g_mindTrapResultTimer = 0.0f;
+static float g_mindTrapResultDuration = 2.8f;
+static float g_mindTrapFlickerTimer = 0.0f;
+static float g_mindTrapWhiteFlashTimer = 0.0f;
+static bool g_mindTrapAdvanceOnResult = false;
+static bool g_mindTrapExitOnResult = false;
+static bool g_mindTrapReadyToExit = false;
+static std::vector<std::string> g_mindTrapTerminalLog;
+static std::deque<std::string> g_mindTrapTypeQueue;
+static std::string g_mindTrapTypingLine;
+static size_t g_mindTrapTypingChars = 0;
+static float g_mindTrapTypingAccumulator = 0.0f;
+static float g_mindTrapTypingCharsPerSecond = 54.0f;
+static float g_mindTrapPostLinePause = 0.0f;
+static bool g_mindTrapAwaitingChoice = false;
+static int g_mindTrapSelectedOption = 0;
+static bool g_mindTrapAdvanceAfterResult = false;
+static bool g_mindTrapFinalizeAfterResult = false;
 static bool g_museumPuzzleInitialized = false;
 static bool g_restorationWingUnlocked = false;
 static bool g_unlockAllDoorsOverride = false;
@@ -466,6 +500,14 @@ static sf::SoundBuffer g_shellDropBuffer;
 static bool g_weaponSoundBuffersReady = false;
 static std::vector<std::shared_ptr<sf::Sound>> g_activeWeaponSounds;
 static std::vector<float> g_pendingShellDropTimers;
+static std::string g_generatorStartSoundBaseFolder;
+static sf::SoundBuffer g_generatorStartBuffer;
+static bool g_generatorStartBufferReady = false;
+static std::shared_ptr<sf::Sound> g_generatorStartSound;
+static float g_generatorStartSoundTimer = 0.0f;
+static constexpr float kGeneratorStartSoundDuration = 3.0f;
+static constexpr float kGeneratorStartFadeOutDuration = 1.0f;
+static constexpr float kGeneratorStartSoundVolume = 100.0f;
 static sf::SoundBuffer g_whisperBuffer;
 static bool g_whisperBufferReady = false;
 static std::string g_whisperBaseFolder;
@@ -528,6 +570,24 @@ static void playWeaponBufferedSound( const sf::SoundBuffer &buffer, float volume
     g_activeWeaponSounds.push_back( snd );
 }
 
+static void refreshGeneratorStartSoundBuffer( const std::string &baseFolder ) {
+    if (g_generatorStartBufferReady && g_generatorStartSoundBaseFolder == baseFolder) return;
+
+    g_generatorStartSoundBaseFolder = baseFolder;
+    g_generatorStartBufferReady = g_generatorStartBuffer.loadFromFile( baseFolder + "\\GeneratorStart.wav" );
+}
+
+static void playGeneratorStartSound( const std::string &baseFolder ) {
+    refreshGeneratorStartSoundBuffer( baseFolder );
+    if (!g_generatorStartBufferReady) return;
+
+    g_generatorStartSound = std::make_shared<sf::Sound>( g_generatorStartBuffer );
+    g_generatorStartSound->setVolume( kGeneratorStartSoundVolume );
+    g_generatorStartSound->play();
+    g_activeWeaponSounds.push_back( g_generatorStartSound );
+    g_generatorStartSoundTimer = kGeneratorStartSoundDuration;
+}
+
 static void playRevolverShotSequence( const std::string &baseFolder ) {
     if (config::schoolMode)
     {
@@ -569,7 +629,7 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
         g_whisperBaseFolder = g_currentLevelFolder;
         g_whisperBufferReady = g_whisperBuffer.loadFromFile( g_currentLevelFolder + "\\whisper.wav" );
         g_whisperTimer = 0.0f;
-        g_whisperNextDelay = randomRange01( 20.0f, 34.0f );
+        g_whisperNextDelay = g_mindTrapActive ? randomRange01( 2.4f, 5.2f ) : randomRange01( 20.0f, 34.0f );
     }
 
     if (!g_whisperBufferReady) return;
@@ -578,19 +638,20 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
     if (g_whisperTimer < g_whisperNextDelay) return;
 
     g_whisperTimer = 0.0f;
-    g_whisperNextDelay = randomRange01( 36.0f, 64.0f );
+    g_whisperNextDelay = g_mindTrapActive ? randomRange01( 1.2f, 3.2f ) : randomRange01( 36.0f, 64.0f );
 
-    playWeaponBufferedSound( g_whisperBuffer, 9.0f );
+    playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 16.0f : 9.0f );
 
     const bool shouldSpeak = (std::rand() % 100) < 70;
     const bool canSpeak =
+        (g_mindTrapActive ||
         !g_dialogue.isActive() &&
         !g_cutsceneController.isCameraLockActive() &&
         !g_revolverInspectCutsceneActive &&
         !g_wakeCutsceneActive &&
         !g_codeEntryActive &&
         !g_notesOpen &&
-        !g_caveQuizActive;
+        !g_caveQuizActive);
     if (!shouldSpeak || !canSpeak) return;
 
     static const std::array<std::string, 6> whisperLines = {
@@ -1764,7 +1825,8 @@ enum GameState
 {
     STATE_MENU,
     STATE_GAME,
-    STATE_ENDING
+    STATE_ENDING,
+    STATE_MIND_TRAP
 };
 
 static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) {
@@ -2014,6 +2076,110 @@ static void renderCaveQuiz( Engine &engineContext ) {
     }
 
     drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "Press 1-4 To Answer   ESC To Cancel", rgb( 130, 130, 145 ), 1, 1, 1, false );
+}
+
+static void renderMindTrapInterface( Engine &engineContext ) {
+    if (!g_mindTrapActive) return;
+    if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
+
+    drawTextBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
+
+    const float flickerNoise =
+        0.82f +
+        0.12f * std::sin( g_mindTrapFlickerTimer * 33.0f ) +
+        0.08f * std::sin( g_mindTrapFlickerTimer * 71.0f );
+    const float flicker = std::clamp( flickerNoise, 0.38f, 1.0f );
+    const Uint8 green = Uint8( std::clamp( 180.0f * flicker, 42.0f, 225.0f ) );
+    const Uint8 greenDim = Uint8( std::clamp( 120.0f * flicker, 24.0f, 180.0f ) );
+    const Uint32 mainText = rgb( 0, green, 22 );
+    const Uint32 dimText = rgb( 0, greenDim, 12 );
+    const Uint32 borderText = rgb( 0, Uint8( std::clamp( green + 18, 0, 255 ) ), 28 );
+
+    for (int y = 8; y < RENDER_H; y += 4)
+    {
+        if (((y / 4) % 2) == 0)
+        {
+            drawTranslucentBox( engineContext, 0, y, RENDER_W, 1, rgb( 0, 44, 0 ), 0.16f );
+        }
+    }
+
+    const bool twitch = (std::sin( g_mindTrapFlickerTimer * 19.0f ) > 0.94f);
+    const int jitterX = twitch ? ((std::rand() % 3) - 1) : 0;
+
+    int panelX = 52 + jitterX;
+    int panelY = 54;
+    int panelW = RENDER_W - 104;
+    int panelH = RENDER_H - 108;
+
+    drawTextBox( engineContext, panelX, panelY, panelW, panelH, rgb( 0, 0, 0 ), borderText );
+
+    const std::string header = "INTERNAL DIAGNOSTIC // CONSCIOUSNESS THREAD";
+    drawString16x16( engineContext, panelX + 18, panelY + 16, header, mainText, panelW - 36, 1, 1, false );
+
+    const std::string phaseLabel = "PHASE " + std::to_string( g_mindTrapPhaseIndex + 1 ) + "/" + std::to_string( g_mindTrapPhases.size() );
+    drawStringTinyScaled( engineContext, panelX + panelW - 132, panelY + 22, phaseLabel, dimText, 1, 1, 1, false );
+
+    const int bodyX = panelX + 18;
+    const int bodyY = panelY + 50;
+    const int bodyW = panelW - 36;
+    const int bodyH = panelH - 170;
+    drawTextBox( engineContext, bodyX - 4, bodyY - 4, bodyW + 8, bodyH + 8, rgb( 0, 0, 0 ), rgb( 0, greenDim, 10 ) );
+
+    const int lineStep = 22;
+    const int visibleLines = std::max( 1, bodyH / lineStep );
+    int start = 0;
+    if ((int)g_mindTrapTerminalLog.size() > visibleLines)
+    {
+        start = (int)g_mindTrapTerminalLog.size() - visibleLines;
+    }
+
+    int ty = bodyY;
+    for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
+    {
+        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTerminalLog[ i ], dimText, 2, 1, 1, false );
+        ty += lineStep;
+        if (ty > bodyY + bodyH - lineStep) break;
+    }
+
+    if (!g_mindTrapTypingLine.empty() && ty <= bodyY + bodyH - lineStep)
+    {
+        const size_t count = std::min( g_mindTrapTypingChars, g_mindTrapTypingLine.size() );
+        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTypingLine.substr( 0, count ), mainText, 2, 1, 1, false );
+    }
+
+    const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
+    int cmdY = panelY + panelH - 82;
+    if (g_mindTrapAwaitingChoice)
+    {
+        const bool cursorOn = ((SDL_GetTicks() / 420) % 2) == 0;
+        drawTextBox( engineContext, bodyX - 4, cmdY - 6, bodyW + 8, 76, rgb( 0, 0, 0 ), rgb( 0, greenDim, 12 ) );
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const bool selected = (i == g_mindTrapSelectedOption);
+            const std::string marker = selected ? ">> " : "   ";
+            const Uint32 col = selected ? mainText : dimText;
+            drawStringTinyScaled( engineContext, bodyX, cmdY + i * 20, marker + phase.commands[ i ], col, 2, 1, 1, false );
+        }
+
+        std::string line = "MINDTRAP> " + phase.commands[ g_mindTrapSelectedOption ] + (cursorOn ? " _" : "  ");
+        drawStringTinyScaled( engineContext, bodyX, cmdY + 60, line, mainText, 2, 1, 1, false );
+    }
+    else if (g_mindTrapReadyToExit)
+    {
+        drawStringTinyScaled( engineContext, bodyX, cmdY, "SYNC COMPLETE... TRANSFERRING CONTEXT", mainText, 2, 1, 1, false );
+    }
+    else
+    {
+        drawStringTinyScaled( engineContext, bodyX, cmdY, "TERMINAL BUSY...", dimText, 2, 1, 1, false );
+    }
+
+    if (g_mindTrapWhiteFlashTimer > 0.0f)
+    {
+        const float flash = std::clamp( g_mindTrapWhiteFlashTimer / 0.65f, 0.0f, 1.0f );
+        const float alpha = std::clamp( std::pow( flash, 0.65f ), 0.0f, 1.0f );
+        drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 255, 255, 255 ), alpha );
+    }
 }
 
 static void renderInteractionAnimation( Engine &engineContext ) {
@@ -2623,6 +2789,37 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
+    g_mindTrapActive = false;
+    g_mindTrapTriggerConsumed = false;
+    g_mindTrapPhaseIndex = 0;
+    g_mindTrapShowingResult = false;
+    g_mindTrapLastResult.clear();
+    g_mindTrapResultTimer = 0.0f;
+    g_mindTrapFlickerTimer = 0.0f;
+    g_mindTrapWhiteFlashTimer = 0.0f;
+    g_mindTrapAdvanceOnResult = false;
+    g_mindTrapExitOnResult = false;
+    g_mindTrapReadyToExit = false;
+    g_mindTrapTerminalLog.clear();
+    g_mindTrapTypeQueue.clear();
+    g_mindTrapTypingLine.clear();
+    g_mindTrapTypingChars = 0;
+    g_mindTrapTypingAccumulator = 0.0f;
+    g_mindTrapPostLinePause = 0.0f;
+    g_mindTrapAwaitingChoice = false;
+    g_mindTrapSelectedOption = 0;
+    g_mindTrapAdvanceAfterResult = false;
+    g_mindTrapFinalizeAfterResult = false;
+    g_mindTrapTerminalLog.clear();
+    g_mindTrapTypeQueue.clear();
+    g_mindTrapTypingLine.clear();
+    g_mindTrapTypingChars = 0;
+    g_mindTrapTypingAccumulator = 0.0f;
+    g_mindTrapPostLinePause = 0.0f;
+    g_mindTrapAwaitingChoice = false;
+    g_mindTrapSelectedOption = 0;
+    g_mindTrapAdvanceAfterResult = false;
+    g_mindTrapFinalizeAfterResult = false;
     g_restorationWingUnlocked = false;
     g_directorDeskUnlocked = false;
     g_combatState = {};
@@ -2637,6 +2834,8 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_revolverInspectModelIndex = -1;
     g_revolverInspectBaseYaw = 0.0f;
     g_activeWeaponSounds.clear();
+    g_generatorStartSound.reset();
+    g_generatorStartSoundTimer = 0.0f;
     g_pendingShellDropTimers.clear();
     resetWhisperAmbience();
     g_firstLockedDoorDialogueShown = false;
@@ -2871,6 +3070,27 @@ g_codeEntryBuffer.clear();
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
     g_caveQuiz.clear();
+    g_mindTrapActive = false;
+    g_mindTrapTriggerConsumed = false;
+    g_mindTrapPhaseIndex = 0;
+    g_mindTrapShowingResult = false;
+    g_mindTrapLastResult.clear();
+    g_mindTrapResultTimer = 0.0f;
+    g_mindTrapFlickerTimer = 0.0f;
+    g_mindTrapWhiteFlashTimer = 0.0f;
+    g_mindTrapAdvanceOnResult = false;
+    g_mindTrapExitOnResult = false;
+    g_mindTrapReadyToExit = false;
+    g_mindTrapTerminalLog.clear();
+    g_mindTrapTypeQueue.clear();
+    g_mindTrapTypingLine.clear();
+    g_mindTrapTypingChars = 0;
+    g_mindTrapTypingAccumulator = 0.0f;
+    g_mindTrapPostLinePause = 0.0f;
+    g_mindTrapAwaitingChoice = false;
+    g_mindTrapSelectedOption = 0;
+    g_mindTrapAdvanceAfterResult = false;
+    g_mindTrapFinalizeAfterResult = false;
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
     g_restorationWingUnlocked = false;
@@ -2887,6 +3107,8 @@ g_codeEntryBuffer.clear();
     g_revolverInspectModelIndex = -1;
     g_revolverInspectBaseYaw = 0.0f;
     g_activeWeaponSounds.clear();
+    g_generatorStartSound.reset();
+    g_generatorStartSoundTimer = 0.0f;
     g_pendingShellDropTimers.clear();
     resetWhisperAmbience();
     g_firstLockedDoorDialogueShown = false;
@@ -3139,6 +3361,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     g_revolverAiming = false;
     g_revolverRecoilTimer = 0.0f;
     g_activeWeaponSounds.clear();
+    g_generatorStartSound.reset();
+    g_generatorStartSoundTimer = 0.0f;
     g_pendingShellDropTimers.clear();
     g_editorSelectedModel = -1;
 	engineContext.hasWallCracks = false;
@@ -3510,6 +3734,310 @@ static void startNewMuseumRun( Engine &engineContext, std::vector<LevelDef> leve
     g_runElapsedSeconds = 0.0f;
     handleLevelChange( engineContext, levels, Levels::MUSEUM );
     startWakeCutscene( engineContext );
+}
+
+static std::string normalizeMindTrapTerminalText( std::string s );
+
+static void pushMindTrapTerminalLine( const std::string &line ) {
+    g_mindTrapTerminalLog.push_back( normalizeMindTrapTerminalText( line ) );
+    constexpr size_t kMaxTerminalLines = 120;
+    if (g_mindTrapTerminalLog.size() > kMaxTerminalLines)
+    {
+        g_mindTrapTerminalLog.erase( g_mindTrapTerminalLog.begin(), g_mindTrapTerminalLog.begin() + (g_mindTrapTerminalLog.size() - kMaxTerminalLines) );
+    }
+}
+
+static std::string normalizeMindTrapTerminalText( std::string s ) {
+    for (char &c : s)
+    {
+        c = char( std::toupper( unsigned char( c ) ) );
+        const bool ok =
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == ' ' || c == '.' || c == ',' || c == '-' || c == '_' || c == '/' ||
+            c == '>' || c == '<' || c == '[' || c == ']' || c == '(' || c == ')';
+        if (!ok) c = ' ';
+    }
+    return s;
+}
+
+static void queueMindTrapTerminalLine( const std::string &line ) {
+    g_mindTrapTypeQueue.push_back( normalizeMindTrapTerminalText( line ) );
+}
+
+static void queueMindTrapPhasePrompt() {
+    if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
+
+    const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
+    queueMindTrapTerminalLine( "------------------------------------------------------------" );
+    queueMindTrapTerminalLine( phase.prompt );
+    queueMindTrapTerminalLine( phase.commands[ 0 ] + "   :: " + phase.options[ 0 ] );
+    queueMindTrapTerminalLine( phase.commands[ 1 ] + "   :: " + phase.options[ 1 ] );
+    queueMindTrapTerminalLine( phase.commands[ 2 ] + "   :: " + phase.options[ 2 ] );
+
+    g_mindTrapAwaitingChoice = false;
+    g_mindTrapSelectedOption = std::clamp( g_mindTrapSelectedOption, 0, 2 );
+}
+
+static bool mindTrapTypewriterIdle() {
+    return g_mindTrapTypeQueue.empty() && g_mindTrapTypingLine.empty();
+}
+
+static void updateMindTrapTypewriter( float dt ) {
+    if (g_mindTrapPostLinePause > 0.0f)
+    {
+        g_mindTrapPostLinePause = std::max( 0.0f, g_mindTrapPostLinePause - dt );
+        return;
+    }
+
+    if (g_mindTrapTypingLine.empty())
+    {
+        if (g_mindTrapTypeQueue.empty()) return;
+        g_mindTrapTypingLine = g_mindTrapTypeQueue.front();
+        g_mindTrapTypeQueue.pop_front();
+        g_mindTrapTypingChars = 0;
+        g_mindTrapTypingAccumulator = 0.0f;
+    }
+
+    g_mindTrapTypingAccumulator += dt * g_mindTrapTypingCharsPerSecond;
+    while (g_mindTrapTypingAccumulator >= 1.0f && g_mindTrapTypingChars < g_mindTrapTypingLine.size())
+    {
+        ++g_mindTrapTypingChars;
+        g_mindTrapTypingAccumulator -= 1.0f;
+    }
+
+    if (g_mindTrapTypingChars >= g_mindTrapTypingLine.size())
+    {
+        pushMindTrapTerminalLine( g_mindTrapTypingLine );
+        g_mindTrapTypingLine.clear();
+        g_mindTrapTypingChars = 0;
+        g_mindTrapTypingAccumulator = 0.0f;
+        g_mindTrapPostLinePause = 0.055f;
+    }
+}
+
+static void initMindTrapPhases() {
+    if (!g_mindTrapPhases.empty()) return;
+
+    g_mindTrapPhases = {
+        {
+            "PHASE 1 // PANIC // MOTOR LOCK CONFIRMED. INPUT SIGNAL?",
+            {
+                "RUN PANIC.MOTOR",
+                "RUN PANIC.VOICE",
+                "RUN PANIC.MEMORY"
+            },
+            {
+                "Force limbs against the stillness",
+                "Attempt a vocal distress call",
+                "Trace the last safe memory"
+            },
+            {
+                "MOTION REQUEST DENIED. JOINTS RETURN 0 RESPONSE.",
+                "VOCAL CHANNEL MUTED. NO AIR VOLUME REGISTERED.",
+                "MEMORY THREAD FRAGMENTED. LOCATION TAG: MUSEUM // UNKNOWN."
+            },
+            -1
+        },
+        {
+            "PHASE 2 // AUDIT // CORE TEMP FALLING. PRESERVATION CYCLE ACTIVE.",
+            {
+                "RUN AUDIT.REJECT",
+                "RUN AUDIT.INTERNAL",
+                "RUN AUDIT.ACCEPT"
+            },
+            {
+                "Reject the scan as invalid",
+                "Run an internal body check",
+                "Accept diagnostic output"
+            },
+            {
+                "ERROR: DENIAL FLAGGED AS NON-CLINICAL RESPONSE.",
+                "NERVE MAP UPDATED: COLD STABLE // PAIN SUBSIDED.",
+                "PRESERVATION STATUS: OPTIMAL. HUMAN VARIANCE MINIMAL."
+            },
+            -1
+        },
+        {
+            "PHASE 3 // DISSOCIATION // SUBJECT REFERENCE SHIFTING.",
+            {
+                "SET IDENTITY.FIRST_PERSON",
+                "SET IDENTITY.OBJECT_VIEW",
+                "SET IDENTITY.ACQUISITION"
+            },
+            {
+                "Reassert ownership with 'I'",
+                "Observe body as an object",
+                "Adopt curator catalog label"
+            },
+            {
+                "IDENTITY TOKEN UNSTABLE. PRONOUN LOCK FAILED.",
+                "OBSERVER MODE ENABLED. SUBJECT DISTANCE INCREASED.",
+                "CATALOG INDEX WRITTEN: ACQUISITION // DISPLAY READY."
+            },
+            -1
+        },
+        {
+            "PHASE 4 // THE SYNC // FINAL DIRECTIVE: ENTER STILLNESS.",
+            {
+                "EXEC SYNC.RESIST",
+                "EXEC SYNC.HOLD_FEAR",
+                "EXEC SYNC.SURRENDER"
+            },
+            {
+                "Fight the frame and refuse",
+                "Hold fear and wait for rescue",
+                "Surrender to the stillness"
+            },
+            {
+                "RESISTANCE LOOP DETECTED. CYCLE RESTARTED.",
+                "HOPE SIGNAL EXPIRED. NO EXTERNAL HANDSHAKE FOUND.",
+                "SYNC ACCEPTED. STILLNESS IS NOW PRIMARY PROCESS."
+            },
+            2
+        }
+    };
+}
+
+static bool isPlayerNearMindTrapTrigger( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::MUSEUM_UPPER) return false;
+
+    const bool nearSealedDoor = isPlayerNearPoint( engineContext, 16.4f, 9.4f, 1.25f );
+    const bool nearSolventVault = isPlayerNearPoint( engineContext, 11.2f, 14.4f, 1.15f );
+    return nearSealedDoor || nearSolventVault;
+}
+
+static void startMindTrapSequence( Engine &engineContext ) {
+    initMindTrapPhases();
+
+    g_mindTrapActive = true;
+    g_mindTrapTriggerConsumed = true;
+    g_mindTrapPhaseIndex = 0;
+    g_mindTrapShowingResult = false;
+    g_mindTrapLastResult.clear();
+    g_mindTrapResultTimer = 0.0f;
+    g_mindTrapFlickerTimer = 0.0f;
+    g_mindTrapWhiteFlashTimer = 0.0f;
+    g_mindTrapAdvanceOnResult = false;
+    g_mindTrapExitOnResult = false;
+    g_mindTrapReadyToExit = false;
+
+    g_notesOpen = false;
+    g_caveQuizActive = false;
+    g_codeEntryActive = false;
+    g_interactionAnim.active = false;
+    g_levelTransition.active = false;
+    g_revolverAiming = false;
+    g_dialogue.clear();
+
+    engineContext.placardOpen = false;
+    engineContext.openArtId = -1;
+    engineContext.statueChatActive = false;
+
+    queueMindTrapTerminalLine( "[BOOT] INTERNAL DIAGNOSTIC CONSOLE" );
+    queueMindTrapTerminalLine( "[CHECK] SENSORY FEED ............. OFFLINE" );
+    queueMindTrapTerminalLine( "[CHECK] MOTOR CONTROL ............ LOCKED" );
+    queueMindTrapTerminalLine( "[CHECK] PRESERVATION PROCESS ..... ACTIVE" );
+    queueMindTrapTerminalLine( "" );
+    queueMindTrapPhasePrompt();
+}
+
+static void commitMindTrapChoice( int choiceIndex ) {
+    if (!g_mindTrapActive || g_mindTrapShowingResult || g_mindTrapReadyToExit || !g_mindTrapAwaitingChoice) return;
+    if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
+    if (choiceIndex < 0 || choiceIndex >= 3) return;
+
+    const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
+    g_mindTrapAwaitingChoice = false;
+    g_mindTrapSelectedOption = choiceIndex;
+
+    pushMindTrapTerminalLine( normalizeMindTrapTerminalText( "> " + phase.commands[ choiceIndex ] ) );
+    pushMindTrapTerminalLine( "[ENTER]" );
+
+    g_mindTrapLastResult = phase.results[ choiceIndex ];
+    queueMindTrapTerminalLine( g_mindTrapLastResult );
+    g_mindTrapResultTimer = 1.25f;
+    g_mindTrapShowingResult = true;
+    g_mindTrapAdvanceAfterResult = false;
+    g_mindTrapFinalizeAfterResult = false;
+
+    const bool finalPhase = (g_mindTrapPhaseIndex == (int)g_mindTrapPhases.size() - 1);
+    if (finalPhase)
+    {
+        if (choiceIndex == phase.surrenderOption)
+        {
+            queueMindTrapTerminalLine( "SYNC TOKEN ACCEPTED." );
+            g_mindTrapFinalizeAfterResult = true;
+        }
+        else
+        {
+            queueMindTrapTerminalLine( "SYNC REJECTED. REQUIRED COMMAND: SURRENDER." );
+        }
+    }
+    else
+    {
+        g_mindTrapAdvanceAfterResult = true;
+    }
+}
+
+static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef> &levels, GameState &currentState, float dt ) {
+    if (!g_mindTrapActive) return;
+
+    g_mindTrapFlickerTimer += dt;
+    updateMindTrapTypewriter( dt );
+
+    if (g_mindTrapShowingResult)
+    {
+        if (mindTrapTypewriterIdle())
+        {
+            g_mindTrapResultTimer -= dt;
+        }
+
+        if (g_mindTrapResultTimer <= 0.0f)
+        {
+            g_mindTrapShowingResult = false;
+
+            if (g_mindTrapAdvanceAfterResult)
+            {
+                g_mindTrapPhaseIndex = std::min( g_mindTrapPhaseIndex + 1, (int)g_mindTrapPhases.size() - 1 );
+                queueMindTrapTerminalLine( "" );
+                queueMindTrapPhasePrompt();
+            }
+            else if (g_mindTrapFinalizeAfterResult)
+            {
+                g_mindTrapReadyToExit = true;
+                g_mindTrapWhiteFlashTimer = 0.01f;
+            }
+            else
+            {
+                queueMindTrapTerminalLine( "" );
+                queueMindTrapPhasePrompt();
+            }
+
+            g_mindTrapAdvanceAfterResult = false;
+            g_mindTrapFinalizeAfterResult = false;
+        }
+    }
+
+    if (!g_mindTrapShowingResult && !g_mindTrapReadyToExit && mindTrapTypewriterIdle())
+    {
+        g_mindTrapAwaitingChoice = true;
+    }
+
+    if (g_mindTrapReadyToExit)
+    {
+        g_mindTrapWhiteFlashTimer += dt;
+        if (g_mindTrapWhiteFlashTimer >= 0.68f)
+        {
+            g_mindTrapActive = false;
+            g_mindTrapReadyToExit = false;
+            g_mindTrapShowingResult = false;
+            g_mindTrapWhiteFlashTimer = 0.0f;
+
+            handleLevelChange( engineContext, levels, Levels::TRANSITION );
+            currentState = STATE_GAME;
+        }
+    }
 }
 
 static bool isPlayerNearStatue( Engine const &engineContext ) {
@@ -5086,7 +5614,6 @@ static void render( Engine &engineContext, float dt ) {
     (void)dt;
 
     const float museumPowerMul = museumPowerLightMultiplierForLevel( engineContext.currentLevel );
-    const float museumDarknessAdd = museumPowerDarknessAddForLevel( engineContext.currentLevel );
 
     const float shotFx01 = std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f );
     const float shotShakeWave = std::pow( shotFx01, 0.56f );
@@ -5097,9 +5624,6 @@ static void render( Engine &engineContext, float dt ) {
     const float recoilKickPitch = shotFx01 * 6.0f;
     const float effectivePitchOffset = engineContext.pitchOffset + shotPitchShake + recoilKickPitch;
     g_lastEffectivePitchOffset = effectivePitchOffset;
-
-    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
-    bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
 
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
@@ -5870,19 +6394,25 @@ static void render( Engine &engineContext, float dt ) {
     */
 
 
+}
+
+static void renderGameplayUiPass( Engine &engineContext ) {
+    const bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
+    const bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
+    const float shotFx01 = std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f );
+    const float museumDarknessAdd = museumPowerDarknessAddForLevel( engineContext.currentLevel );
+
     int lookingAtArt = pickArtworkUnderCrosshair( engineContext );
 
-    // Get distance to artwork that were looking at 
-
-	float distanceToArt = 0.0f; 
+    float distanceToArt = 0.0f;
     if (lookingAtArt != -1)
     {
-        const Artwork* art = nullptr;
+        const Artwork *art = nullptr;
         for (const auto &artWork : engineContext.artworks)
         {
             if (artWork.id == lookingAtArt)
             {
-                art = &artWork; 
+                art = &artWork;
                 break;
             }
         }
@@ -5892,18 +6422,16 @@ static void render( Engine &engineContext, float dt ) {
             float dy = (art->wy + 0.5f) - engineContext.positionY;
             distanceToArt = std::sqrt( dx * dx + dy * dy );
         }
-	}
+    }
 
-
-
-    if (!overlayBusy && lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5)
+    if (!overlayBusy && lookingAtArt != -1 && engineContext.placardOpen == false && engineContext.journalOpen == false && distanceToArt < 2.5f)
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 50, (RENDER_H / 2) + 5, "[E] To View", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (!overlayBusy && engineContext.inRangeOfStatue && !engineContext.statueChatActive)
     {
-		drawString16x16( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 70, (RENDER_H / 2) + 25, "[E] To Talk", rgb( 220, 220, 220 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (!overlayBusy && engineContext.showHelp)
@@ -5948,14 +6476,11 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    // Debug: position and FPS
-    drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
-    // Draw FPS in top-left
+    drawStringTinyScaled( engineContext, 12, RENDER_H - 20, "X: " + to_string( engineContext.positionX ) + " " + "Y: " + to_string( engineContext.positionY ), rgb( 0, 0, 0 ), 1, 1, 1, false );
     {
         int fpsInt = (int)(engineContext.fps + 0.5f);
-        drawStringTinyScaled(engineContext, 12, RENDER_H - 50, string("FPS: ") + to_string(fpsInt), rgb(200, 200, 200), 1, 1, 1, false);
+        drawStringTinyScaled( engineContext, 12, RENDER_H - 50, string( "FPS: " ) + to_string( fpsInt ), rgb( 200, 200, 200 ), 1, 1, 1, false );
     }
-
 
     int nearbyKey = getNearbyKeyPickup( engineContext );
     if (!overlayBusy && nearbyKey >= 0 && !g_codeEntryActive)
@@ -6019,6 +6544,10 @@ static void render( Engine &engineContext, float dt ) {
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, "[E] Back To Ground Floor", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
+    if (!overlayBusy && !g_mindTrapTriggerConsumed && isPlayerNearMindTrapTrigger( engineContext ))
+    {
+        drawString16x16( engineContext, (RENDER_W / 2) - 190, (RENDER_H / 2) + 145, "[E] Enter Solvent Diagnostic", rgb( 120, 235, 140 ), RENDER_W, 1, 2, true, rgb( 10, 25, 10 ) );
+    }
 
     int doorTx = 0, doorTy = 0;
     if (isMuseumLikeLevel( engineContext.currentLevel ) && getDoorAheadTile( engineContext, doorTx, doorTy ))
@@ -6046,7 +6575,7 @@ static void render( Engine &engineContext, float dt ) {
         {
             if (artWork.id == engineContext.openArtId)
             {
-                art = &artWork; 
+                art = &artWork;
                 break;
             }
         }
@@ -6057,12 +6586,9 @@ static void render( Engine &engineContext, float dt ) {
         renderCompass( engineContext );
     }
 
-
-    if (art) 
+    if (art)
     {
-        
         renderPolishedPlacard( engineContext );
-
     }
     if (engineContext.statueChatActive)
     {
@@ -6072,9 +6598,9 @@ static void render( Engine &engineContext, float dt ) {
     if (!cutsceneHudSuppressed && (engineContext.currentLevel == Levels::MUSEUM || engineContext.currentLevel == Levels::MUSEUM_UPPER))
     {
         renderObjectives( engineContext );
-        renderGalleryCard( engineContext ); 
+        renderGalleryCard( engineContext );
     }
-    
+
     renderCaveHUD( engineContext );
     renderHeldRevolver( engineContext );
 
@@ -6093,8 +6619,6 @@ static void render( Engine &engineContext, float dt ) {
     renderInteractionAnimation( engineContext );
     renderLevelTransitionOverlay( engineContext );
     renderDialogueSubtitle( engineContext );
-
-    
 }
 static void renderMenu(
     Engine &engineContext,
@@ -6523,9 +7047,14 @@ int main( int argc, char **argv ) {
         updateMusicStream();
         g_dialogue.update( dt );
         g_cutsceneController.update( engineContext, g_dialogue, dt );
-        if (currentState == STATE_GAME)
+        if (currentState == STATE_GAME || currentState == STATE_MIND_TRAP)
         {
             updateWhisperAmbience( engineContext, dt );
+        }
+
+        if (currentState == STATE_MIND_TRAP)
+        {
+            updateMindTrapSequence( engineContext, levels, currentState, dt );
         }
 
         g_revolverShotCooldown = std::max( 0.0f, g_revolverShotCooldown - dt );
@@ -6545,6 +7074,28 @@ int main( int argc, char **argv ) {
                 }
                 g_pendingShellDropTimers.erase( g_pendingShellDropTimers.begin() + i );
             }
+        }
+
+        if (g_generatorStartSound && g_generatorStartSound->getStatus() == sf::SoundSource::Status::Playing)
+        {
+            g_generatorStartSoundTimer = std::max( 0.0f, g_generatorStartSoundTimer - dt );
+
+            if (g_generatorStartSoundTimer <= kGeneratorStartFadeOutDuration)
+            {
+                const float fadeT = std::clamp( g_generatorStartSoundTimer / kGeneratorStartFadeOutDuration, 0.0f, 1.0f );
+                g_generatorStartSound->setVolume( kGeneratorStartSoundVolume * fadeT );
+            }
+
+            if (g_generatorStartSoundTimer <= 0.0f)
+            {
+                g_generatorStartSound->stop();
+                g_generatorStartSound.reset();
+            }
+        }
+        else
+        {
+            g_generatorStartSoundTimer = 0.0f;
+            g_generatorStartSound.reset();
         }
 
         g_activeWeaponSounds.erase(
@@ -7214,6 +7765,13 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
+                        if (!g_mindTrapTriggerConsumed && isPlayerNearMindTrapTrigger( engineContext ))
+                        {
+                            startMindTrapSequence( engineContext );
+                            currentState = STATE_MIND_TRAP;
+                            continue;
+                        }
+
                         if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
                         {
                             triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ASCENDING TO UPPER GALLERY", 0.9f );
@@ -7268,6 +7826,7 @@ int main( int argc, char **argv ) {
                             g_gasCanCollected = false;
                             g_powerRestoreFlickerActive = true;
                             g_powerRestoreFlickerTimer = 0.0f;
+                            playGeneratorStartSound( levels[ engineContext.currentLevel ].folder );
 
                             if (g_generatorModelIndex >= 0 && g_generatorModelIndex < (int)g_worldModels.size())
                             {
@@ -7599,6 +8158,31 @@ int main( int argc, char **argv ) {
                     }
                 }
             }
+            else if (currentState == STATE_MIND_TRAP)
+            {
+                if (ev.type == SDL_EVENT_KEY_DOWN)
+                {
+                    if ((ev.key.key == SDLK_UP || ev.key.key == SDLK_W) && g_mindTrapAwaitingChoice)
+                    {
+                        g_mindTrapSelectedOption = (g_mindTrapSelectedOption + 2) % 3;
+                    }
+                    else if ((ev.key.key == SDLK_DOWN || ev.key.key == SDLK_S) && g_mindTrapAwaitingChoice)
+                    {
+                        g_mindTrapSelectedOption = (g_mindTrapSelectedOption + 1) % 3;
+                    }
+                    else if ((ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER) && g_mindTrapAwaitingChoice)
+                    {
+                        commitMindTrapChoice( g_mindTrapSelectedOption );
+                    }
+                    else if (ev.key.key == SDLK_ESCAPE && !g_mindTrapReadyToExit && mindTrapTypewriterIdle())
+                    {
+                        g_mindTrapAwaitingChoice = false;
+                        pushMindTrapTerminalLine( "> EXIT" );
+                        pushMindTrapTerminalLine( "[ENTER]" );
+                        queueMindTrapTerminalLine( "EXIT COMMAND DENIED. COMPLETE THE SYNC." );
+                    }
+                }
+            }
         }
 
         if (currentState == STATE_GAME)
@@ -7755,9 +8339,21 @@ int main( int argc, char **argv ) {
                 g_cutsceneController.triggerStudioCutscene( engineContext, g_dialogue );
             }
         }
-        render( engineContext, dt );
+        if (currentState == STATE_MIND_TRAP)
+        {
+            drawTextBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
+        }
+        else
+        {
+            render( engineContext, dt );
+            applyPostAAMode( engineContext );
+        }
 
-        if (currentState == STATE_MENU)
+        if (currentState == STATE_GAME)
+        {
+            renderGameplayUiPass( engineContext );
+        }
+        else if (currentState == STATE_MENU)
         {
             renderMenu( engineContext,
                 currentMenuSelection,
@@ -7775,7 +8371,10 @@ int main( int argc, char **argv ) {
         {
             renderEndingScreen( engineContext );
         }
-        applyPostAAMode( engineContext );
+        else if (currentState == STATE_MIND_TRAP)
+        {
+            renderMindTrapInterface( engineContext );
+        }
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
         SDL_RenderClear( engineContext.renderer );

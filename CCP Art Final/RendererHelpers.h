@@ -177,7 +177,18 @@ static const std::unordered_map<char, Glyph> TINY_GLYPHS = {
     {'/', {0b001,0b001,0b010,0b100,0b100}},
     {':', {0b000,0b010,0b000,0b010,0b000}},
     {';', {0b000,0b010,0b000,0b010,0b100}},
+    {'<', {0b001,0b010,0b100,0b010,0b001}},
+    {'=', {0b000,0b111,0b000,0b111,0b000}},
+    {'>', {0b100,0b010,0b001,0b010,0b100}},
     {'?', {0b111,0b001,0b011,0b000,0b010}},
+    {'@', {0b111,0b101,0b111,0b100,0b111}},
+
+    {'[', {0b011,0b010,0b010,0b010,0b011}},
+    {'\\',{0b100,0b100,0b010,0b001,0b001}},
+    {']', {0b110,0b010,0b010,0b010,0b110}},
+    {'^', {0b010,0b101,0b000,0b000,0b000}},
+    {'_', {0b000,0b000,0b000,0b000,0b111}},
+    {'`', {0b010,0b001,0b000,0b000,0b000}},
 
     // digits
     {'0', {0b111,0b101,0b101,0b101,0b111}},
@@ -218,6 +229,11 @@ static const std::unordered_map<char, Glyph> TINY_GLYPHS = {
     {'X', {0b101,0b101,0b010,0b101,0b101}},
     {'Y', {0b101,0b101,0b111,0b010,0b010}},
     {'Z', {0b111,0b001,0b010,0b100,0b111}},
+
+    {'{', {0b001,0b010,0b100,0b010,0b001}},
+    {'|', {0b010,0b010,0b010,0b010,0b010}},
+    {'}', {0b100,0b010,0b001,0b010,0b100}},
+    {'~', {0b000,0b101,0b010,0b000,0b000}},
 };
 
 
@@ -687,9 +703,85 @@ static void drawGlyphTinyScaled( Engine &engineContext, int x, int y, const Glyp
     }
 }
 
+static inline bool glyph8x8BitSet( const Glyph8x8 &g, int sx, int sy ) {
+    sx = std::clamp( sx, 0, 7 );
+    sy = std::clamp( sy, 0, 7 );
+    return (g[ sy ] & (1 << (7 - sx))) != 0;
+}
+
+static inline void blendPix( Engine &engineContext, int x, int y, Uint32 src, float alpha ) {
+    if ((unsigned)x >= (unsigned)RENDER_W || (unsigned)y >= (unsigned)RENDER_H) return;
+    alpha = std::clamp( alpha, 0.0f, 1.0f );
+    if (alpha <= 0.0f) return;
+    if (alpha >= 1.0f)
+    {
+        putPix( engineContext, x, y, src );
+        return;
+    }
+
+    Uint32 dst = engineContext.backbuffer[ y * RENDER_W + x ];
+    const float sr = float( (src >> 16) & 255 );
+    const float sg = float( (src >> 8) & 255 );
+    const float sb = float( src & 255 );
+    const float dr = float( (dst >> 16) & 255 );
+    const float dg = float( (dst >> 8) & 255 );
+    const float db = float( dst & 255 );
+
+    putPix( engineContext, x, y, rgb(
+        Uint8( std::clamp( sr * alpha + dr * (1.0f - alpha), 0.0f, 255.0f ) ),
+        Uint8( std::clamp( sg * alpha + dg * (1.0f - alpha), 0.0f, 255.0f ) ),
+        Uint8( std::clamp( sb * alpha + db * (1.0f - alpha), 0.0f, 255.0f ) )
+    ) );
+}
+
+static void drawCharTinyScaledHiRes( Engine &engineContext, int x, int y, char c, Uint32 color, int scale ) {
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
+
+    auto it = FONT_8X8.find( c );
+    if (it == FONT_8X8.end()) it = FONT_8X8.find( '?' );
+    const Glyph8x8 &g = (it != FONT_8X8.end()) ? it->second : FONT_8X8.at( ' ' );
+
+    const int outW = std::max( 1, 3 * scale );
+    const int outH = std::max( 1, 5 * scale );
+
+    for (int oy = 0; oy < outH; ++oy)
+    {
+        for (int ox = 0; ox < outW; ++ox)
+        {
+            float coverage = 0.0f;
+            for (int sy = 0; sy < 2; ++sy)
+            {
+                for (int sx = 0; sx < 2; ++sx)
+                {
+                    const float sampleX = ((float)ox + (sx ? 0.75f : 0.25f)) / (float)outW;
+                    const float sampleY = ((float)oy + (sy ? 0.75f : 0.25f)) / (float)outH;
+                    const int srcX = std::clamp( int( sampleX * 8.0f ), 0, 7 );
+                    const int srcY = std::clamp( int( sampleY * 8.0f ), 0, 7 );
+                    coverage += glyph8x8BitSet( g, srcX, srcY ) ? 0.25f : 0.0f;
+                }
+            }
+
+            if (coverage >= 0.99f)
+            {
+                putPix( engineContext, x + ox, y + oy, color );
+            }
+            else if (coverage > 0.0f)
+            {
+                blendPix( engineContext, x + ox, y + oy, color, coverage );
+            }
+        }
+    }
+}
+
 
 
 static void drawCharTinyScaled( Engine &engineContext, int x, int y, char c, Uint32 color, int scale ) {
+    if (scale > 1)
+    {
+        drawCharTinyScaledHiRes( engineContext, x, y, c, color, scale );
+        return;
+    }
+
     if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
     auto it = TINY_GLYPHS.find( c );
     if (it == TINY_GLYPHS.end()) it = TINY_GLYPHS.find( '?' );
