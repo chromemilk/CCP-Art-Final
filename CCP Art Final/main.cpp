@@ -11,6 +11,8 @@
 #include <functional>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
+#include <ctime>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -134,6 +136,9 @@ static std::vector<CaveQuizQuestion> g_caveQuiz;
 static bool g_museumPuzzleInitialized = false;
 static bool g_restorationWingUnlocked = false;
 static bool g_unlockAllDoorsOverride = false;
+static bool g_wakeCutsceneActive = false;
+static float g_wakeCutsceneTimer = 0.0f;
+static constexpr float kWakeCutsceneDuration = 6.5f;
 
 struct WeaponPickup
 {
@@ -166,6 +171,7 @@ struct CpuModel
     std::vector<glm::vec2> uvs;
     std::vector<uint32_t> indices;
     std::vector<Image> baseColorTextures;
+    std::vector<SDL_Texture*> hwTextures;
     std::vector<int> triangleTextureIndex;
     std::vector<glm::vec4> triangleBaseColorFactor;
     glm::vec3 boundsMin{0.0f};
@@ -444,6 +450,12 @@ static sf::SoundBuffer g_shellDropBuffer;
 static bool g_weaponSoundBuffersReady = false;
 static std::vector<std::shared_ptr<sf::Sound>> g_activeWeaponSounds;
 static std::vector<float> g_pendingShellDropTimers;
+static sf::SoundBuffer g_whisperBuffer;
+static bool g_whisperBufferReady = false;
+static std::string g_whisperBaseFolder;
+static float g_whisperTimer = 0.0f;
+static float g_whisperNextDelay = 14.0f;
+static bool g_firstLockedDoorDialogueShown = false;
 static constexpr float kRevolverFacingYawOffset = 1.5f;
 static constexpr float kRevolverScreenShakeX = 16.0f;
 static constexpr float kRevolverScreenShakeY = 11.0f;
@@ -471,6 +483,7 @@ static std::string resolveAssetModelPath( const std::string &assetName );
 static std::filesystem::path editorModelsPathForLevel();
 static std::filesystem::path findAssetsRoot();
 static void refreshEditorAssetCatalog( bool force = false );
+static void clearPuzzleState();
 
 static std::string makeEditorModelsFileNameForLevel( int levelId, const std::string &mapFile ) {
     std::string stem = std::filesystem::path( mapFile.empty() ? "map.txt" : mapFile ).stem().string();
@@ -510,6 +523,71 @@ static void playRevolverShotSequence( const std::string &baseFolder ) {
 
     playWeaponBufferedSound( g_gunshotBuffer, 100.0f );
     g_pendingShellDropTimers.push_back( 0.34f );
+}
+
+static float randomRange01( float minValue, float maxValue ) {
+    const float t = float( std::rand() ) / float( RAND_MAX );
+    return minValue + (maxValue - minValue) * t;
+}
+
+static void resetWhisperAmbience() {
+    g_whisperBufferReady = false;
+    g_whisperBaseFolder.clear();
+    g_whisperTimer = 0.0f;
+    g_whisperNextDelay = randomRange01( 24.0f, 40.0f );
+}
+
+static void updateWhisperAmbience( Engine &engineContext, float dt ) {
+    if (engineContext.currentLevel != Levels::MUSEUM && engineContext.currentLevel != Levels::MUSEUM_UPPER)
+    {
+        return;
+    }
+
+    if (g_currentLevelFolder.empty())
+    {
+        return;
+    }
+
+    if (g_whisperBaseFolder != g_currentLevelFolder)
+    {
+        g_whisperBaseFolder = g_currentLevelFolder;
+        g_whisperBufferReady = g_whisperBuffer.loadFromFile( g_currentLevelFolder + "\\whisper.wav" );
+        g_whisperTimer = 0.0f;
+        g_whisperNextDelay = randomRange01( 20.0f, 34.0f );
+    }
+
+    if (!g_whisperBufferReady) return;
+
+    g_whisperTimer += dt;
+    if (g_whisperTimer < g_whisperNextDelay) return;
+
+    g_whisperTimer = 0.0f;
+    g_whisperNextDelay = randomRange01( 36.0f, 64.0f );
+
+    playWeaponBufferedSound( g_whisperBuffer, 9.0f );
+
+    const bool shouldSpeak = (std::rand() % 100) < 70;
+    const bool canSpeak =
+        !g_dialogue.isActive() &&
+        !g_cutsceneController.isCameraLockActive() &&
+        !g_revolverInspectCutsceneActive &&
+        !g_wakeCutsceneActive &&
+        !g_codeEntryActive &&
+        !g_notesOpen &&
+        !g_caveQuizActive;
+    if (!shouldSpeak || !canSpeak) return;
+
+    static const std::array<std::string, 6> whisperLines = {
+        "I'm losing it.",
+        "What was that?",
+        "I'm not alone down here.",
+        "Did someone just whisper my name?",
+        "No, no... keep it together.",
+        "Something is following me."
+    };
+
+    const int index = std::rand() % (int)whisperLines.size();
+    g_dialogue.start( { { whisperLines[ index ], 2.2f } } );
 }
 
 static const std::vector<EditorAssetDef> &editorAssetCatalog() {
@@ -1512,10 +1590,46 @@ static InteractionAnimState g_interactionAnim;
 static bool g_perfLowMode = false;
 static float g_wallRenderDistance = 42.0f;
 static float g_worldModelRenderDistance = 22.0f;
+static float g_horrorLightingMul = 0.72f;
+static float g_horrorDarknessOverlay = 0.14f;
+static int g_meshTriangleStride = 1;
+static int g_meshRasterStep = 1;
+static bool g_useGpuModelRendering = false;
+static float g_lastEffectivePitchOffset = 0.0f;
 static bool g_detectedPerfLowMode = false;
 static float g_detectedWallRenderDistance = 42.0f;
 static float g_detectedWorldModelRenderDistance = 22.0f;
 static std::string g_rendererBackend = "unknown";
+
+static int getGpuRenderMode() {
+    return std::clamp( config::gpuRenderMode, 0, 2 );
+}
+
+static bool isGpuModelRenderingEnabled() {
+    return g_useGpuModelRendering && getGpuRenderMode() != 0;
+}
+
+static bool shouldGpuRenderModel( Engine const &engineContext, WorldModelInstance const &inst ) {
+    if (!isGpuModelRenderingEnabled()) return false;
+    if (getGpuRenderMode() == 2) return true; // Full
+
+    // Smart mode: offload nearby or complex models to GPU, keep trivial/far meshes on CPU.
+    const float dx = inst.x - engineContext.positionX;
+    const float dy = inst.y - engineContext.positionY;
+    const float distSq = dx * dx + dy * dy;
+    const int triCount = inst.model ? int( inst.model->indices.size() / 3 ) : 0;
+
+    return distSq <= (12.0f * 12.0f) || triCount >= 220;
+}
+
+static const char *gpuRenderModeLabel() {
+    switch (getGpuRenderMode())
+    {
+    case 0: return "NONE";
+    case 2: return "FULL";
+    default: return "SMART";
+    }
+}
 
 static void applyQualityPresetFromConfig();
 static void applyPresentationFilter( Engine &engineContext );
@@ -1538,6 +1652,7 @@ static void configureRuntimeGpuProfile( SDL_Renderer *renderer ) {
         backendLower.find( "opengl" ) != std::string::npos;
 
     g_detectedPerfLowMode = softwareLike;
+    g_useGpuModelRendering = !softwareLike && gpuTierHigh;
     g_detectedWallRenderDistance = gpuTierHigh ? 52.0f : 40.0f;
     g_detectedWorldModelRenderDistance = gpuTierHigh ? 26.0f : 20.0f;
     if (g_detectedPerfLowMode)
@@ -1549,6 +1664,8 @@ static void configureRuntimeGpuProfile( SDL_Renderer *renderer ) {
     applyQualityPresetFromConfig();
 
     std::cout << "[Renderer] " << g_rendererBackend
+        << " | gpuModelRendering=" << (g_useGpuModelRendering ? "true" : "false")
+        << " | gpuMode=" << gpuRenderModeLabel()
         << " | perfLowMode=" << (g_perfLowMode ? "true" : "false")
         << " | wallRenderDistance=" << g_wallRenderDistance
         << " | modelRenderDistance=" << g_worldModelRenderDistance
@@ -1562,16 +1679,22 @@ static void applyQualityPresetFromConfig() {
         g_perfLowMode = false;
         g_wallRenderDistance = std::clamp( g_detectedWallRenderDistance * 1.15f, 32.0f, 72.0f );
         g_worldModelRenderDistance = std::clamp( g_detectedWorldModelRenderDistance * 1.18f, 16.0f, 40.0f );
+        g_meshTriangleStride = 1;
+        g_meshRasterStep = 1;
         break;
     case 2: // Performance
         g_perfLowMode = true;
         g_wallRenderDistance = std::clamp( g_detectedWallRenderDistance * 0.85f, 18.0f, 44.0f );
         g_worldModelRenderDistance = std::clamp( g_detectedWorldModelRenderDistance * 0.72f, 10.0f, 26.0f );
+        g_meshTriangleStride = 3;
+        g_meshRasterStep = 2;
         break;
     default: // Balanced
         g_perfLowMode = g_detectedPerfLowMode;
         g_wallRenderDistance = g_detectedWallRenderDistance;
         g_worldModelRenderDistance = g_detectedWorldModelRenderDistance;
+        g_meshTriangleStride = g_detectedPerfLowMode ? 2 : 1;
+        g_meshRasterStep = g_detectedPerfLowMode ? 2 : 1;
         break;
     }
 }
@@ -2431,6 +2554,8 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_revolverInspectBaseYaw = 0.0f;
     g_activeWeaponSounds.clear();
     g_pendingShellDropTimers.clear();
+    resetWhisperAmbience();
+    g_firstLockedDoorDialogueShown = false;
     g_cutsceneController.reset();
     g_dialogue.clear();
 
@@ -2497,11 +2622,15 @@ static void initMuseumPuzzle(Engine& engineContext) {
         addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.1f, 14.4f, 0.20f, rgb(220, 210, 182), -0.20f, 0, 0, false, 0, -0.05f);
         addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.8f, 15.0f, 0.18f, rgb(226, 216, 190), 0.95f, 0, 0, false, 0, -0.05f);
         g_clueNotes.clear();
+        g_clueNotes.push_back(makeClueNote(engineContext,
+            "Missed Calls",
+            "[PHONE] 12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
+            10.0f, 10.3f));
         // Atrium note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Janitor's Log",
             "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
-            15.5f, 11.5f));
+            6.1f, 10.8f));
         // West Wing Note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Archivist Notebook",
@@ -2526,19 +2655,19 @@ static void initMuseumPuzzle(Engine& engineContext) {
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Emergency Override Slip",
             "If wing routing fails, South Wing emergency code is 7391.",
-            8.5f, 4.5f));
+            9.2f, 2.8f));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Conservation Log A",
             "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
-            9.5f, 8.4f));
+            7.8f, 6.8f));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Conservation Log B",
             "A perfect exhibit is one breath held forever. Preservation is mercy, not violence.",
-            12.8f, 9.2f));
+            14.7f, 6.2f));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Conservation Log C",
             "Stillness is purity. If they move, they suffer. If they freeze, they become art.",
-            10.2f, 11.6f));
+            11.4f, 13.8f));
         // NE Vault lore note so the room is still meaningful after progression rebalance
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Vault Ledger",
@@ -2548,27 +2677,27 @@ static void initMuseumPuzzle(Engine& engineContext) {
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Spilled Solvent",
             "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. Wait, I haven't seen anyone in a while. Where are they? How did I get here?",
-            10.5f, 15.5f,
+            7.3f, 15.6f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Entry #402",
             "I can still see the fear in his eyes. The color drained from her body. The texture abandoned his face. He went limp. The Director's requests are becoming too much. ",
-            10.5f, 4.5f,
+            14.9f, 4.2f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Scientist Note",
             "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now...",
-            4.5f, 9.5f,
+            3.9f, 10.6f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Archive Assistant Letter",
             "Look away. If you look it in the eye it will take you.",
-            18.5f, 9.5f,
+            18.2f, 8.2f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Special Exhibit Intake Receipt",
             "NEW ACQUISITION // SUBJECT: YOU\nCondition: Conscious, disoriented, highly expressive under stress.\nCurator notes: Frame after identity fracture. Keep still. Preserve the moment forever.",
-            12.0f, 9.3f,
+            11.2f, 11.0f,
             Levels::MUSEUM_UPPER));
     }
     g_museumPuzzleInitialized = true;
@@ -2605,22 +2734,22 @@ static void initCaveFinalObjective(Engine& engineContext) {
     g_clueNotes.push_back(makeClueNote(engineContext,
         "Scribbled Warning",
         "The Warden statue tests those who try to leave. You must understand the Director's madness to pass. Remember: he wants one breath held forever.",
-        2.8f, 2.3f));
+        2.4f, 2.1f));
 
     g_clueNotes.push_back(makeClueNote(engineContext,
         "Assistant's Regret",
         "I couldn't watch them suffer anymore. But the Director insists... stillness is purity. They only truly become art when they freeze.",
-        4.8f, 3.8f));
+        7.0f, 2.9f));
 
     g_clueNotes.push_back(makeClueNote(engineContext,
         "Torn Intake Log",
         "I found the paperwork for the newest acquisition. It's... it's you. The notes say you are 'conscious and disoriented'. Don't let them catch you.",
-        6.2f, 2.1f));
+        3.6f, 6.6f));
 
     g_clueNotes.push_back(makeClueNote(engineContext,
         "Last Journal Fragment",
         "You aren't escaping the museum... you're descending into the slaughterhouse it was built upon. The exhibits upstairs aren't statues. They're the ones who stopped moving.",
-        8.5f, 5.2f));
+        9.3f, 8.1f));
 
     g_caveFinalNoteCollected = false;
     g_caveQuizActive = false;
@@ -2668,6 +2797,8 @@ g_codeEntryBuffer.clear();
     g_revolverInspectBaseYaw = 0.0f;
     g_activeWeaponSounds.clear();
     g_pendingShellDropTimers.clear();
+    resetWhisperAmbience();
+    g_firstLockedDoorDialogueShown = false;
     g_dialogue.clear();
     g_cutsceneController.reset();
 }
@@ -2905,9 +3036,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
     engineContext.ambianceTint = level.ambianceTint;
     engineContext.ambianceMul = level.ambianceMul;
-    engineContext.indoorShadeLinear = level.isMuseumFloor ? 0.08f : 0.10f;
-    engineContext.indoorShadeQuadratic = level.isMuseumFloor ? 0.02f : 0.03f;
-    engineContext.indoorShadeMin = level.isMuseumFloor ? 0.02f : 0.04f;
+    engineContext.indoorShadeLinear = level.isMuseumFloor ? 0.12f : 0.14f;
+    engineContext.indoorShadeQuadratic = level.isMuseumFloor ? 0.035f : 0.050f;
+    engineContext.indoorShadeMin = level.isMuseumFloor ? 0.01f : 0.015f;
 
     fs::path mapPath = level.mapFile.empty() ? (folder / "map.txt") : (folder / level.mapFile);
     // Map (1=wall, D=door)
@@ -3062,9 +3193,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
         if (level.levelId == Levels::CAVE)
         {
-            engineContext.lightRadius = 2.0f;
+            engineContext.lightRadius = 1.5f;
             engineContext.lightFalloff = 2.0f;
-            engineContext.caveAmbient = 0.06f;
+            engineContext.caveAmbient = 0.03f;
 
             tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
             //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
@@ -3076,9 +3207,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
         if (level.levelId == Levels::TRANSITION)
         {
-            engineContext.lightRadius = 1.2f;
+            engineContext.lightRadius = 0.9f;
             engineContext.lightFalloff = 1.5f;
-            engineContext.caveAmbient = 0.03f;
+            engineContext.caveAmbient = 0.02f;
         }
     }
 
@@ -3217,6 +3348,21 @@ void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Lev
     {
         g_cutsceneController.triggerUpstairsGalleryCutscene( engineContext, g_dialogue );
     }
+}
+
+static void startWakeCutscene( Engine &engineContext ) {
+    g_wakeCutsceneActive = true;
+    g_wakeCutsceneTimer = 0.0f;
+    g_revolverAiming = false;
+    engineContext.pitchOffset = 78.0f;
+}
+
+static void startNewMuseumRun( Engine &engineContext, std::vector<LevelDef> levels ) {
+    clearPuzzleState();
+    g_notesCollectedRun = 0;
+    g_runElapsedSeconds = 0.0f;
+    handleLevelChange( engineContext, levels, Levels::MUSEUM );
+    startWakeCutscene( engineContext );
 }
 
 static bool isPlayerNearStatue( Engine const &engineContext ) {
@@ -3739,7 +3885,7 @@ static void renderAccessPopup( Engine &engineContext ) {
         (g_accessPopup.find( "required" ) != std::string::npos);
     Uint32 border = denied ? rgb( 200, 40, 40 ) : rgb( 120, 170, 70 );
     Uint32 head = denied ? rgb( 255, 80, 80 ) : rgb( 180, 230, 120 );
-    std::string title = denied ? "ACCESS DENIED" : "LOG UPDATED";
+    std::string title = denied ? "The Door Is Locked" : "LOG UPDATED";
     drawTextBox( engineContext, x, y, w, h, rgb( 12, 12, 16 ), border );
     drawString16x16( engineContext, x + 12, y + 10, title, head, w - 24, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 38, g_accessPopup, rgb( 230, 230, 230 ), 2, 1, 1, false );
@@ -3850,14 +3996,17 @@ static std::vector<std::string> wrapNoteTextLines( const std::string &text, int 
 static void renderNotesScreen( Engine &engineContext ) {
     if (!g_notesOpen) return;
 
-    int panelW = RENDER_W - 90;
-    int panelH = RENDER_H - 70;
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), 180.0f / 255.0f );
+
+    int panelW = RENDER_W - 140;
+    int panelH = RENDER_H - 110;
     int x = (RENDER_W - panelW) / 2;
     int y = (RENDER_H - panelH) / 2;
 
-    drawTextBox( engineContext, x, y, panelW, panelH, rgb( 14, 12, 10 ), rgb( 170, 145, 95 ) );
-    drawString16x16( engineContext, x + 18, y + 16, "FIELD NOTES", rgb( 240, 210, 140 ), panelW - 36, 1, 1, false );
-    drawStringTinyScaled( engineContext, x + panelW - 290, y + 22, "UP/DOWN SELECT  PGUP/PGDN SCROLL  N/ESC CLOSE", rgb( 145, 135, 110 ), 1, 1, 1, false );
+    drawTranslucentBox( engineContext, x + 8, y + 8, panelW, panelH, rgb( 0, 0, 0 ), 100.0f / 255.0f );
+    drawTextBox( engineContext, x, y, panelW, panelH, rgb( 240, 240, 235 ), rgb( 212, 212, 206 ) );
+    drawString16x16( engineContext, x + 18, y + 16, "FIELD NOTES", rgb( 30, 30, 30 ), panelW - 36, 1, 1, false );
+    drawStringTinyScaled( engineContext, x + panelW - 290, y + 22, "UP/DOWN SELECT  PGUP/PGDN SCROLL  N/ESC CLOSE", rgb( 70, 70, 70 ), 1, 1, 1, false );
 
     int listX = x + 16;
     int listY = y + 52;
@@ -3869,12 +4018,12 @@ static void renderNotesScreen( Engine &engineContext ) {
     int bodyW = panelW - (bodyX - x) - 16;
     int bodyH = listH;
 
-    drawTextBox( engineContext, listX, listY, listW, listH, rgb( 10, 10, 12 ), rgb( 110, 96, 70 ) );
-    drawTextBox( engineContext, bodyX, bodyY, bodyW, bodyH, rgb( 10, 10, 12 ), rgb( 110, 96, 70 ) );
+    drawTextBox( engineContext, listX, listY, listW, listH, rgb( 232, 232, 227 ), rgb( 205, 205, 198 ) );
+    drawTextBox( engineContext, bodyX, bodyY, bodyW, bodyH, rgb( 235, 235, 230 ), rgb( 205, 205, 198 ) );
 
     if (g_foundNotes.empty())
     {
-        drawString16x16( engineContext, listX + 12, listY + 14, "No clues collected yet.", rgb( 210, 210, 210 ), listW - 24, 1, 1, false );
+        drawString16x16( engineContext, listX + 12, listY + 14, "No clues collected yet.", rgb( 30, 30, 30 ), listW - 24, 1, 1, false );
         return;
     }
 
@@ -3890,10 +4039,10 @@ static void renderNotesScreen( Engine &engineContext ) {
         bool selected = (i == g_notesSelected);
         if (selected)
         {
-            drawTextBox( engineContext, listX + 6, listLineY - 2, listW - 12, 16, rgb( 42, 34, 20 ), rgb( 170, 145, 90 ) );
+            drawTextBox( engineContext, listX + 6, listLineY - 2, listW - 12, 16, rgb( 225, 225, 220 ), rgb( 30, 30, 30 ) );
         }
 
-        drawStringTinyScaled( engineContext, listX + 10, listLineY, note.title, selected ? rgb( 250, 226, 165 ) : rgb( 210, 210, 210 ), 1, 1, 1, false );
+        drawStringTinyScaled( engineContext, listX + 10, listLineY, note.title, selected ? rgb( 30, 30, 30 ) : rgb( 55, 55, 55 ), 1, 1, 1, false );
         listLineY += listLineStep;
         if (listLineY > listY + listH - 14) break;
     }
@@ -3902,7 +4051,7 @@ static void renderNotesScreen( Engine &engineContext ) {
     if (selectedNoteIdx < 0 || selectedNoteIdx >= (int)g_clueNotes.size()) return;
 
     const auto &selected = g_clueNotes[ selectedNoteIdx ];
-    drawString16x16( engineContext, bodyX + 12, bodyY + 10, selected.title, rgb( 255, 232, 170 ), bodyW - 24, 1, 1, false );
+    drawString16x16( engineContext, bodyX + 12, bodyY + 10, selected.title, rgb( 30, 30, 30 ), bodyW - 24, 1, 1, false );
 
     const int maxChars = std::max( 20, (bodyW - 24) / 6 );
     std::vector<std::string> wrapped = wrapNoteTextLines( selected.body, maxChars );
@@ -3913,12 +4062,12 @@ static void renderNotesScreen( Engine &engineContext ) {
     int textY = bodyY + 34;
     for (int i = g_notesBodyScroll; i < (int)wrapped.size() && i < g_notesBodyScroll + visibleLines; ++i)
     {
-        drawStringTinyScaled( engineContext, bodyX + 12, textY, wrapped[ i ], rgb( 220, 220, 215 ), 1, 1, 1, false );
+        drawStringTinyScaled( engineContext, bodyX + 12, textY, wrapped[ i ], rgb( 30, 30, 30 ), 1, 1, 1, false );
         textY += 12;
     }
 
     std::string scroll = "LINE " + std::to_string( std::min( (int)wrapped.size(), g_notesBodyScroll + 1 ) ) + "/" + std::to_string( std::max( 1, (int)wrapped.size() ) );
-    drawStringTinyScaled( engineContext, bodyX + bodyW - 95, bodyY + bodyH - 14, scroll, rgb( 165, 155, 130 ), 1, 1, 1, false );
+    drawStringTinyScaled( engineContext, bodyX + bodyW - 95, bodyY + bodyH - 14, scroll, rgb( 90, 90, 90 ), 1, 1, 1, false );
 }
 
 static void renderCompass( Engine &engineContext ) {
@@ -4039,6 +4188,7 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
     for (const auto &inst : g_worldModels)
     {
         if (!inst.visible || !inst.model || inst.model->indices.size() < 3) continue;
+        if (shouldGpuRenderModel( engineContext, inst )) continue;
 
         const glm::vec3 modelHalfExtents = glm::max( (inst.model->boundsMax - inst.model->boundsMin) * 0.5f, glm::vec3( 0.0001f ) ) * inst.scale;
         const float modelRadius = std::max( 0.05f, glm::length( modelHalfExtents ) );
@@ -4170,9 +4320,17 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         }
         if (occlusionRejected) continue;
 
+        int renderedTrianglesForModel = 0;
+        const int triangleBudget = g_perfLowMode ? 520 : std::numeric_limits<int>::max();
+        const int triStride = std::max( 1, g_meshTriangleStride );
+        const int rasterStep = std::max( 1, g_meshRasterStep );
+
         for (size_t i = 0; i + 2 < inst.model->indices.size(); i += 3)
         {
             const int triIdx = int( i / 3 );
+            if (triStride > 1 && (triIdx % triStride) != 0) continue;
+            if (renderedTrianglesForModel >= triangleBudget) break;
+
             const uint32_t i0 = inst.model->indices[ i + 0 ];
             const uint32_t i1 = inst.model->indices[ i + 1 ];
             const uint32_t i2 = inst.model->indices[ i + 2 ];
@@ -4217,9 +4375,9 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             const float invZ1 = 1.0f / std::max( 0.0001f, b.z );
             const float invZ2 = 1.0f / std::max( 0.0001f, c.z );
 
-            for (int y = minY; y <= maxY; ++y)
+            for (int y = minY; y <= maxY; y += rasterStep)
             {
-                for (int x = minX; x <= maxX; ++x)
+                for (int x = minX; x <= maxX; x += rasterStep)
                 {
                     const float px = x + 0.5f;
                     const float py = y + 0.5f;
@@ -4297,7 +4455,7 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
                         distanceShade = std::clamp( distanceShade, engineContext.indoorShadeMin, 1.0f );
                     }
 
-                    const float lit = std::clamp( 0.28f + 0.95f * (lambert * distanceShade), 0.28f, 1.15f );
+                    const float lit = std::clamp( 0.16f + 0.90f * (lambert * distanceShade), 0.16f, 1.00f );
                     const glm::vec3 vertexMul = hasTexture ? glm::vec3( 1.0f ) : vertexColor;
                     Uint8 r = Uint8( std::clamp( materialColor.r * vertexMul.r * texColor.r * lit * 255.0f, 0.0f, 255.0f ) );
                     Uint8 g = Uint8( std::clamp( materialColor.g * vertexMul.g * texColor.g * lit * 255.0f, 0.0f, 255.0f ) );
@@ -4306,7 +4464,227 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
                     meshDepthBuffer[ pix ] = z;
                 }
             }
+
+            ++renderedTrianglesForModel;
         }
+    }
+}
+
+static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
+    if (!isGpuModelRenderingEnabled()) return;
+    if (!engineContext.renderer || g_worldModels.empty()) return;
+
+    const float projScaleY = (RENDER_W * 0.5f);
+    const float horizon = (RENDER_H * 0.5f) + pitchOffset;
+    const float camHeight = 0.52f;
+    const float nearClip = 0.18f;
+    const float invDet = 1.0f / (engineContext.planeX * engineContext.directionY - engineContext.directionX * engineContext.planeY);
+
+    struct GpuVert { float sx = 0, sy = 0, z = -1; glm::vec3 world{0.0f}; glm::vec3 vcolor{1.0f}; glm::vec2 uv{0.0f}; bool valid = false; };
+    struct DrawTri { SDL_Vertex a{}, b{}, c{}; float z = 0.0f; SDL_Texture* texture = nullptr; };
+
+    std::vector<DrawTri> tris;
+    tris.reserve( 4096 );
+
+    for (const auto &inst : g_worldModels)
+    {
+        if (!inst.visible || !inst.model || inst.model->indices.size() < 3) continue;
+        if (!shouldGpuRenderModel( engineContext, inst )) continue;
+
+        if (inst.model->hwTextures.size() != inst.model->baseColorTextures.size()) {
+            inst.model->hwTextures.resize(inst.model->baseColorTextures.size(), nullptr);
+            for (size_t t = 0; t < inst.model->baseColorTextures.size(); ++t) {
+                const auto& img = inst.model->baseColorTextures[t];
+                if (img.width > 0 && img.height > 0) {
+                    SDL_Texture* tex = SDL_CreateTexture(engineContext.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, img.width, img.height);
+                    if (tex)
+                    {
+                        SDL_UpdateTexture(tex, nullptr, img.pixels.data(), img.width * 4);
+                        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+                    }
+                    inst.model->hwTextures[t] = tex;
+                }
+            }
+        }
+
+        const glm::vec3 modelHalfExtents = glm::max( (inst.model->boundsMax - inst.model->boundsMin) * 0.5f, glm::vec3( 0.0001f ) ) * inst.scale;
+        const float modelRadius = std::max( 0.05f, glm::length( modelHalfExtents ) );
+
+        const float centerDx = inst.x - engineContext.positionX;
+        const float centerDy = inst.y - engineContext.positionY;
+        const float centerTz = invDet * (-engineContext.planeY * centerDx + engineContext.planeX * centerDy);
+        if ((centerTz + modelRadius) <= nearClip) continue;
+        if ((centerTz - modelRadius) > g_worldModelRenderDistance) continue;
+
+        std::vector<GpuVert> projected;
+        projected.resize( inst.model->vertices.size() );
+        std::vector<glm::vec3> transformed;
+        transformed.resize( inst.model->vertices.size(), glm::vec3( 0.0f ) );
+
+        const float timeSeconds = SDL_GetTicks() * 0.001f;
+        const float yawNow = inst.yaw + (inst.spinYaw ? (inst.spinSpeed * timeSeconds) : 0.0f);
+        const glm::quat qYaw = glm::angleAxis( yawNow, glm::vec3( 0.0f, 1.0f, 0.0f ) );
+        const glm::quat qPitch = glm::angleAxis( inst.pitch, glm::vec3( 1.0f, 0.0f, 0.0f ) );
+        const glm::quat qRoll = glm::angleAxis( inst.roll, glm::vec3( 0.0f, 0.0f, 1.0f ) );
+        const glm::quat q = qYaw * qPitch * qRoll;
+        const glm::vec3 pivot(
+            (inst.model->boundsMin.x + inst.model->boundsMax.x) * 0.5f,
+            inst.model->boundsMin.y,
+            (inst.model->boundsMin.z + inst.model->boundsMax.z) * 0.5f );
+
+        float modelMinY = std::numeric_limits<float>::max();
+        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        {
+            const glm::vec3 local = (inst.model->vertices[ i ] - pivot) * inst.scale;
+            transformed[ i ] = q * local;
+            modelMinY = std::min( modelMinY, transformed[ i ].y );
+        }
+        if (!std::isfinite( modelMinY )) modelMinY = 0.0f;
+
+        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        {
+            const glm::vec3 r = transformed[ i ];
+            const float wx = inst.x + r.x;
+            const float wy = (r.y - modelMinY) + inst.heightOffset;
+            const float wz = inst.y + r.z;
+
+            const float dx = wx - engineContext.positionX;
+            const float dy = wz - engineContext.positionY;
+            const float tx = invDet * (engineContext.directionY * dx - engineContext.directionX * dy);
+            const float tz = invDet * (-engineContext.planeY * dx + engineContext.planeX * dy);
+            if (tz <= nearClip) continue;
+
+            projected[ i ].sx = (RENDER_W * 0.5f) * (1.0f + (tx / tz));
+            projected[ i ].sy = horizon - ((wy - camHeight) * projScaleY / tz);
+            projected[ i ].z = tz;
+            projected[ i ].world = glm::vec3( wx, wy, wz );
+            if (i < inst.model->colors.size()) projected[ i ].vcolor = inst.model->colors[ i ];
+            if (i < inst.model->uvs.size()) projected[ i ].uv = inst.model->uvs[ i ];
+            projected[ i ].valid = true;
+        }
+
+        const int triStride = std::max( 1, g_meshTriangleStride );
+        int triBudget = g_perfLowMode ? 650 : std::numeric_limits<int>::max();
+
+        for (size_t i = 0; i + 2 < inst.model->indices.size(); i += 3)
+        {
+            if (triBudget <= 0) break;
+            const int triIdx = int( i / 3 );
+            if (triStride > 1 && (triIdx % triStride) != 0) continue;
+
+            const uint32_t i0 = inst.model->indices[ i + 0 ];
+            const uint32_t i1 = inst.model->indices[ i + 1 ];
+            const uint32_t i2 = inst.model->indices[ i + 2 ];
+            if (i0 >= projected.size() || i1 >= projected.size() || i2 >= projected.size()) continue;
+
+            const GpuVert &a = projected[ i0 ];
+            const GpuVert &b = projected[ i1 ];
+            const GpuVert &c = projected[ i2 ];
+            if (!a.valid || !b.valid || !c.valid) continue;
+
+            const float area = (b.sx - a.sx) * (c.sy - a.sy) - (b.sy - a.sy) * (c.sx - a.sx);
+            if (std::fabs( area ) < 0.01f) continue;
+            if (area >= -0.01f) continue;
+
+            const int minX = std::max( 0, (int)std::floor( std::min( { a.sx, b.sx, c.sx } ) ) );
+            const int maxX = std::min( RENDER_W - 1, (int)std::ceil( std::max( { a.sx, b.sx, c.sx } ) ) );
+            const int minY = std::max( 0, (int)std::floor( std::min( { a.sy, b.sy, c.sy } ) ) );
+            const int maxY = std::min( RENDER_H - 1, (int)std::ceil( std::max( { a.sy, b.sy, c.sy } ) ) );
+            if (minX > maxX || minY > maxY) continue;
+
+            const float triMidZ = (a.z + b.z + c.z) * (1.0f / 3.0f);
+            const int sxA = std::clamp( (int)a.sx, 0, RENDER_W - 1 );
+            const int sxB = std::clamp( (int)b.sx, 0, RENDER_W - 1 );
+            const int sxC = std::clamp( (int)c.sx, 0, RENDER_W - 1 );
+            if (a.z >= engineContext.zbuffer[ sxA ] && b.z >= engineContext.zbuffer[ sxB ] && c.z >= engineContext.zbuffer[ sxC ]) {
+                continue;
+            }
+
+            const glm::vec3 nrm = glm::normalize( glm::cross( b.world - a.world, c.world - a.world ) );
+            const float lambert = std::clamp( 0.25f + 0.75f * std::fabs( glm::dot( nrm, glm::normalize( glm::vec3( -0.35f, 0.85f, -0.40f ) ) ) ), 0.15f, 1.0f );
+            float shade = 1.0f;
+            if (engineContext.caveMode)
+            {
+                float R = engineContext.lightRadius;
+                float t = std::clamp( 1.0f - std::pow( triMidZ / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+                shade = std::max( engineContext.caveAmbient, t );
+            }
+            else
+            {
+                shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * triMidZ + engineContext.indoorShadeQuadratic * triMidZ * triMidZ);
+                shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
+            }
+            glm::vec3 baseColor( 1.0f );
+            if (triIdx >= 0 && triIdx < (int)inst.model->triangleBaseColorFactor.size())
+            {
+                const glm::vec4 f = inst.model->triangleBaseColorFactor[ triIdx ];
+                baseColor = glm::vec3( f.r, f.g, f.b );
+            }
+
+            int texIdx = -1;
+            if (triIdx >= 0 && triIdx < (int)inst.model->triangleTextureIndex.size())
+            {
+                texIdx = inst.model->triangleTextureIndex[ triIdx ];
+            }
+
+            const glm::vec3 vAvg = (a.vcolor + b.vcolor + c.vcolor) * (1.0f / 3.0f);
+            const float tr = float( (inst.tint >> 16) & 255 ) / 255.0f;
+            const float tg = float( (inst.tint >> 8) & 255 ) / 255.0f;
+            const float tb = float( inst.tint & 255 ) / 255.0f;
+
+            const glm::vec3 rgb = glm::clamp(
+                baseColor * vAvg * glm::vec3( tr, tg, tb ) *
+                std::clamp( lambert * shade * engineContext.ambianceMul * g_horrorLightingMul, 0.10f, 1.0f ),
+                glm::vec3( 0.0f ), glm::vec3( 1.0f ) );
+            const SDL_FColor col{ rgb.r, rgb.g, rgb.b, 1.0f };
+
+            DrawTri out{};
+            out.z = triMidZ;
+            out.a.position = SDL_FPoint{ a.sx * float( WIN_SCALE ), a.sy * float( WIN_SCALE ) };
+            out.b.position = SDL_FPoint{ b.sx * float( WIN_SCALE ), b.sy * float( WIN_SCALE ) };
+            out.c.position = SDL_FPoint{ c.sx * float( WIN_SCALE ), c.sy * float( WIN_SCALE ) };
+            out.a.tex_coord = SDL_FPoint{ a.uv.x, a.uv.y };
+            out.b.tex_coord = SDL_FPoint{ b.uv.x, b.uv.y };
+            out.c.tex_coord = SDL_FPoint{ c.uv.x, c.uv.y };
+            out.a.color = col; out.b.color = col; out.c.color = col;
+            out.texture = (texIdx >= 0 && texIdx < (int)inst.model->hwTextures.size()) ? inst.model->hwTextures[ texIdx ] : nullptr;
+
+            tris.push_back( out );
+
+            --triBudget;
+        }
+    }
+
+    if (!tris.empty())
+    {
+        std::sort( tris.begin(), tris.end(), []( const DrawTri &lhs, const DrawTri &rhs ) {
+            return lhs.z > rhs.z; // draw far-to-near to emulate opaque depth ordering
+            } );
+
+        SDL_Texture* currentTex = tris[ 0 ].texture;
+        std::vector<SDL_Vertex> batch;
+        batch.reserve( 768 );
+
+        auto flushBatch = [&]() {
+            if (batch.empty()) return;
+            SDL_RenderGeometry( engineContext.renderer, currentTex, batch.data(), (int)batch.size(), nullptr, 0 );
+            batch.clear();
+        };
+
+        for (const DrawTri &t : tris)
+        {
+            if (t.texture != currentTex)
+            {
+                flushBatch();
+                currentTex = t.texture;
+            }
+
+            batch.push_back( t.a );
+            batch.push_back( t.b );
+            batch.push_back( t.c );
+        }
+
+        flushBatch();
     }
 }
 
@@ -4321,9 +4699,10 @@ static void render( Engine &engineContext, float dt ) {
         kRevolverScreenShakeY * shotShakeWave;
     const float recoilKickPitch = shotFx01 * 6.0f;
     const float effectivePitchOffset = engineContext.pitchOffset + shotPitchShake + recoilKickPitch;
+    g_lastEffectivePitchOffset = effectivePitchOffset;
 
-    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
-    bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
+    bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
+    bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
 
     auto luma = []( Uint32 c ) -> float {
         float r = float( (c >> 16) & 255 ), g = float( (c >> 8) & 255 ), b = float( c & 255 );
@@ -4361,9 +4740,10 @@ static void render( Engine &engineContext, float dt ) {
         float tr = float( (engineContext.ambianceTint >> 16) & 255 ) / 255.0f;
         float tg = float( (engineContext.ambianceTint >> 8) & 255 ) / 255.0f;
         float tb = float( engineContext.ambianceTint & 255 ) / 255.0f;
-        Uint8 r = Uint8( std::clamp( float( (shaded >> 16) & 255 ) * tr * engineContext.ambianceMul, 0.0f, 255.0f ) );
-        Uint8 g = Uint8( std::clamp( float( (shaded >> 8) & 255 ) * tg * engineContext.ambianceMul, 0.0f, 255.0f ) );
-        Uint8 b = Uint8( std::clamp( float( shaded & 255 ) * tb * engineContext.ambianceMul, 0.0f, 255.0f ) );
+        const float horrorMul = std::clamp( g_horrorLightingMul, 0.35f, 1.0f );
+        Uint8 r = Uint8( std::clamp( float( (shaded >> 16) & 255 ) * tr * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
+        Uint8 g = Uint8( std::clamp( float( (shaded >> 8) & 255 ) * tg * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
+        Uint8 b = Uint8( std::clamp( float( shaded & 255 ) * tb * engineContext.ambianceMul * horrorMul, 0.0f, 255.0f ) );
         return rgb( r, g, b );
         };
 
@@ -4809,9 +5189,22 @@ static void render( Engine &engineContext, float dt ) {
         }
     }
 
-    static std::vector<float> meshDepthBuffer;
-    meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
-    renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
+    if (!isGpuModelRenderingEnabled())
+    {
+        static std::vector<float> meshDepthBuffer;
+        meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
+        renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
+    }
+    else
+    {
+        // In Smart mode the CPU pass still handles the subset not offloaded to GPU.
+        if (config::gpuRenderMode == 1)
+        {
+            static std::vector<float> meshDepthBuffer;
+            meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
+            renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
+        }
+    }
 
 
 
@@ -4873,7 +5266,7 @@ static void render( Engine &engineContext, float dt ) {
                     else
                     {
                         shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * transY + engineContext.indoorShadeQuadratic * transY * transY);
-                        shade = std::clamp( shade, 0.18f, 1.0f );
+                        shade = std::clamp( shade, 0.08f, 1.0f );
                     }
                     Uint32 shaded = applyAmbience( color, shade );
                     putPix( engineContext, sx, sy, shaded );
@@ -5129,6 +5522,28 @@ static void render( Engine &engineContext, float dt ) {
     renderRevolverShotEffects( engineContext, shotFx01 );
     renderSchoolSafeWeaponBlur( engineContext );
 
+    drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), g_horrorDarknessOverlay + (engineContext.caveMode ? 0.05f : 0.0f) );
+
+    if (g_wakeCutsceneActive)
+    {
+        const float p = std::clamp( g_wakeCutsceneTimer / std::max( 0.001f, kWakeCutsceneDuration ), 0.0f, 1.0f );
+        const float eyeOpen = std::clamp( std::pow( p, 1.9f ), 0.0f, 1.0f );
+        const int lidH = int( (RENDER_H * 0.5f) * (1.0f - eyeOpen) );
+
+        if (lidH > 0)
+        {
+            drawTextBox( engineContext, 0, 0, RENDER_W, lidH, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
+            drawTextBox( engineContext, 0, RENDER_H - lidH, RENDER_W, lidH, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
+        }
+
+        drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), std::clamp( 0.55f - p * 0.55f, 0.0f, 0.55f ) );
+
+        if (p > 0.38f && p < 0.92f)
+        {
+            drawStringTinyScaled( engineContext, (RENDER_W / 2) - 45, RENDER_H - 44, "...where am I?", rgb( 185, 185, 200 ), 2, 1, 1, false );
+        }
+    }
+
     // Debug: position and FPS
     drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
     // Draw FPS in top-left
@@ -5171,11 +5586,6 @@ static void render( Engine &engineContext, float dt ) {
     {
         std::string statuePrompt = g_caveQuizPassed ? "WARDEN: PATH OPEN" : "[E] ANSWER WARDEN QUESTIONS";
         drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, statuePrompt, rgb( 210, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
-    }
-
-    if (!overlayBusy && engineContext.currentLevel == Levels::ENTRANCE && isPlayerNearPoint( engineContext, 11.5f, 2.5f, 1.4f ))
-    {
-        drawString16x16( engineContext, (RENDER_W / 2) - 160, (RENDER_H / 2) + 105, "[E] CHECK IN", rgb( 220, 220, 180 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 
     if (!overlayBusy && engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
@@ -5263,9 +5673,9 @@ static void render( Engine &engineContext, float dt ) {
 
     
 }
-static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob, bool antiAliasing, int modelQualityPreset, bool schoolMode ) {
+static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob, bool antiAliasing, int modelQualityPreset, int gpuRenderMode, bool schoolMode ) {
     // Dimensions
-    int width = 420, height = 320;
+    int width = 460, height = 350;
     int x = (RENDER_W - width) / 2;
     int y = (RENDER_H - height) / 2;
 
@@ -5343,9 +5753,14 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     else if (modelQualityPreset == 2) quality = "PERFORMANCE";
     drawItem( 5, "Model Quality: " + quality );
 
-    drawItem( 6, std::string( "School Mode: " ) + (schoolMode ? "ON" : "OFF") );
+    std::string gpuMode = "SMART";
+    if (gpuRenderMode == 0) gpuMode = "NONE";
+    else if (gpuRenderMode == 2) gpuMode = "FULL";
+    drawItem( 6, "GPU Rendering: " + gpuMode );
 
-    drawItem( 7, "Quit" );
+    drawItem( 7, std::string( "School Mode: " ) + (schoolMode ? "ON" : "OFF") );
+
+    drawItem( 8, "Quit" );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
     int footW = (int)footer.length() * 4;
@@ -5358,8 +5773,82 @@ static void applyPresentationFilter( Engine &engineContext ) {
     (void)SDL_SetTextureScaleMode( engineContext.backtexure, mode );
 }
 
+static void renderModernCrosshairOverlay( Engine &engineContext ) {
+    if (!engineContext.renderer) return;
+
+    const int screenW = RENDER_W * WIN_SCALE;
+    const int screenH = RENDER_H * WIN_SCALE;
+    const int cx = screenW / 2;
+    const int cy = screenH / 2;
+    const int dotSize = 4;
+    const int dotHalf = dotSize / 2;
+
+    SDL_SetRenderDrawBlendMode( engineContext.renderer, SDL_BLENDMODE_BLEND );
+
+    SDL_SetRenderDrawColor( engineContext.renderer, 0, 0, 0, 150 );
+    SDL_FRect borderRect{
+        float( cx - dotHalf - 1 ),
+        float( cy - dotHalf - 1 ),
+        float( dotSize + 2 ),
+        float( dotSize + 2 )
+    };
+    SDL_RenderFillRect( engineContext.renderer, &borderRect );
+
+    SDL_SetRenderDrawColor( engineContext.renderer, 255, 255, 255, 200 );
+    SDL_FRect dotRect{
+        float( cx - dotHalf ),
+        float( cy - dotHalf ),
+        float( dotSize ),
+        float( dotSize )
+    };
+    SDL_RenderFillRect( engineContext.renderer, &dotRect );
+}
+
+static void renderModernRevolverHudOverlay( Engine &engineContext ) {
+    if (!engineContext.renderer || !g_combatState.active || !g_combatState.hasRevolver) return;
+
+    SDL_SetRenderDrawBlendMode( engineContext.renderer, SDL_BLENDMODE_BLEND );
+
+    const float centerX = float( RENDER_W * WIN_SCALE - 60 );
+    const float centerY = float( RENDER_H * WIN_SCALE - 60 );
+    const float ringRadius = 18.0f;
+    const float chamberSize = 7.0f;
+    const int loaded = std::clamp( g_combatState.loadedAmmo, 0, 6 );
+    constexpr float kTau = 6.28318530718f;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        const float angle = (-kTau * 0.25f) + (kTau * (float)i / 6.0f);
+        const float px = centerX + std::cos( angle ) * ringRadius;
+        const float py = centerY + std::sin( angle ) * ringRadius;
+
+        SDL_FRect chamberRect{
+            px - (chamberSize * 0.5f),
+            py - (chamberSize * 0.5f),
+            chamberSize,
+            chamberSize
+        };
+
+        if (i < loaded)
+        {
+            SDL_SetRenderDrawColor( engineContext.renderer, 255, 220, 100, 255 );
+            SDL_RenderFillRect( engineContext.renderer, &chamberRect );
+        }
+        else
+        {
+            SDL_SetRenderDrawColor( engineContext.renderer, 50, 50, 50, 100 );
+            SDL_RenderFillRect( engineContext.renderer, &chamberRect );
+        }
+
+        SDL_SetRenderDrawColor( engineContext.renderer, 25, 25, 25, i < loaded ? 190 : 135 );
+        SDL_RenderRect( engineContext.renderer, &chamberRect );
+    }
+}
+
 int main( int argc, char **argv ) {
     (void)argc; (void)argv;
+    std::srand( (unsigned int)std::time( nullptr ) );
+
     if (!SDL_Init( SDL_INIT_VIDEO ))
     {
         std::fprintf( stderr, "SDL_Init failed: %s\n", SDL_GetError() );
@@ -5411,11 +5900,11 @@ int main( int argc, char **argv ) {
     std::filesystem::path assetRoot = findProjectRoot( cwd );
 
     std::vector<LevelDef> levels = {
-    {"Museum Entrance", (assetRoot / "levels" / "entrance").string(), "map.txt", 11.5f, 15.5f, 270.f, Levels::ENTRANCE, rgb( 230, 238, 255 ), 1.0f, false, "Check in at the desk"},
-    {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 1.06f, true, "Explore both floors and report to the statue"},
-    {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.92f, true, "Explore both floors and report to the statue"},
-    {"Transition", (assetRoot / "levels" / "transition").string(), "map.txt", 1.5f, 4.5f, 270.f, Levels::TRANSITION, rgb( 235, 235, 235 ), 1.0f, false, "Proceed through the tunnels"},
-    {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.90f, false, "Find the final journal fragment"}
+    {"Museum Entrance", (assetRoot / "levels" / "entrance").string(), "map.txt", 11.5f, 15.5f, 270.f, Levels::ENTRANCE, rgb( 230, 238, 255 ), 0.78f, false, "Check in at the desk"},
+    {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 0.72f, true, "Explore both floors and report to the statue"},
+    {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.66f, true, "Explore both floors and report to the statue"},
+    {"Transition", (assetRoot / "levels" / "transition").string(), "map.txt", 1.5f, 4.5f, 270.f, Levels::TRANSITION, rgb( 235, 235, 235 ), 0.62f, false, "Proceed through the tunnels"},
+    {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.58f, false, "Find the final journal fragment"}
 
 
     };
@@ -5424,6 +5913,7 @@ int main( int argc, char **argv ) {
 
     calibrateMusicVolumeFromMic();
 
+    engineContext.currentLevel = Levels::MUSEUM;
     int curLevel = engineContext.currentLevel;
     if (!loadLevel( engineContext, levels[ curLevel ] )) return 1;
 
@@ -5442,9 +5932,13 @@ int main( int argc, char **argv ) {
 
 
     GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
+    if (currentState == STATE_GAME)
+    {
+        startWakeCutscene( engineContext );
+    }
 
-	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=quit
-    const int numMenuOptions = 8;
+   int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=AA, 5=quality, 6=gpu mode, 7=school, 8=quit
+    const int numMenuOptions = 9;
     float musicVolume = getMusicVolume(); 
     g_notesCollectedRun = 0;
     g_runElapsedSeconds = 0.0f;
@@ -5481,10 +5975,8 @@ int main( int argc, char **argv ) {
                 if (g_caveTimerSeconds <= 0.0f)
                 {
                     g_caveTimerActive = false;
-                    showAccessPopup( "Oxygen depleted. Returning to entrance.", 4000 );
-                    handleLevelChange( engineContext, levels, Levels::ENTRANCE );
-                    g_notesCollectedRun = 0;
-                    g_runElapsedSeconds = 0.0f;
+                    showAccessPopup( "Oxygen depleted. Restarting from the museum.", 4000 );
+                    startNewMuseumRun( engineContext, levels );
                 }
             }
         }
@@ -5532,6 +6024,10 @@ int main( int argc, char **argv ) {
         updateMusicStream();
         g_dialogue.update( dt );
         g_cutsceneController.update( engineContext, g_dialogue, dt );
+        if (currentState == STATE_GAME)
+        {
+            updateWhisperAmbience( engineContext, dt );
+        }
 
         g_revolverShotCooldown = std::max( 0.0f, g_revolverShotCooldown - dt );
         g_revolverRecoilTimer = std::max( 0.0f, g_revolverRecoilTimer - dt );
@@ -5647,6 +6143,20 @@ int main( int argc, char **argv ) {
             }
         }
 
+        if (g_wakeCutsceneActive)
+        {
+            g_wakeCutsceneTimer += dt;
+            const float p = std::clamp( g_wakeCutsceneTimer / std::max( 0.001f, kWakeCutsceneDuration ), 0.0f, 1.0f );
+            const float openEase = 1.0f - std::pow( 1.0f - p, 2.2f );
+            engineContext.pitchOffset = (1.0f - openEase) * 78.0f + std::sin( SDL_GetTicks() * 0.004f ) * 0.6f;
+            if (g_wakeCutsceneTimer >= kWakeCutsceneDuration)
+            {
+                g_wakeCutsceneActive = false;
+                g_wakeCutsceneTimer = 0.0f;
+                engineContext.pitchOffset = 0.0f;
+            }
+        }
+
         while (SDL_PollEvent( &ev ))
         {
             actualSpeed = MOVE_SPEED;
@@ -5674,9 +6184,10 @@ int main( int argc, char **argv ) {
                     case SDLK_KP_ENTER:
                         if (currentMenuSelection == 0) // "Play"
                         {
+                            startNewMuseumRun( engineContext, levels );
                             currentState = STATE_GAME;
                         }
-                       else if (currentMenuSelection == 7) // "Quit"
+                       else if (currentMenuSelection == 8) // "Quit"
                         {
                             exit( 0 );
                         }
@@ -5706,6 +6217,10 @@ int main( int argc, char **argv ) {
                             applyQualityPresetFromConfig();
                         }
                         else if (currentMenuSelection == 6)
+                        {
+                            config::gpuRenderMode = (config::gpuRenderMode + 2) % 3;
+                        }
+                        else if (currentMenuSelection == 7)
                         {
                             config::schoolMode = !config::schoolMode;
                             if (config::schoolMode)
@@ -5739,6 +6254,10 @@ int main( int argc, char **argv ) {
                             applyQualityPresetFromConfig();
                         }
                         else if (currentMenuSelection == 6)
+                        {
+                            config::gpuRenderMode = (config::gpuRenderMode + 1) % 3;
+                        }
+                        else if (currentMenuSelection == 7)
                         {
                             config::schoolMode = !config::schoolMode;
                             if (config::schoolMode)
@@ -5780,7 +6299,7 @@ int main( int argc, char **argv ) {
 
                 if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
                 {
-                    const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive;
+                    const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
 
                     if (ev.button.button == SDL_BUTTON_RIGHT)
                     {
@@ -5822,7 +6341,7 @@ int main( int argc, char **argv ) {
 
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
-                    if (g_levelTransition.active)
+                    if (g_levelTransition.active || g_wakeCutsceneActive)
                     {
                         continue;
                     }
@@ -6122,6 +6641,7 @@ int main( int argc, char **argv ) {
                                     }
                                     else
                                     {
+
                                         playFailedDoorOpen(levels[engineContext.currentLevel].folder);
                                         showAccessPopup( "Wrong code. Access denied." );
                                     }
@@ -6177,13 +6697,6 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
-                        if (engineContext.currentLevel == Levels::ENTRANCE && isPlayerNearPoint( engineContext, 11.5f, 2.5f, 1.4f ))
-                        {
-                            triggerInteractionAnim( InteractionAnimType::DOOR_USE, "CHECKING IN WITH FRONT DESK", 0.9f );
-                            beginLevelTransition( Levels::MUSEUM, 1.1f );
-                            continue;
-                        }
-
                         if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearPoint( engineContext, kUpperEntryX, kUpperEntryY, kUpperEntryRadius ))
                         {
                             triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ASCENDING TO UPPER GALLERY", 0.9f );
@@ -6264,7 +6777,9 @@ int main( int argc, char **argv ) {
 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
                             triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
 
-                            if (g_cutsceneController.canTriggerPhoneCutscene() && engineContext.currentLevel == Levels::MUSEUM)
+                            if (g_cutsceneController.canTriggerPhoneCutscene() &&
+                                engineContext.currentLevel == Levels::MUSEUM &&
+                                n.title == "Missed Calls")
                             {
                                 g_cutsceneController.triggerPhoneCutscene( engineContext, g_dialogue, phoneCutsceneAsset );
                             }
@@ -6418,6 +6933,12 @@ int main( int argc, char **argv ) {
                             int lockIndex = findDoorLockIndex( engineContext.currentLevel, tx, ty );
                             if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked)
                             {
+                                if (!g_firstLockedDoorDialogueShown)
+                                {
+                                    g_dialogue.start( { { "Why is this locked?", 2.0f } } );
+                                    g_firstLockedDoorDialogueShown = true;
+                                }
+
                                 auto &lock = g_roomLocks[ lockIndex ];
                                 if (lock.type == LockType::KEY)
                                 {
@@ -6502,9 +7023,7 @@ int main( int argc, char **argv ) {
                 {
                     if (ev.key.key == SDLK_R)
                     {
-                        handleLevelChange( engineContext, levels, Levels::ENTRANCE );
-                        g_notesCollectedRun = 0;
-                        g_runElapsedSeconds = 0.0f;
+                        startNewMuseumRun( engineContext, levels );
                         currentState = STATE_GAME;
                     }
                     else if (ev.key.key == SDLK_ESCAPE)
@@ -6519,9 +7038,9 @@ int main( int argc, char **argv ) {
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
             float ms = actualSpeed * dt;
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
-            if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive) ts = 0.0f;
+            if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
                 float ang = -ts;
@@ -6676,6 +7195,7 @@ int main( int argc, char **argv ) {
                 config::viewBobbing,
                 config::antiAliasing,
                 config::modelQualityPreset,
+                config::gpuRenderMode,
                 config::schoolMode );
         }
         else if (currentState == STATE_ENDING)
@@ -6702,6 +7222,45 @@ int main( int argc, char **argv ) {
             dstRect.y = (std::cos( phase * 109.0f ) * 0.88f + std::sin( phase * 159.0f ) * 0.47f) * kRevolverScreenShakeY * amp;
         }
         SDL_RenderTexture( engineContext.renderer, engineContext.backtexure, nullptr, &dstRect );
+        if (currentState == STATE_GAME && isGpuModelRenderingEnabled())
+        {
+            renderWorldModelsGpu( engineContext, g_lastEffectivePitchOffset );
+
+            if (g_wakeCutsceneActive)
+            {
+                const float p = std::clamp( g_wakeCutsceneTimer / std::max( 0.001f, kWakeCutsceneDuration ), 0.0f, 1.0f );
+                const float eyeOpen = std::clamp( std::pow( p, 1.9f ), 0.0f, 1.0f );
+                const int lidH = int( (RENDER_H * 0.5f) * (1.0f - eyeOpen) );
+
+                SDL_SetRenderDrawBlendMode( engineContext.renderer, SDL_BLENDMODE_BLEND );
+
+                if (lidH > 0)
+                {
+                    SDL_SetRenderDrawColor( engineContext.renderer, 0, 0, 0, 255 );
+                    SDL_FRect topBar{ 0.0f, 0.0f, float( RENDER_W * WIN_SCALE ), float( lidH * WIN_SCALE ) };
+                    SDL_FRect botBar{ 0.0f, float( (RENDER_H - lidH) * WIN_SCALE ), float( RENDER_W * WIN_SCALE ), float( lidH * WIN_SCALE ) };
+                    SDL_RenderFillRect( engineContext.renderer, &topBar );
+                    SDL_RenderFillRect( engineContext.renderer, &botBar );
+                }
+
+                const Uint8 fadeAlpha = Uint8( std::clamp( 0.55f - p * 0.55f, 0.0f, 0.55f ) * 255.0f );
+                if (fadeAlpha > 0)
+                {
+                    SDL_SetRenderDrawColor( engineContext.renderer, 0, 0, 0, fadeAlpha );
+                    SDL_FRect fadeRect{ 0.0f, 0.0f, float( RENDER_W * WIN_SCALE ), float( RENDER_H * WIN_SCALE ) };
+                    SDL_RenderFillRect( engineContext.renderer, &fadeRect );
+                }
+            }
+        }
+        if (currentState == STATE_GAME)
+        {
+            const bool uiOverlayOpen = g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode;
+            if (!uiOverlayOpen)
+            {
+                renderModernCrosshairOverlay( engineContext );
+                renderModernRevolverHudOverlay( engineContext );
+            }
+        }
         SDL_RenderPresent( engineContext.renderer );
     }
 
