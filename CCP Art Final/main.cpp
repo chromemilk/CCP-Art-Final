@@ -500,6 +500,11 @@ static void playWeaponBufferedSound( const sf::SoundBuffer &buffer, float volume
 }
 
 static void playRevolverShotSequence( const std::string &baseFolder ) {
+    if (config::schoolMode)
+    {
+        return;
+    }
+
     refreshWeaponSoundBuffers( baseFolder );
     if (!g_weaponSoundBuffersReady) return;
 
@@ -519,6 +524,8 @@ static std::string toLowerCopy( std::string s ) {
     for (char &c : s) c = char( std::tolower( unsigned char( c ) ) );
     return s;
 }
+
+static void configureRuntimeGpuProfile( SDL_Renderer *renderer );
 
 static EditorAssetDef makeEditorAssetDefForName( const std::string &assetName ) {
     EditorAssetDef out;
@@ -1503,6 +1510,71 @@ struct InteractionAnimState
 static LevelTransitionState g_levelTransition;
 static InteractionAnimState g_interactionAnim;
 static bool g_perfLowMode = false;
+static float g_wallRenderDistance = 42.0f;
+static float g_worldModelRenderDistance = 22.0f;
+static bool g_detectedPerfLowMode = false;
+static float g_detectedWallRenderDistance = 42.0f;
+static float g_detectedWorldModelRenderDistance = 22.0f;
+static std::string g_rendererBackend = "unknown";
+
+static void applyQualityPresetFromConfig();
+static void applyPresentationFilter( Engine &engineContext );
+
+static void configureRuntimeGpuProfile( SDL_Renderer *renderer ) {
+    const char *rendererName = renderer ? SDL_GetRendererName( renderer ) : nullptr;
+    g_rendererBackend = rendererName ? rendererName : "unknown";
+    const std::string backendLower = toLowerCopy( g_rendererBackend );
+
+    const bool softwareLike =
+        backendLower.find( "software" ) != std::string::npos ||
+        backendLower.find( "llvmpipe" ) != std::string::npos ||
+        backendLower.find( "swiftshader" ) != std::string::npos ||
+        backendLower.find( "warp" ) != std::string::npos;
+
+    const bool gpuTierHigh =
+        backendLower.find( "vulkan" ) != std::string::npos ||
+        backendLower.find( "direct3d" ) != std::string::npos ||
+        backendLower.find( "metal" ) != std::string::npos ||
+        backendLower.find( "opengl" ) != std::string::npos;
+
+    g_detectedPerfLowMode = softwareLike;
+    g_detectedWallRenderDistance = gpuTierHigh ? 52.0f : 40.0f;
+    g_detectedWorldModelRenderDistance = gpuTierHigh ? 26.0f : 20.0f;
+    if (g_detectedPerfLowMode)
+    {
+        g_detectedWallRenderDistance = 26.0f;
+        g_detectedWorldModelRenderDistance = 14.0f;
+    }
+
+    applyQualityPresetFromConfig();
+
+    std::cout << "[Renderer] " << g_rendererBackend
+        << " | perfLowMode=" << (g_perfLowMode ? "true" : "false")
+        << " | wallRenderDistance=" << g_wallRenderDistance
+        << " | modelRenderDistance=" << g_worldModelRenderDistance
+        << std::endl;
+}
+
+static void applyQualityPresetFromConfig() {
+    switch (config::modelQualityPreset)
+    {
+    case 0: // High
+        g_perfLowMode = false;
+        g_wallRenderDistance = std::clamp( g_detectedWallRenderDistance * 1.15f, 32.0f, 72.0f );
+        g_worldModelRenderDistance = std::clamp( g_detectedWorldModelRenderDistance * 1.18f, 16.0f, 40.0f );
+        break;
+    case 2: // Performance
+        g_perfLowMode = true;
+        g_wallRenderDistance = std::clamp( g_detectedWallRenderDistance * 0.85f, 18.0f, 44.0f );
+        g_worldModelRenderDistance = std::clamp( g_detectedWorldModelRenderDistance * 0.72f, 10.0f, 26.0f );
+        break;
+    default: // Balanced
+        g_perfLowMode = g_detectedPerfLowMode;
+        g_wallRenderDistance = g_detectedWallRenderDistance;
+        g_worldModelRenderDistance = g_detectedWorldModelRenderDistance;
+        break;
+    }
+}
 
 enum GameState
 {
@@ -3588,6 +3660,73 @@ static void renderRevolverShotEffects( Engine &engineContext, float intensity ) 
     }
 }
 
+static void renderSchoolSafeWeaponBlur( Engine &engineContext ) {
+    if (!config::schoolMode) return;
+    if (!g_combatState.active || !g_combatState.hasRevolver) return;
+    if (!g_showHeldWeapon && !g_revolverInspectCutsceneActive) return;
+
+    int x = int( RENDER_W * 0.56f );
+    int y = int( RENDER_H * 0.54f );
+    int w = int( RENDER_W * 0.36f );
+    int h = int( RENDER_H * 0.30f );
+
+    if (g_revolverAiming)
+    {
+        x = int( RENDER_W * 0.45f );
+        y = int( RENDER_H * 0.48f );
+        w = int( RENDER_W * 0.26f );
+        h = int( RENDER_H * 0.26f );
+    }
+    else if (g_revolverInspectCutsceneActive)
+    {
+        x = int( RENDER_W * 0.40f );
+        y = int( RENDER_H * 0.35f );
+        w = int( RENDER_W * 0.30f );
+        h = int( RENDER_H * 0.35f );
+    }
+
+    x = std::clamp( x, 0, RENDER_W - 1 );
+    y = std::clamp( y, 0, RENDER_H - 1 );
+    w = std::clamp( w, 1, RENDER_W - x );
+    h = std::clamp( h, 1, RENDER_H - y );
+
+    const int block = 6;
+    for (int by = y; by < y + h; by += block)
+    {
+        for (int bx = x; bx < x + w; bx += block)
+        {
+            const int ex = std::min( bx + block, x + w );
+            const int ey = std::min( by + block, y + h );
+
+            uint32_t sumR = 0, sumG = 0, sumB = 0, count = 0;
+            for (int py = by; py < ey; ++py)
+            {
+                for (int px = bx; px < ex; ++px)
+                {
+                    Uint32 c = engineContext.backbuffer[ py * RENDER_W + px ];
+                    sumR += (c >> 16) & 255;
+                    sumG += (c >> 8) & 255;
+                    sumB += c & 255;
+                    ++count;
+                }
+            }
+
+            if (count == 0) continue;
+            const Uint32 avg = rgb( Uint8( sumR / count ), Uint8( sumG / count ), Uint8( sumB / count ) );
+
+            for (int py = by; py < ey; ++py)
+            {
+                for (int px = bx; px < ex; ++px)
+                {
+                    putPix( engineContext, px, py, avg );
+                }
+            }
+        }
+    }
+
+    drawTextBox( engineContext, x, y, w, h, rgb( 0, 0, 0 ), rgb( 120, 120, 140 ) );
+}
+
 static void renderAccessPopup( Engine &engineContext ) {
     if (g_accessPopup.empty() || SDL_GetTicks() > g_accessPopupUntil) return;
 
@@ -3915,6 +4054,11 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             continue;
         }
 
+        if ((centerTz - modelRadius) > g_worldModelRenderDistance)
+        {
+            continue;
+        }
+
         const float txRadius = modelRadius / std::max( 0.001f, FOV_TAN );
         const float horizontalLimit = (1.0f + kViewPreload) * std::max( centerTz, nearClip );
         if ((centerTx - txRadius) > horizontalLimit || (centerTx + txRadius) < -horizontalLimit)
@@ -4000,6 +4144,13 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         const int modelScreenMaxY = std::min( RENDER_H - 1, (int)std::ceil( modelMaxSy ) );
         if (modelScreenMinX > modelScreenMaxX || modelScreenMinY > modelScreenMaxY) continue;
 
+        const int modelScreenW = modelScreenMaxX - modelScreenMinX + 1;
+        const int modelScreenH = modelScreenMaxY - modelScreenMinY + 1;
+        if (g_perfLowMode && (modelScreenW * modelScreenH) <= 20)
+        {
+            continue;
+        }
+
         bool occlusionRejected = true;
         int sampleStepX = std::max( 1, (modelScreenMaxX - modelScreenMinX + 1) / 24 );
         for (int sx = modelScreenMinX; sx <= modelScreenMaxX; sx += sampleStepX)
@@ -4042,6 +4193,19 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             const int maxY = std::min( RENDER_H - 1, (int)std::ceil( std::max( { a.sy, b.sy, c.sy } ) ) );
             if (minX > maxX || minY > maxY) continue;
             if ((maxX - minX) > (RENDER_W - 8) || (maxY - minY) > (RENDER_H - 8)) continue;
+
+            if (g_perfLowMode)
+            {
+                const int triW = maxX - minX + 1;
+                const int triH = maxY - minY + 1;
+                if ((triW * triH) <= 2) continue;
+
+                const float triMidZ = (a.z + b.z + c.z) * (1.0f / 3.0f);
+                if (triMidZ > (g_worldModelRenderDistance * 0.55f) && (triIdx & 1))
+                {
+                    continue;
+                }
+            }
 
             glm::vec3 nrm = glm::cross( b.world - a.world, c.world - a.world );
             const float nLen = glm::length( nrm );
@@ -4277,6 +4441,12 @@ static void render( Engine &engineContext, float dt ) {
                 side = 1;
             }
 
+            const float rayTravel = std::min( sideDistX, sideDistY );
+            if (rayTravel > g_wallRenderDistance)
+            {
+                break;
+            }
+
             if (mapX < 0 || mapY < 0 || mapX >= engineContext.map.width || mapY >= engineContext.map.height) break;
             int tile = engineContext.map.tiles[ mapY * engineContext.map.width + mapX ];
             if (tile > 0) hitTile = tile;
@@ -4288,6 +4458,7 @@ static void render( Engine &engineContext, float dt ) {
             ? ((mapX - engineContext.positionX) + (1 - stepX) * 0.5f) / (rayDirX == 0 ? 1e-6f : rayDirX)
             : ((mapY - engineContext.positionY) + (1 - stepY) * 0.5f) / (rayDirY == 0 ? 1e-6f : rayDirY);
         perpWallDist = std::max( std::fabs( perpWallDist ), 0.05f );
+        if (perpWallDist > g_wallRenderDistance) continue;
 
         // Column geometry
         int lineH = int( RENDER_H / std::max( perpWallDist, 1e-3f ) );
@@ -4956,8 +5127,15 @@ static void render( Engine &engineContext, float dt ) {
     }
 
     renderRevolverShotEffects( engineContext, shotFx01 );
+    renderSchoolSafeWeaponBlur( engineContext );
 
+    // Debug: position and FPS
     drawStringTinyScaled(engineContext, 12, RENDER_H - 20, "X: " + to_string(engineContext.positionX) + " " + "Y: " + to_string(engineContext.positionY), rgb(0, 0, 0), 1, 1, 1, false);
+    // Draw FPS in top-left
+    {
+        int fpsInt = (int)(engineContext.fps + 0.5f);
+        drawStringTinyScaled(engineContext, 12, RENDER_H - 50, string("FPS: ") + to_string(fpsInt), rgb(200, 200, 200), 1, 1, 1, false);
+    }
 
 
     int nearbyKey = getNearbyKeyPickup( engineContext );
@@ -5085,9 +5263,9 @@ static void render( Engine &engineContext, float dt ) {
 
     
 }
-static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob ) {
+static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob, bool antiAliasing, int modelQualityPreset, bool schoolMode ) {
     // Dimensions
-    int width = 320, height = 225;
+    int width = 420, height = 320;
     int x = (RENDER_W - width) / 2;
     int y = (RENDER_H - height) / 2;
 
@@ -5116,8 +5294,8 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 1, 3, 1, false );
 
 
-    int optY = y + 80;
-    int lineH = 25;
+    int optY = y + 86;
+    int lineH = 24;
 
     bool showCursor = (SDL_GetTicks() / 350) % 2 == 0;
 
@@ -5158,11 +5336,26 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     std::string viewBobEnabler = viewBob ? "ON" : "OFF";
     drawItem( 3, "View Bobbing: " + viewBobEnabler );
 
-    drawItem( 4, "Quit" );
+    drawItem( 4, std::string( "Anti-Aliasing: " ) + (antiAliasing ? "LINEAR" : "OFF") );
+
+    std::string quality = "BALANCED";
+    if (modelQualityPreset == 0) quality = "HIGH";
+    else if (modelQualityPreset == 2) quality = "PERFORMANCE";
+    drawItem( 5, "Model Quality: " + quality );
+
+    drawItem( 6, std::string( "School Mode: " ) + (schoolMode ? "ON" : "OFF") );
+
+    drawItem( 7, "Quit" );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
     int footW = (int)footer.length() * 4;
     drawStringTinyScaled( engineContext, x + (width - footW) / 2, y + height - 20, footer, rgb( 80, 80, 90 ), 1, 1, 1, false );
+}
+
+static void applyPresentationFilter( Engine &engineContext ) {
+    if (!engineContext.backtexure) return;
+    const SDL_ScaleMode mode = config::antiAliasing ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST;
+    (void)SDL_SetTextureScaleMode( engineContext.backtexure, mode );
 }
 
 int main( int argc, char **argv ) {
@@ -5190,7 +5383,11 @@ int main( int argc, char **argv ) {
         std::fprintf( stderr, "SDL_CreateRenderer: %s\n", SDL_GetError() );
         return 1;
     }
+
+    configureRuntimeGpuProfile( engineContext.renderer );
+
     engineContext.backtexure = SDL_CreateTexture( engineContext.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, RENDER_W, RENDER_H );
+    applyPresentationFilter( engineContext );
 
 
 
@@ -5247,7 +5444,7 @@ int main( int argc, char **argv ) {
     GameState currentState = debug::showMenuInital ? STATE_MENU : STATE_GAME;
 
 	int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=quit
-    const int numMenuOptions = 5;
+    const int numMenuOptions = 8;
     float musicVolume = getMusicVolume(); 
     g_notesCollectedRun = 0;
     g_runElapsedSeconds = 0.0f;
@@ -5257,6 +5454,8 @@ int main( int argc, char **argv ) {
     // Main loop
     bool running = true; 
     Uint32 prev = SDL_GetTicks();
+    static int __fpsCounter = 0;
+    static float __fpsAccum = 0.0f;
     while (running)
     {
 
@@ -5264,6 +5463,15 @@ int main( int argc, char **argv ) {
         float dt = (now - prev) / 1000.0f;
         prev = now;
         if (dt > 0.05f) dt = 0.05f;
+        // Update FPS accumulator and publish to engineContext every 0.5s
+        __fpsCounter++;
+        __fpsAccum += dt;
+        if (__fpsAccum >= 0.5f)
+        {
+            engineContext.fps = float(__fpsCounter) / __fpsAccum;
+            __fpsCounter = 0;
+            __fpsAccum = 0.0f;
+        }
         if (currentState == STATE_GAME) 
         {
             g_runElapsedSeconds += dt;
@@ -5468,7 +5676,7 @@ int main( int argc, char **argv ) {
                         {
                             currentState = STATE_GAME;
                         }
-						else if (currentMenuSelection == 4) // "Quit"
+                       else if (currentMenuSelection == 7) // "Quit"
                         {
                             exit( 0 );
                         }
@@ -5487,6 +5695,24 @@ int main( int argc, char **argv ) {
                         {
 							config::viewBobbing = !config::viewBobbing;
                         }
+                        else if (currentMenuSelection == 4)
+                        {
+                            config::antiAliasing = !config::antiAliasing;
+                            applyPresentationFilter( engineContext );
+                        }
+                        else if (currentMenuSelection == 5)
+                        {
+                            config::modelQualityPreset = (config::modelQualityPreset + 2) % 3;
+                            applyQualityPresetFromConfig();
+                        }
+                        else if (currentMenuSelection == 6)
+                        {
+                            config::schoolMode = !config::schoolMode;
+                            if (config::schoolMode)
+                            {
+                                g_pendingShellDropTimers.clear();
+                            }
+                        }
                         break;
                     case SDLK_RIGHT:
                         if (currentMenuSelection == 1) // Music Toggle
@@ -5502,6 +5728,24 @@ int main( int argc, char **argv ) {
 						{
 							config::viewBobbing = !config::viewBobbing;
 						}
+                        else if (currentMenuSelection == 4)
+                        {
+                            config::antiAliasing = !config::antiAliasing;
+                            applyPresentationFilter( engineContext );
+                        }
+                        else if (currentMenuSelection == 5)
+                        {
+                            config::modelQualityPreset = (config::modelQualityPreset + 1) % 3;
+                            applyQualityPresetFromConfig();
+                        }
+                        else if (currentMenuSelection == 6)
+                        {
+                            config::schoolMode = !config::schoolMode;
+                            if (config::schoolMode)
+                            {
+                                g_pendingShellDropTimers.clear();
+                            }
+                        }
                         break;
                     }
                 }
@@ -6425,7 +6669,14 @@ int main( int argc, char **argv ) {
 
         if (currentState == STATE_MENU)
         {
-            renderMenu( engineContext, currentMenuSelection, musicVolume, config::useMusic, config::viewBobbing );
+            renderMenu( engineContext,
+                currentMenuSelection,
+                musicVolume,
+                config::useMusic,
+                config::viewBobbing,
+                config::antiAliasing,
+                config::modelQualityPreset,
+                config::schoolMode );
         }
         else if (currentState == STATE_ENDING)
         {

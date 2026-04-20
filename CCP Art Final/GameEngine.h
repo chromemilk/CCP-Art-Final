@@ -266,6 +266,7 @@ struct Engine
     Levels currentLevel = Levels::ENTRANCE;
 
     float yaw;
+    float fps = 0.0f;
 
     bool inRangeOfStatue = false;     
     bool statueChatActive = false;    
