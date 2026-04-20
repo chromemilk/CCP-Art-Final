@@ -1853,6 +1853,106 @@ static bool isMuseumLikeLevel( Levels level ) {
     return level == Levels::MUSEUM || level == Levels::MUSEUM_UPPER;
 }
 
+using Player = Engine;
+
+static void updateAudioOcclusion( Player &p, float sourceX, float sourceY ) {
+    static Uint32 lastTick = SDL_GetTicks();
+    const Uint32 nowTick = SDL_GetTicks();
+    float dt = (nowTick - lastTick) * (1.0f / 1000.0f);
+    lastTick = nowTick;
+    dt = std::clamp( dt, 0.0f, 0.05f );
+
+    if (p.map.width <= 0 || p.map.height <= 0 || p.map.tiles.empty())
+    {
+        updateMusicOcclusion( false, dt );
+        return;
+    }
+
+    const float dx = sourceX - p.positionX;
+    const float dy = sourceY - p.positionY;
+    const float sourceDistance = std::sqrt( dx * dx + dy * dy );
+    if (sourceDistance <= 0.0001f)
+    {
+        updateMusicOcclusion( false, dt );
+        return;
+    }
+
+    const float rayDirX = dx / sourceDistance;
+    const float rayDirY = dy / sourceDistance;
+
+    int mapX = int( p.positionX );
+    int mapY = int( p.positionY );
+
+    const float deltaDistX = (std::fabs( rayDirX ) < 1e-6f) ? 1e30f : std::fabs( 1.0f / rayDirX );
+    const float deltaDistY = (std::fabs( rayDirY ) < 1e-6f) ? 1e30f : std::fabs( 1.0f / rayDirY );
+
+    int stepX = 0;
+    int stepY = 0;
+    float sideDistX = 0.0f;
+    float sideDistY = 0.0f;
+
+    if (rayDirX < 0.0f)
+    {
+        stepX = -1;
+        sideDistX = (p.positionX - float( mapX )) * deltaDistX;
+    }
+    else
+    {
+        stepX = 1;
+        sideDistX = (float( mapX ) + 1.0f - p.positionX) * deltaDistX;
+    }
+
+    if (rayDirY < 0.0f)
+    {
+        stepY = -1;
+        sideDistY = (p.positionY - float( mapY )) * deltaDistY;
+    }
+    else
+    {
+        stepY = 1;
+        sideDistY = (float( mapY ) + 1.0f - p.positionY) * deltaDistY;
+    }
+
+    bool blocked = false;
+    const int maxSteps = std::max( 8, p.map.width * p.map.height );
+    for (int step = 0; step < maxSteps; ++step)
+    {
+        float travelDist = 0.0f;
+
+        if (sideDistX < sideDistY)
+        {
+            travelDist = sideDistX;
+            sideDistX += deltaDistX;
+            mapX += stepX;
+        }
+        else
+        {
+            travelDist = sideDistY;
+            sideDistY += deltaDistY;
+            mapY += stepY;
+        }
+
+        if (travelDist >= sourceDistance)
+        {
+            break;
+        }
+
+        if (mapX < 0 || mapY < 0 || mapX >= p.map.width || mapY >= p.map.height)
+        {
+            break;
+        }
+
+        const int tile = p.map.tiles[ mapY * p.map.width + mapX ];
+        if (tile == 1 || tile == 2)
+        {
+            blocked = true;
+            break;
+        }
+    }
+
+    updateMusicOcclusion( blocked, dt );
+}
+
 static bool museumPowerFlickerLowPhase() {
     if (!g_powerRestoreFlickerActive) return false;
     const float t = g_powerRestoreFlickerTimer;
@@ -6980,6 +7080,13 @@ int main( int argc, char **argv ) {
             __fpsCounter = 0;
             __fpsAccum = 0.0f;
         }
+
+        updateMusicListener( engineContext.positionX, engineContext.positionY, engineContext.directionX, engineContext.directionY );
+        {
+            const sf::Vector3f source = getMusicSourcePosition();
+            updateAudioOcclusion( engineContext, source.x, source.y );
+        }
+
         if (currentState == STATE_GAME) 
         {
             g_runElapsedSeconds += dt;
