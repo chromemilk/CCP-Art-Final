@@ -5,6 +5,9 @@
 #include <iostream>
 #include <filesystem> 
 #include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 #include <array>
 #include <memory>
 #include <limits>
@@ -13,6 +16,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <ctime>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -1600,9 +1604,44 @@ static bool g_detectedPerfLowMode = false;
 static float g_detectedWallRenderDistance = 42.0f;
 static float g_detectedWorldModelRenderDistance = 22.0f;
 static std::string g_rendererBackend = "unknown";
+static bool g_multithreadingEnabled = true;
+static unsigned int g_logicalThreadCount = std::max( 1u, std::thread::hardware_concurrency() );
+static unsigned int g_detectedThreadCount = 1u;
+
+static std::vector<std::thread> g_rasterWorkers;
+static std::mutex g_rasterWorkMutex;
+static std::condition_variable g_rasterWorkCv;
+static std::condition_variable g_rasterDoneCv;
+static bool g_rasterPoolShutdown = false;
+static bool g_rasterJobAvailable = false;
+static uint64_t g_rasterJobSerial = 0;
+static unsigned int g_rasterJobWorkerCount = 0;
+static unsigned int g_rasterJobCompleted = 0;
+static Engine *g_rasterJobEngine = nullptr;
+static std::vector<float> *g_rasterJobMeshDepth = nullptr;
+static const std::vector<float> *g_rasterJobWallDepth = nullptr;
+static float g_rasterJobPitchOffset = 0.0f;
+
+static unsigned int estimateCpuRasterWorkerThreads( unsigned int logicalThreadCount ) {
+    logicalThreadCount = std::max( 1u, logicalThreadCount );
+
+    // Heuristic: on SMT/HT systems, using all logical threads for this memory-heavy raster path
+    // can hurt due to sibling-core contention and cache pressure.
+    unsigned int physicalLike = logicalThreadCount;
+    if (logicalThreadCount >= 8 && (logicalThreadCount % 2u) == 0u)
+    {
+        physicalLike = logicalThreadCount / 2u;
+    }
+
+    return std::max( 1u, physicalLike );
+}
 
 static int getGpuRenderMode() {
     return std::clamp( config::gpuRenderMode, 0, 2 );
+}
+
+static int getAntiAliasingMode() {
+    return std::clamp( config::antiAliasingMode, 0, 2 );
 }
 
 static bool isGpuModelRenderingEnabled() {
@@ -1666,6 +1705,7 @@ static void configureRuntimeGpuProfile( SDL_Renderer *renderer ) {
     std::cout << "[Renderer] " << g_rendererBackend
         << " | gpuModelRendering=" << (g_useGpuModelRendering ? "true" : "false")
         << " | gpuMode=" << gpuRenderModeLabel()
+        << " | cpuRasterThreads=" << g_detectedThreadCount << "/" << g_logicalThreadCount
         << " | perfLowMode=" << (g_perfLowMode ? "true" : "false")
         << " | wallRenderDistance=" << g_wallRenderDistance
         << " | modelRenderDistance=" << g_worldModelRenderDistance
@@ -4170,11 +4210,23 @@ static void renderEndingScreen( Engine &engineContext ) {
     drawString16x16( engineContext, x + 20, y + h - 34, "[R] Restart   [ESC] Menu", rgb( 210, 210, 210 ), w - 40, 1, 1, false );
 }
 
-static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset ) {
-    if (g_worldModels.empty()) return;
+static int wrapTextureCoord( int value, int size ) {
+    if (size <= 0) return 0;
+    value %= size;
+    if (value < 0) value += size;
+    return value;
+}
+
+static void renderWorldModelsRange(
+    Engine &engineContext,
+    std::vector<float> &meshInvDepthBuffer,
+    const std::vector<float> &wallInvDepthBuffer,
+    float pitchOffset,
+    int yStartInclusive,
+    int yEndExclusive ) {
+    if (yStartInclusive >= yEndExclusive) return;
 
     const float projScaleY = (RENDER_W * 0.5f);
-    const float projScaleX = (RENDER_W * 0.5f);
     const float horizon = (RENDER_H * 0.5f) + pitchOffset;
     const float camHeight = 0.52f;
     const float nearClip = 0.18f;
@@ -4183,7 +4235,19 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
     const float kViewPreload = 0.28f;
     const float kCullingEpsilon = 0.015f;
 
-    struct ProjVert { float sx = 0, sy = 0, z = -1; glm::vec3 world{0.0f}; glm::vec3 color{1.0f}; glm::vec2 uv{0.0f}; bool valid = false; };
+    struct CpuProjVert {
+        float sx = 0.0f;
+        float sy = 0.0f;
+        float z = -1.0f;
+        glm::vec3 world{0.0f};
+        glm::vec3 color{1.0f};
+        glm::vec2 uv{0.0f};
+        bool valid = false;
+    };
+
+    auto toFixed256 = []( float v )->int {
+        return std::clamp( int( v * 256.0f + 0.5f ), 0, 256 );
+    };
 
     for (const auto &inst : g_worldModels)
     {
@@ -4199,22 +4263,12 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         const float centerTx = invDet * (engineContext.directionY * centerDx - engineContext.directionX * centerDy);
         const float centerTz = invDet * (-engineContext.planeY * centerDx + engineContext.planeX * centerDy);
 
-        if ((centerTz + modelRadius) <= nearClip)
-        {
-            continue;
-        }
-
-        if ((centerTz - modelRadius) > g_worldModelRenderDistance)
-        {
-            continue;
-        }
+        if ((centerTz + modelRadius) <= nearClip) continue;
+        if ((centerTz - modelRadius) > g_worldModelRenderDistance) continue;
 
         const float txRadius = modelRadius / std::max( 0.001f, FOV_TAN );
         const float horizontalLimit = (1.0f + kViewPreload) * std::max( centerTz, nearClip );
-        if ((centerTx - txRadius) > horizontalLimit || (centerTx + txRadius) < -horizontalLimit)
-        {
-            continue;
-        }
+        if ((centerTx - txRadius) > horizontalLimit || (centerTx + txRadius) < -horizontalLimit) continue;
 
         const float centerScreenY = horizon - ((modelCenterY - camHeight) * projScaleY / std::max( centerTz, nearClip ));
         const float verticalRadiusPx = (projScaleY * modelRadius) / std::max( centerTz, nearClip );
@@ -4224,10 +4278,9 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             continue;
         }
 
-        std::vector<ProjVert> projected;
-        projected.resize( inst.model->vertices.size() );
-        std::vector<glm::vec3> transformed;
-        transformed.resize( inst.model->vertices.size(), glm::vec3( 0.0f ) );
+        std::vector<CpuProjVert> projected( inst.model->vertices.size() );
+        std::vector<glm::vec3> transformed( inst.model->vertices.size(), glm::vec3( 0.0f ) );
+
         const float timeSeconds = SDL_GetTicks() * 0.001f;
         const float yawNow = inst.yaw + (inst.spinYaw ? (inst.spinSpeed * timeSeconds) : 0.0f);
         const glm::quat qYaw = glm::angleAxis( yawNow, glm::vec3( 0.0f, 1.0f, 0.0f ) );
@@ -4240,12 +4293,11 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             (inst.model->boundsMin.z + inst.model->boundsMax.z) * 0.5f );
 
         float modelMinY = std::numeric_limits<float>::max();
-        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        for (size_t vi = 0; vi < inst.model->vertices.size(); ++vi)
         {
-            const glm::vec3 v = inst.model->vertices[ i ];
-            const glm::vec3 local = (v - pivot) * inst.scale;
-            transformed[ i ] = q * local;
-            modelMinY = std::min( modelMinY, transformed[ i ].y );
+            const glm::vec3 local = (inst.model->vertices[ vi ] - pivot) * inst.scale;
+            transformed[ vi ] = q * local;
+            modelMinY = std::min( modelMinY, transformed[ vi ].y );
         }
         if (!std::isfinite( modelMinY )) modelMinY = 0.0f;
 
@@ -4256,9 +4308,9 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         float modelMaxSy = std::numeric_limits<float>::lowest();
         float modelNearestZ = std::numeric_limits<float>::max();
 
-        for (size_t i = 0; i < inst.model->vertices.size(); ++i)
+        for (size_t vi = 0; vi < inst.model->vertices.size(); ++vi)
         {
-            const glm::vec3 r = transformed[ i ];
+            const glm::vec3 r = transformed[ vi ];
 
             const float wx = inst.x + r.x;
             const float wy = (r.y - modelMinY) + inst.heightOffset;
@@ -4270,19 +4322,19 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
             const float tz = invDet * (-engineContext.planeY * dx + engineContext.planeX * dy);
             if (tz <= nearClip) continue;
 
-            projected[ i ].sx = (RENDER_W * 0.5f) * (1.0f + (tx / tz));
-            projected[ i ].sy = horizon - ((wy - camHeight) * projScaleY / tz);
-            projected[ i ].z = tz;
-            projected[ i ].world = glm::vec3( wx, wy, wz );
-            if (i < inst.model->colors.size()) projected[ i ].color = inst.model->colors[ i ];
-            if (i < inst.model->uvs.size()) projected[ i ].uv = inst.model->uvs[ i ];
-            projected[ i ].valid = true;
+            projected[ vi ].sx = (RENDER_W * 0.5f) * (1.0f + (tx / tz));
+            projected[ vi ].sy = horizon - ((wy - camHeight) * projScaleY / tz);
+            projected[ vi ].z = tz;
+            projected[ vi ].world = glm::vec3( wx, wy, wz );
+            if (vi < inst.model->colors.size()) projected[ vi ].color = inst.model->colors[ vi ];
+            if (vi < inst.model->uvs.size()) projected[ vi ].uv = inst.model->uvs[ vi ];
+            projected[ vi ].valid = true;
 
             hasProjectedVerts = true;
-            modelMinSx = std::min( modelMinSx, projected[ i ].sx );
-            modelMaxSx = std::max( modelMaxSx, projected[ i ].sx );
-            modelMinSy = std::min( modelMinSy, projected[ i ].sy );
-            modelMaxSy = std::max( modelMaxSy, projected[ i ].sy );
+            modelMinSx = std::min( modelMinSx, projected[ vi ].sx );
+            modelMaxSx = std::max( modelMaxSx, projected[ vi ].sx );
+            modelMinSy = std::min( modelMinSy, projected[ vi ].sy );
+            modelMaxSy = std::max( modelMaxSy, projected[ vi ].sy );
             modelNearestZ = std::min( modelNearestZ, tz );
         }
 
@@ -4293,13 +4345,11 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         const int modelScreenMinY = std::max( 0, (int)std::floor( modelMinSy ) );
         const int modelScreenMaxY = std::min( RENDER_H - 1, (int)std::ceil( modelMaxSy ) );
         if (modelScreenMinX > modelScreenMaxX || modelScreenMinY > modelScreenMaxY) continue;
+        if (modelScreenMaxY < yStartInclusive || modelScreenMinY >= yEndExclusive) continue;
 
         const int modelScreenW = modelScreenMaxX - modelScreenMinX + 1;
         const int modelScreenH = modelScreenMaxY - modelScreenMinY + 1;
-        if (g_perfLowMode && (modelScreenW * modelScreenH) <= 20)
-        {
-            continue;
-        }
+        if (g_perfLowMode && (modelScreenW * modelScreenH) <= 20) continue;
 
         bool occlusionRejected = true;
         int sampleStepX = std::max( 1, (modelScreenMaxX - modelScreenMinX + 1) / 24 );
@@ -4325,30 +4375,31 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
         const int triStride = std::max( 1, g_meshTriangleStride );
         const int rasterStep = std::max( 1, g_meshRasterStep );
 
-        for (size_t i = 0; i + 2 < inst.model->indices.size(); i += 3)
+        for (size_t ii = 0; ii + 2 < inst.model->indices.size(); ii += 3)
         {
-            const int triIdx = int( i / 3 );
+            const int triIdx = int( ii / 3 );
             if (triStride > 1 && (triIdx % triStride) != 0) continue;
             if (renderedTrianglesForModel >= triangleBudget) break;
 
-            const uint32_t i0 = inst.model->indices[ i + 0 ];
-            const uint32_t i1 = inst.model->indices[ i + 1 ];
-            const uint32_t i2 = inst.model->indices[ i + 2 ];
+            const uint32_t i0 = inst.model->indices[ ii + 0 ];
+            const uint32_t i1 = inst.model->indices[ ii + 1 ];
+            const uint32_t i2 = inst.model->indices[ ii + 2 ];
             if (i0 >= projected.size() || i1 >= projected.size() || i2 >= projected.size()) continue;
 
-            const ProjVert &a = projected[ i0 ];
-            const ProjVert &b = projected[ i1 ];
-            const ProjVert &c = projected[ i2 ];
+            const CpuProjVert &a = projected[ i0 ];
+            const CpuProjVert &b = projected[ i1 ];
+            const CpuProjVert &c = projected[ i2 ];
             if (!a.valid || !b.valid || !c.valid) continue;
             if (a.z <= nearClip || b.z <= nearClip || c.z <= nearClip) continue;
 
             const float area = (b.sx - a.sx) * (c.sy - a.sy) - (b.sy - a.sy) * (c.sx - a.sx);
-            if (std::fabs( area ) < 1e-4f) continue;
+            if (std::fabs( area ) < 1e-5f) continue;
 
-            const int minX = std::max( 0, (int)std::floor( std::min( { a.sx, b.sx, c.sx } ) ) );
-            const int maxX = std::min( RENDER_W - 1, (int)std::ceil( std::max( { a.sx, b.sx, c.sx } ) ) );
-            const int minY = std::max( 0, (int)std::floor( std::min( { a.sy, b.sy, c.sy } ) ) );
-            const int maxY = std::min( RENDER_H - 1, (int)std::ceil( std::max( { a.sy, b.sy, c.sy } ) ) );
+            int minX = std::max( 0, (int)std::floor( std::min( { a.sx, b.sx, c.sx } ) ) );
+            int maxX = std::min( RENDER_W - 1, (int)std::ceil( std::max( { a.sx, b.sx, c.sx } ) ) );
+            int minY = std::max( 0, (int)std::floor( std::min( { a.sy, b.sy, c.sy } ) ) );
+            int maxY = std::min( RENDER_H - 1, (int)std::ceil( std::max( { a.sy, b.sy, c.sy } ) ) );
+
             if (minX > maxX || minY > maxY) continue;
             if ((maxX - minX) > (RENDER_W - 8) || (maxY - minY) > (RENDER_H - 8)) continue;
 
@@ -4365,109 +4416,343 @@ static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDe
                 }
             }
 
+            minY = std::max( minY, yStartInclusive );
+            maxY = std::min( maxY, yEndExclusive - 1 );
+            if (minY > maxY) continue;
+
             glm::vec3 nrm = glm::cross( b.world - a.world, c.world - a.world );
             const float nLen = glm::length( nrm );
             if (nLen <= 1e-6f) continue;
             nrm /= nLen;
             const float lambert = std::clamp( 0.35f + 0.65f * std::fabs( glm::dot( nrm, lightDir ) ), 0.20f, 1.0f );
 
+            const float triDepth = (a.z + b.z + c.z) * (1.0f / 3.0f);
+            float distanceShade;
+            if (engineContext.caveMode)
+            {
+                const float R = engineContext.lightRadius;
+                const float t = std::clamp( 1.0f - std::pow( triDepth / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
+                distanceShade = std::max( engineContext.caveAmbient, t );
+            }
+            else
+            {
+                distanceShade = 1.0f / (1.0f + engineContext.indoorShadeLinear * triDepth + engineContext.indoorShadeQuadratic * triDepth * triDepth);
+                distanceShade = std::clamp( distanceShade, engineContext.indoorShadeMin, 1.0f );
+            }
+
+            glm::vec3 materialColor( 1.0f );
+            if (triIdx >= 0 && triIdx < (int)inst.model->triangleBaseColorFactor.size())
+            {
+                const glm::vec4 f = inst.model->triangleBaseColorFactor[ triIdx ];
+                materialColor = glm::vec3( f.r, f.g, f.b );
+            }
+
+            int texIdx = -1;
+            if (triIdx >= 0 && triIdx < (int)inst.model->triangleTextureIndex.size())
+            {
+                texIdx = inst.model->triangleTextureIndex[ triIdx ];
+            }
+
+            const Image *tex = nullptr;
+            if (texIdx >= 0 && texIdx < (int)inst.model->baseColorTextures.size())
+            {
+                const Image &candidate = inst.model->baseColorTextures[ texIdx ];
+                if (candidate.width > 0 && candidate.height > 0)
+                {
+                    tex = &candidate;
+                }
+            }
+
+            glm::vec3 vertexMul( 1.0f );
+            if (!tex)
+            {
+                vertexMul = (a.color + b.color + c.color) * (1.0f / 3.0f);
+            }
+
+            const float lit = std::clamp( 0.16f + 0.90f * (lambert * distanceShade), 0.16f, 1.00f );
+            const int shadeR256 = toFixed256( materialColor.r * vertexMul.r * lit );
+            const int shadeG256 = toFixed256( materialColor.g * vertexMul.g * lit );
+            const int shadeB256 = toFixed256( materialColor.b * vertexMul.b * lit );
+            const Uint32 solidColor = rgb(
+                Uint8( (255 * shadeR256) >> 8 ),
+                Uint8( (255 * shadeG256) >> 8 ),
+                Uint8( (255 * shadeB256) >> 8 ) );
+
             const float invZ0 = 1.0f / std::max( 0.0001f, a.z );
             const float invZ1 = 1.0f / std::max( 0.0001f, b.z );
             const float invZ2 = 1.0f / std::max( 0.0001f, c.z );
 
+            const float invArea = 1.0f / area;
+
+            // Edge stepping for E(p) = (v0.x - p.x)*(v1.y - p.y) - (v0.y - p.y)*(v1.x - p.x)
+            const float w0dx = (b.sy - c.sy) * float( rasterStep );
+            const float w0dy = (c.sx - b.sx) * float( rasterStep );
+            const float w1dx = (c.sy - a.sy) * float( rasterStep );
+            const float w1dy = (a.sx - c.sx) * float( rasterStep );
+            const float w2dx = (a.sy - b.sy) * float( rasterStep );
+            const float w2dy = (b.sx - a.sx) * float( rasterStep );
+
+            const float invZdx = (w0dx * invZ0 + w1dx * invZ1 + w2dx * invZ2) * invArea;
+            const float invZdy = (w0dy * invZ0 + w1dy * invZ1 + w2dy * invZ2) * invArea;
+
+            const float sampleStartX = float( minX ) + 0.5f;
+            const float sampleStartY = float( minY ) + 0.5f;
+
+            const float w0RowInit =
+                (b.sx - sampleStartX) * (c.sy - sampleStartY) -
+                (b.sy - sampleStartY) * (c.sx - sampleStartX);
+            const float w1RowInit =
+                (c.sx - sampleStartX) * (a.sy - sampleStartY) -
+                (c.sy - sampleStartY) * (a.sx - sampleStartX);
+            const float w2RowInit =
+                (a.sx - sampleStartX) * (b.sy - sampleStartY) -
+                (a.sy - sampleStartY) * (b.sx - sampleStartX);
+
+            float w0Row = w0RowInit;
+            float w1Row = w1RowInit;
+            float w2Row = w2RowInit;
+
+            float invZRow = (w0Row * invZ0 + w1Row * invZ1 + w2Row * invZ2) * invArea;
+
+            int uFixedRow = 0;
+            int vFixedRow = 0;
+            int duFixedX = 0;
+            int dvFixedX = 0;
+            int duFixedY = 0;
+            int dvFixedY = 0;
+
+            if (tex)
+            {
+                const float u0 = a.uv.x;
+                const float u1 = b.uv.x;
+                const float u2 = c.uv.x;
+                const float v0 = a.uv.y;
+                const float v1 = b.uv.y;
+                const float v2 = c.uv.y;
+
+                const float udx = (w0dx * u0 + w1dx * u1 + w2dx * u2) * invArea;
+                const float udy = (w0dy * u0 + w1dy * u1 + w2dy * u2) * invArea;
+                const float vdx = (w0dx * v0 + w1dx * v1 + w2dx * v2) * invArea;
+                const float vdy = (w0dy * v0 + w1dy * v1 + w2dy * v2) * invArea;
+
+                const float uStart = (w0Row * u0 + w1Row * u1 + w2Row * u2) * invArea;
+                const float vStart = (w0Row * v0 + w1Row * v1 + w2Row * v2) * invArea;
+
+                const float uScale = float( tex->width ) * 65536.0f;
+                const float vScale = float( tex->height ) * 65536.0f;
+
+                uFixedRow = int( uStart * uScale );
+                vFixedRow = int( vStart * vScale );
+                duFixedX = int( udx * uScale );
+                dvFixedX = int( vdx * vScale );
+                duFixedY = int( udy * uScale );
+                dvFixedY = int( vdy * vScale );
+            }
+
+            const bool areaPositive = area > 0.0f;
+
             for (int y = minY; y <= maxY; y += rasterStep)
             {
+                float w0 = w0Row;
+                float w1 = w1Row;
+                float w2 = w2Row;
+                float invZ = invZRow;
+                int uFixed = uFixedRow;
+                int vFixed = vFixedRow;
+
                 for (int x = minX; x <= maxX; x += rasterStep)
                 {
-                    const float px = x + 0.5f;
-                    const float py = y + 0.5f;
+                    const bool inside = areaPositive
+                        ? (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f)
+                        : (w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f);
 
-                    const float w0raw = (b.sx - px) * (c.sy - py) - (b.sy - py) * (c.sx - px);
-                    const float w1raw = (c.sx - px) * (a.sy - py) - (c.sy - py) * (a.sx - px);
-                    const float w2raw = (a.sx - px) * (b.sy - py) - (a.sy - py) * (b.sx - px);
-
-                    if (area > 0.0f)
+                    if (inside && invZ > wallInvDepthBuffer[ x ])
                     {
-                        if (w0raw < 0.0f || w1raw < 0.0f || w2raw < 0.0f) continue;
-                    }
-                    else
-                    {
-                        if (w0raw > 0.0f || w1raw > 0.0f || w2raw > 0.0f) continue;
-                    }
-
-                    const float w0 = w0raw / area;
-                    const float w1 = w1raw / area;
-                    const float w2 = w2raw / area;
-
-                    const glm::vec3 vertexColor =
-                        (a.color * w0) +
-                        (b.color * w1) +
-                        (c.color * w2);
-
-                    glm::vec3 materialColor( 1.0f );
-                    if (triIdx >= 0 && triIdx < (int)inst.model->triangleBaseColorFactor.size())
-                    {
-                        const glm::vec4 f = inst.model->triangleBaseColorFactor[ triIdx ];
-                        materialColor = glm::vec3( f.r, f.g, f.b );
-                    }
-
-                    glm::vec3 texColor( 1.0f );
-                    int texIdx = -1;
-                    if (triIdx >= 0 && triIdx < (int)inst.model->triangleTextureIndex.size())
-                    {
-                        texIdx = inst.model->triangleTextureIndex[ triIdx ];
-                    }
-                    const bool hasTexture = (texIdx >= 0 && texIdx < (int)inst.model->baseColorTextures.size());
-                    if (hasTexture)
-                    {
-                        const Image &tex = inst.model->baseColorTextures[ texIdx ];
-                        if (tex.width > 0 && tex.height > 0)
+                        const int pix = y * RENDER_W + x;
+                        if (invZ > meshInvDepthBuffer[ pix ])
                         {
-                            const glm::vec2 uv = (a.uv * w0) + (b.uv * w1) + (c.uv * w2);
-                            float uu = uv.x - std::floor( uv.x );
-                            float vv = uv.y - std::floor( uv.y );
-                            int tx = std::clamp( int( uu * tex.width ), 0, tex.width - 1 );
-                            int ty = std::clamp( int( vv * tex.height ), 0, tex.height - 1 );
-                            Uint32 tc = tex.sample( tx, ty );
-                            texColor.r = float( (tc >> 16) & 255 ) / 255.0f;
-                            texColor.g = float( (tc >> 8) & 255 ) / 255.0f;
-                            texColor.b = float( tc & 255 ) / 255.0f;
+                            if (tex)
+                            {
+                                const int tx = wrapTextureCoord( uFixed >> 16, tex->width );
+                                const int ty = wrapTextureCoord( vFixed >> 16, tex->height );
+                                const Uint32 tc = tex->sample( tx, ty );
+                                const Uint8 r = Uint8( (int( (tc >> 16) & 255 ) * shadeR256) >> 8 );
+                                const Uint8 g = Uint8( (int( (tc >> 8) & 255 ) * shadeG256) >> 8 );
+                                const Uint8 bch = Uint8( (int( tc & 255 ) * shadeB256) >> 8 );
+                                engineContext.backbuffer[ pix ] = rgb( r, g, bch );
+                            }
+                            else
+                            {
+                                engineContext.backbuffer[ pix ] = solidColor;
+                            }
+
+                            meshInvDepthBuffer[ pix ] = invZ;
                         }
                     }
 
-                    const float invZ = (w0 * invZ0) + (w1 * invZ1) + (w2 * invZ2);
-                    const float z = 1.0f / std::max( 0.0001f, invZ );
-                    if (z >= engineContext.zbuffer[ x ]) continue;
-
-                    const int pix = y * RENDER_W + x;
-                    if (z >= meshDepthBuffer[ pix ]) continue;
-
-                    float distanceShade;
-                    if (engineContext.caveMode)
-                    {
-                        float R = engineContext.lightRadius;
-                        float t = std::clamp( 1.0f - std::pow( z / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
-                        distanceShade = std::max( engineContext.caveAmbient, t );
-                    }
-                    else
-                    {
-                        distanceShade = 1.0f / (1.0f + engineContext.indoorShadeLinear * z + engineContext.indoorShadeQuadratic * z * z);
-                        distanceShade = std::clamp( distanceShade, engineContext.indoorShadeMin, 1.0f );
-                    }
-
-                    const float lit = std::clamp( 0.16f + 0.90f * (lambert * distanceShade), 0.16f, 1.00f );
-                    const glm::vec3 vertexMul = hasTexture ? glm::vec3( 1.0f ) : vertexColor;
-                    Uint8 r = Uint8( std::clamp( materialColor.r * vertexMul.r * texColor.r * lit * 255.0f, 0.0f, 255.0f ) );
-                    Uint8 g = Uint8( std::clamp( materialColor.g * vertexMul.g * texColor.g * lit * 255.0f, 0.0f, 255.0f ) );
-                    Uint8 bcol = Uint8( std::clamp( materialColor.b * vertexMul.b * texColor.b * lit * 255.0f, 0.0f, 255.0f ) );
-                    putPix( engineContext, x, y, rgb( r, g, bcol ) );
-                    meshDepthBuffer[ pix ] = z;
+                    w0 += w0dx;
+                    w1 += w1dx;
+                    w2 += w2dx;
+                    invZ += invZdx;
+                    uFixed += duFixedX;
+                    vFixed += dvFixedX;
                 }
+
+                w0Row += w0dy;
+                w1Row += w1dy;
+                w2Row += w2dy;
+                invZRow += invZdy;
+                uFixedRow += duFixedY;
+                vFixedRow += dvFixedY;
             }
 
             ++renderedTrianglesForModel;
         }
     }
+}
+
+static void rasterWorkerThreadMain( unsigned int workerIndex ) {
+    uint64_t observedSerial = 0;
+
+    while (true)
+    {
+        Engine *jobEngine = nullptr;
+        std::vector<float> *jobMeshDepth = nullptr;
+        const std::vector<float> *jobWallDepth = nullptr;
+        float jobPitchOffset = 0.0f;
+        unsigned int jobWorkerCount = 0;
+        uint64_t localSerial = 0;
+
+        {
+            std::unique_lock<std::mutex> lock( g_rasterWorkMutex );
+            g_rasterWorkCv.wait( lock, [&]() {
+                return g_rasterPoolShutdown || (g_rasterJobAvailable && g_rasterJobSerial != observedSerial);
+            } );
+
+            if (g_rasterPoolShutdown)
+            {
+                return;
+            }
+
+            localSerial = g_rasterJobSerial;
+            observedSerial = localSerial;
+            jobEngine = g_rasterJobEngine;
+            jobMeshDepth = g_rasterJobMeshDepth;
+            jobWallDepth = g_rasterJobWallDepth;
+            jobPitchOffset = g_rasterJobPitchOffset;
+            jobWorkerCount = g_rasterJobWorkerCount;
+        }
+
+        if (workerIndex < jobWorkerCount && jobEngine && jobMeshDepth && jobWallDepth)
+        {
+            const int y0 = int( (workerIndex * RENDER_H) / jobWorkerCount );
+            const int y1 = int( ((workerIndex + 1) * RENDER_H) / jobWorkerCount );
+            renderWorldModelsRange( *jobEngine, *jobMeshDepth, *jobWallDepth, jobPitchOffset, y0, y1 );
+
+            std::lock_guard<std::mutex> doneLock( g_rasterWorkMutex );
+            if (g_rasterJobSerial == localSerial)
+            {
+                ++g_rasterJobCompleted;
+                if (g_rasterJobCompleted >= g_rasterJobWorkerCount)
+                {
+                    g_rasterDoneCv.notify_one();
+                }
+            }
+        }
+    }
+}
+
+static void initRasterWorkerPool() {
+    if (!g_rasterWorkers.empty()) return;
+    if (g_detectedThreadCount <= 1u) return;
+
+    g_rasterPoolShutdown = false;
+    g_rasterJobAvailable = false;
+    g_rasterJobSerial = 0;
+    g_rasterJobWorkerCount = 0;
+    g_rasterJobCompleted = 0;
+
+    g_rasterWorkers.reserve( g_detectedThreadCount );
+    for (unsigned int i = 0; i < g_detectedThreadCount; ++i)
+    {
+        g_rasterWorkers.emplace_back( rasterWorkerThreadMain, i );
+    }
+}
+
+static void shutdownRasterWorkerPool() {
+    {
+        std::lock_guard<std::mutex> lock( g_rasterWorkMutex );
+        g_rasterPoolShutdown = true;
+    }
+    g_rasterWorkCv.notify_all();
+
+    for (auto &t : g_rasterWorkers)
+    {
+        if (t.joinable()) t.join();
+    }
+    g_rasterWorkers.clear();
+}
+
+static void dispatchRasterWorkers(
+    Engine &engineContext,
+    std::vector<float> &meshDepthBuffer,
+    const std::vector<float> &wallInvDepthBuffer,
+    float pitchOffset,
+    unsigned int workerCount ) {
+    workerCount = std::max( 1u, workerCount );
+
+    {
+        std::lock_guard<std::mutex> lock( g_rasterWorkMutex );
+        g_rasterJobEngine = &engineContext;
+        g_rasterJobMeshDepth = &meshDepthBuffer;
+        g_rasterJobWallDepth = &wallInvDepthBuffer;
+        g_rasterJobPitchOffset = pitchOffset;
+        g_rasterJobWorkerCount = workerCount;
+        g_rasterJobCompleted = 0;
+        g_rasterJobAvailable = true;
+        ++g_rasterJobSerial;
+    }
+
+    g_rasterWorkCv.notify_all();
+
+    std::unique_lock<std::mutex> doneLock( g_rasterWorkMutex );
+    g_rasterDoneCv.wait( doneLock, [&]() {
+        return g_rasterJobCompleted >= g_rasterJobWorkerCount;
+    } );
+}
+
+static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset ) {
+    if (g_worldModels.empty()) return;
+
+    std::vector<float> wallInvDepthBuffer;
+    wallInvDepthBuffer.resize( RENDER_W, 0.0f );
+    for (int x = 0; x < RENDER_W; ++x)
+    {
+        const float wz = engineContext.zbuffer[ x ];
+        wallInvDepthBuffer[ x ] = (wz > 0.0001f) ? (1.0f / wz) : std::numeric_limits<float>::infinity();
+    }
+
+    const int fullYStart = 0;
+    const int fullYEnd = RENDER_H;
+    const unsigned int threadCount = std::max( 1u, g_detectedThreadCount );
+    const bool useMultithreading = g_multithreadingEnabled && threadCount > 1 && g_worldModels.size() >= 4;
+
+    if (!useMultithreading)
+    {
+        renderWorldModelsRange( engineContext, meshDepthBuffer, wallInvDepthBuffer, pitchOffset, fullYStart, fullYEnd );
+        return;
+    }
+
+    const unsigned int maxUsefulThreadsByRows = std::max( 1u, (unsigned int)(RENDER_H / 96) );
+    const unsigned int workerCount = std::max( 1u, std::min( threadCount, maxUsefulThreadsByRows ) );
+
+    if (workerCount <= 1u || g_rasterWorkers.empty())
+    {
+        renderWorldModelsRange( engineContext, meshDepthBuffer, wallInvDepthBuffer, pitchOffset, fullYStart, fullYEnd );
+        return;
+    }
+
+    dispatchRasterWorkers( engineContext, meshDepthBuffer, wallInvDepthBuffer, pitchOffset, workerCount );
 }
 
 static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
@@ -5192,7 +5477,7 @@ static void render( Engine &engineContext, float dt ) {
     if (!isGpuModelRenderingEnabled())
     {
         static std::vector<float> meshDepthBuffer;
-        meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
+        meshDepthBuffer.assign( RENDER_W * RENDER_H, 0.0f );
         renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
     }
     else
@@ -5201,7 +5486,7 @@ static void render( Engine &engineContext, float dt ) {
         if (config::gpuRenderMode == 1)
         {
             static std::vector<float> meshDepthBuffer;
-            meshDepthBuffer.assign( RENDER_W * RENDER_H, std::numeric_limits<float>::infinity() );
+            meshDepthBuffer.assign( RENDER_W * RENDER_H, 0.0f );
             renderWorldModels( engineContext, meshDepthBuffer, effectivePitchOffset );
         }
     }
@@ -5673,9 +5958,20 @@ static void render( Engine &engineContext, float dt ) {
 
     
 }
-static void renderMenu( Engine &engineContext, int selection, float volume, bool musicOn, bool viewBob, bool antiAliasing, int modelQualityPreset, int gpuRenderMode, bool schoolMode ) {
+static void renderMenu(
+    Engine &engineContext,
+    int selection,
+    float volume,
+    bool musicOn,
+    bool viewBob,
+    int antiAliasingMode,
+    int modelQualityPreset,
+    int gpuRenderMode,
+    bool multithreadingEnabled,
+    unsigned int detectedThreadCount,
+    bool schoolMode ) {
     // Dimensions
-    int width = 460, height = 350;
+    int width = 460, height = 376;
     int x = (RENDER_W - width) / 2;
     int y = (RENDER_H - height) / 2;
 
@@ -5746,7 +6042,10 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     std::string viewBobEnabler = viewBob ? "ON" : "OFF";
     drawItem( 3, "View Bobbing: " + viewBobEnabler );
 
-    drawItem( 4, std::string( "Anti-Aliasing: " ) + (antiAliasing ? "LINEAR" : "OFF") );
+    std::string antiAliasingLabel = "LINEAR";
+    if (antiAliasingMode == 0) antiAliasingLabel = "OFF";
+    else if (antiAliasingMode == 2) antiAliasingLabel = "FXAA";
+    drawItem( 4, "Anti-Aliasing: " + antiAliasingLabel );
 
     std::string quality = "BALANCED";
     if (modelQualityPreset == 0) quality = "HIGH";
@@ -5758,9 +6057,11 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
     else if (gpuRenderMode == 2) gpuMode = "FULL";
     drawItem( 6, "GPU Rendering: " + gpuMode );
 
-    drawItem( 7, std::string( "School Mode: " ) + (schoolMode ? "ON" : "OFF") );
+    drawItem( 7, std::string( "Multithreading: " ) + (multithreadingEnabled ? "ON" : "OFF") + " (" + std::to_string( std::max( 1u, detectedThreadCount ) ) + " Threads)" );
 
-    drawItem( 8, "Quit" );
+    drawItem( 8, std::string( "School Mode: " ) + (schoolMode ? "ON" : "OFF") );
+
+    drawItem( 9, "Quit" );
 
     std::string footer = "UP/DOWN Select    ENTER Confirm";
     int footW = (int)footer.length() * 4;
@@ -5769,8 +6070,64 @@ static void renderMenu( Engine &engineContext, int selection, float volume, bool
 
 static void applyPresentationFilter( Engine &engineContext ) {
     if (!engineContext.backtexure) return;
-    const SDL_ScaleMode mode = config::antiAliasing ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST;
+    SDL_ScaleMode mode = (getAntiAliasingMode() == 0) ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR;
     (void)SDL_SetTextureScaleMode( engineContext.backtexure, mode );
+}
+
+static void applyPostAAMode( Engine &engineContext ) {
+    if (getAntiAliasingMode() != 2) return;
+    if (engineContext.backbuffer.size() != size_t( RENDER_W * RENDER_H )) return;
+
+    static std::vector<Uint32> scratch;
+    scratch.resize( engineContext.backbuffer.size() );
+    scratch = engineContext.backbuffer;
+
+    auto lum = []( Uint32 c ) -> float {
+        const float r = float( (c >> 16) & 255 );
+        const float g = float( (c >> 8) & 255 );
+        const float b = float( c & 255 );
+        return 0.299f * r + 0.587f * g + 0.114f * b;
+    };
+
+    for (int y = 1; y < RENDER_H - 1; ++y)
+    {
+        for (int x = 1; x < RENDER_W - 1; ++x)
+        {
+            const int i = y * RENDER_W + x;
+            const Uint32 c = scratch[ i ];
+
+            const float gx = std::fabs( lum( scratch[ i + 1 ] ) - lum( scratch[ i - 1 ] ) );
+            const float gy = std::fabs( lum( scratch[ i + RENDER_W ] ) - lum( scratch[ i - RENDER_W ] ) );
+            const float edge = gx + gy;
+            if (edge < 26.0f) continue;
+
+            float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f;
+            for (int oy = -1; oy <= 1; ++oy)
+            {
+                for (int ox = -1; ox <= 1; ++ox)
+                {
+                    const Uint32 s = scratch[ (y + oy) * RENDER_W + (x + ox) ];
+                    sumR += float( (s >> 16) & 255 );
+                    sumG += float( (s >> 8) & 255 );
+                    sumB += float( s & 255 );
+                }
+            }
+
+            const float avgR = sumR / 9.0f;
+            const float avgG = sumG / 9.0f;
+            const float avgB = sumB / 9.0f;
+
+            const float blend = std::clamp( (edge - 26.0f) / 84.0f, 0.0f, 0.45f );
+            const float srcR = float( (c >> 16) & 255 );
+            const float srcG = float( (c >> 8) & 255 );
+            const float srcB = float( c & 255 );
+
+            const Uint8 outR = Uint8( std::clamp( srcR * (1.0f - blend) + avgR * blend, 0.0f, 255.0f ) );
+            const Uint8 outG = Uint8( std::clamp( srcG * (1.0f - blend) + avgG * blend, 0.0f, 255.0f ) );
+            const Uint8 outB = Uint8( std::clamp( srcB * (1.0f - blend) + avgB * blend, 0.0f, 255.0f ) );
+            engineContext.backbuffer[ i ] = rgb( outR, outG, outB );
+        }
+    }
 }
 
 static void renderModernCrosshairOverlay( Engine &engineContext ) {
@@ -5873,6 +6230,10 @@ int main( int argc, char **argv ) {
         return 1;
     }
 
+    g_logicalThreadCount = std::max( 1u, std::thread::hardware_concurrency() );
+    g_detectedThreadCount = estimateCpuRasterWorkerThreads( g_logicalThreadCount );
+    initRasterWorkerPool();
+
     configureRuntimeGpuProfile( engineContext.renderer );
 
     engineContext.backtexure = SDL_CreateTexture( engineContext.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, RENDER_W, RENDER_H );
@@ -5937,8 +6298,8 @@ int main( int argc, char **argv ) {
         startWakeCutscene( engineContext );
     }
 
-   int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=AA, 5=quality, 6=gpu mode, 7=school, 8=quit
-    const int numMenuOptions = 9;
+   int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=AA, 5=quality, 6=gpu mode, 7=multithreading, 8=school, 9=quit
+    const int numMenuOptions = 10;
     float musicVolume = getMusicVolume(); 
     g_notesCollectedRun = 0;
     g_runElapsedSeconds = 0.0f;
@@ -6187,7 +6548,7 @@ int main( int argc, char **argv ) {
                             startNewMuseumRun( engineContext, levels );
                             currentState = STATE_GAME;
                         }
-                       else if (currentMenuSelection == 8) // "Quit"
+                       else if (currentMenuSelection == 9) // "Quit"
                         {
                             exit( 0 );
                         }
@@ -6208,7 +6569,7 @@ int main( int argc, char **argv ) {
                         }
                         else if (currentMenuSelection == 4)
                         {
-                            config::antiAliasing = !config::antiAliasing;
+                            config::antiAliasingMode = (getAntiAliasingMode() + 2) % 3;
                             applyPresentationFilter( engineContext );
                         }
                         else if (currentMenuSelection == 5)
@@ -6221,6 +6582,10 @@ int main( int argc, char **argv ) {
                             config::gpuRenderMode = (config::gpuRenderMode + 2) % 3;
                         }
                         else if (currentMenuSelection == 7)
+                        {
+                            g_multithreadingEnabled = !g_multithreadingEnabled;
+                        }
+                        else if (currentMenuSelection == 8)
                         {
                             config::schoolMode = !config::schoolMode;
                             if (config::schoolMode)
@@ -6245,7 +6610,7 @@ int main( int argc, char **argv ) {
 						}
                         else if (currentMenuSelection == 4)
                         {
-                            config::antiAliasing = !config::antiAliasing;
+                            config::antiAliasingMode = (getAntiAliasingMode() + 1) % 3;
                             applyPresentationFilter( engineContext );
                         }
                         else if (currentMenuSelection == 5)
@@ -6258,6 +6623,10 @@ int main( int argc, char **argv ) {
                             config::gpuRenderMode = (config::gpuRenderMode + 1) % 3;
                         }
                         else if (currentMenuSelection == 7)
+                        {
+                            g_multithreadingEnabled = !g_multithreadingEnabled;
+                        }
+                        else if (currentMenuSelection == 8)
                         {
                             config::schoolMode = !config::schoolMode;
                             if (config::schoolMode)
@@ -7193,15 +7562,18 @@ int main( int argc, char **argv ) {
                 musicVolume,
                 config::useMusic,
                 config::viewBobbing,
-                config::antiAliasing,
+                getAntiAliasingMode(),
                 config::modelQualityPreset,
                 config::gpuRenderMode,
+                g_multithreadingEnabled,
+                g_detectedThreadCount,
                 config::schoolMode );
         }
         else if (currentState == STATE_ENDING)
         {
             renderEndingScreen( engineContext );
         }
+        applyPostAAMode( engineContext );
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
         SDL_RenderClear( engineContext.renderer );
@@ -7265,6 +7637,7 @@ int main( int argc, char **argv ) {
     }
 
     SDL_DestroyTexture( engineContext.backtexure );
+    shutdownRasterWorkerPool();
     SDL_DestroyRenderer( engineContext.renderer );
     SDL_DestroyWindow( engineContext.window );
     SDL_Quit();
