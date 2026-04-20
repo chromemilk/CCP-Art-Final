@@ -1,0 +1,19 @@
+PLANT 3.5 2.6 plant.bmp 0.95
+PLANT 19.5 2.6 plant.bmp 0.95
+PLANT 3.5 15.0 plant.bmp 0.90
+PLANT 19.5 15.0 plant.bmp 0.90
+
+STATUE 6.0 3.6 statue.bmp 1.00
+STATUE 17.0 3.6 statue.bmp 1.00
+
+VASE1 8.2 4.4 vase1.bmp 0.55
+VASE2 14.8 4.4 vase2.bmp 0.55
+VASE3 11.5 4.7 vase3.bmp 0.55
+
+ROPE 9.2 3.2 rope.bmp
+ROPE 10.2 3.2 rope.bmp
+ROPE 12.8 3.2 rope.bmp
+ROPE 13.8 3.2 rope.bmp
+
+TRASHCAN 2.8 14.0 trashcan.bmp 0.8
+TRASHCAN 20.2 14.0 trashcan.bmp 0.8

@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="data">
+      <UniqueIdentifier>{da944934-0dbb-4ead-b9b3-36db78dbc3d6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets">
+      <UniqueIdentifier>{3cb22fad-47a3-4152-9960-bb2e9191caa8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Constants.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Includes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GameEngine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RendererHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PhysicsHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MusicSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WalkBot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MapHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MathHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Settings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GpuPropSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="levels\museum\A_Night_To_Remember_Laufey.mp3" />
+    <Media Include="levels\museum\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\failed_door_open.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\I_Wish_You_Love_Laufey.mp3" />
+    <Media Include="levels\museum\Misty_Laufey.mp3" />
+    <Media Include="levels\museum\Nocture_Interlude_Laufey.mp3" />
+    <Media Include="levels\museum\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\pickup.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\museum\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Creepy_Cave_Noise.mp3" />
+    <Media Include="levels\cave\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\cave\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\door_creak.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\paper_rustle.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Paper_Rustle_01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Paper_Rustle_02.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="levels\transition\Sound 01.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="levels\museum\apollo.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\bench.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\BigFour.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\bulls.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\centaur.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\coins.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\corinthian_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\cup.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\door.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\doric_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\feline.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ionic_surface.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\mastaba.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\plant.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\ramses.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\rope.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\statue.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\stonehenge.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\trashcan.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase1.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase2.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\vase3.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\museum\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_cracks.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_puddles.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\floor_stains.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\statue.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_cracks.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_darkening.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\cave\wall_stain.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\ceiling.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\door.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\floor.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="levels\transition\wall.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="levels\museum\artworks.txt" />
+    <Text Include="levels\museum\artworksVerbose.txt" />
+    <Text Include="levels\museum\columns.txt" />
+    <Text Include="levels\museum\map.txt" />
+    <Text Include="levels\museum\props.txt" />
+    <Text Include="levels\cave\map.txt" />
+    <Text Include="levels\cave\props.txt" />
+    <Text Include="levels\transition\map.txt" />
+    <Text Include="levels\entrance\map.txt" />
+    <Text Include="levels\transition\props.txt" />
+    <Text Include="levels\entrance\props.txt" />
+    <Text Include="levels\museum_upper\editor_models_level_2_map.txt" />
+  </ItemGroup>
+</Project>
