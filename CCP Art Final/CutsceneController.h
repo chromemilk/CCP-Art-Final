@@ -1,4 +1,5 @@
 #pragma once
+#pragma once
 
 class CutsceneController
 {
@@ -82,6 +83,13 @@ public:
                 scriptedPanActive = false;
                 scriptedPanElapsed = 0.0f;
             }
+
+            const float turnIntensity = std::clamp( std::fabs( scriptedPanSpeed ) * 12.0f, 0.2f, 1.0f );
+            updateTurnHeadShake( dt, true, turnIntensity );
+        }
+        else
+        {
+            updateTurnHeadShake( dt, false, 0.0f );
         }
 
         if (!phoneCutsceneActive) return;
@@ -112,6 +120,68 @@ public:
         return 0.0f;
     }
 
+    void updateViewBobShake( bool enabled, bool moving, float dt, float speedScale = 1.0f ) {
+        const bool bobActive = enabled && moving;
+        const float targetBlend = bobActive ? 1.0f : 0.0f;
+        const float blendSpeed = bobActive ? 12.0f : 7.5f;
+        const float alpha = std::clamp( dt * blendSpeed, 0.0f, 1.0f );
+        viewBobBlend += (targetBlend - viewBobBlend) * alpha;
+
+        const float phaseAdvance = std::max( 0.2f, speedScale ) * dt * 7.5f;
+        viewBobPhase += phaseAdvance;
+
+        const float bobS = std::sin( viewBobPhase );
+        const float bobC = std::cos( viewBobPhase * 2.0f );
+        viewBobYawOffset = bobS * 0.0045f * viewBobBlend;
+        viewBobPitchOffset = (bobS * 1.15f + bobC * 0.30f) * viewBobBlend;
+    }
+
+    void updateTurnHeadShake( float dt, bool active, float intensity = 1.0f ) {
+        if (!active)
+        {
+            turnShakeBlend = 0.0f;
+            turnShakeYawOffset = 0.0f;
+            turnShakePitchOffset = 0.0f;
+            return;
+        }
+
+        intensity = std::clamp( intensity, 0.0f, 1.25f );
+        const float target = 1.0f;
+        const float blendSpeed = 10.0f;
+        const float alpha = std::clamp( dt * blendSpeed, 0.0f, 1.0f );
+        turnShakeBlend += (target - turnShakeBlend) * alpha;
+
+        if (turnShakeBlend <= 0.0001f)
+        {
+            turnShakeYawOffset = 0.0f;
+            turnShakePitchOffset = 0.0f;
+            return;
+        }
+
+        turnShakePhase += dt * (6.2f + intensity * 2.4f);
+        turnShakeYawOffset = std::sin( turnShakePhase * 1.15f ) * 0.0075f * turnShakeBlend * intensity;
+        turnShakePitchOffset = std::sin( turnShakePhase * 0.92f + 0.65f ) * 0.55f * turnShakeBlend * intensity;
+    }
+
+    float headShakeYawOffset() const {
+        return viewBobYawOffset + turnShakeYawOffset;
+    }
+
+    float headShakePitchOffset() const {
+        return viewBobPitchOffset + turnShakePitchOffset;
+    }
+
+    void clearHeadShake() {
+        viewBobPhase = 0.0f;
+        viewBobBlend = 0.0f;
+        viewBobYawOffset = 0.0f;
+        viewBobPitchOffset = 0.0f;
+        turnShakePhase = 0.0f;
+        turnShakeBlend = 0.0f;
+        turnShakeYawOffset = 0.0f;
+        turnShakePitchOffset = 0.0f;
+    }
+
     void reset() {
         phoneCutsceneActive = false;
         phoneCutsceneTriggered = false;
@@ -121,6 +191,7 @@ public:
         scriptedPanElapsed = 0.0f;
         upstairsGalleryCutsceneTriggered = false;
         studioCutsceneTriggered = false;
+        clearHeadShake();
     }
 
 private:
@@ -156,6 +227,14 @@ private:
     float scriptedPanSpeed = 0.45f;
     bool upstairsGalleryCutsceneTriggered = false;
     bool studioCutsceneTriggered = false;
+    float viewBobPhase = 0.0f;
+    float viewBobBlend = 0.0f;
+    float viewBobYawOffset = 0.0f;
+    float viewBobPitchOffset = 0.0f;
+    float turnShakePhase = 0.0f;
+    float turnShakeBlend = 0.0f;
+    float turnShakeYawOffset = 0.0f;
+    float turnShakePitchOffset = 0.0f;
     static constexpr float kPhoneForward = 0.45f;
     static constexpr float kPhoneHeight = 0.45f;
     static constexpr float kPhoneYawOffset = 1.5707963f;

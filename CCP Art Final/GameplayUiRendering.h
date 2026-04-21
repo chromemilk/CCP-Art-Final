@@ -49,11 +49,18 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     const Uint32 borderText = rgb( 0, Uint8( std::clamp( green + 18, 0, 255 ) ), 28 );
     const Uint32 voiceText = rgb( voiceRed, 18, 22 );
     const Uint32 playerText = rgb( 30, 80, playerBlue );
+    const Uint32 thoughtText = rgb( 160, Uint8( std::clamp( green + 30, 0, 255 ) ), 40 );
 
     auto terminalLineColor = [&]( const std::string &line, Uint32 fallback ) -> Uint32 {
         if (line.rfind( "VOICE>", 0 ) == 0 || line.rfind( "MIND>", 0 ) == 0) return voiceText;
         if (line.rfind( "YOU>", 0 ) == 0) return playerText;
+        if (line.rfind( "THOUGHT>", 0 ) == 0) return thoughtText;
         return fallback;
+    };
+
+    auto drawTerminalText = [&]( int tx, int ty, const std::string &line, Uint32 color ) {
+        drawStringTinyScaled( engineContext, tx + 1, ty + 1, line, rgb( 0, 24, 0 ), 2, 1, 1, false );
+        drawStringTinyScaled( engineContext, tx, ty, line, color, 2, 1, 1, false );
     };
 
     for (int y = 8; y < RENDER_H; y += 4)
@@ -76,6 +83,8 @@ static void renderMindTrapInterface( Engine &engineContext ) {
 
     const std::string header = "C://INTERNAL DIAGNOSTIC//CONSCIOUSNESS THREAD";
     drawString16x16( engineContext, panelX + 18, panelY + 16, header, mainText, panelW - 36, 1, 1, false );
+    drawTextBox( engineContext, panelX + 14, panelY + 34, panelW - 28, 12, rgb( 0, 18, 0 ), rgb( 0, greenDim, 10 ) );
+    drawStringTinyScaled( engineContext, panelX + 20, panelY + 36, "ROOT@MINDTRAP  SESSION: LIVE  MODE: READ/WRITE", dimText, 1, 1, 1, false );
 
     const int bodyX = panelX + 18;
     const int bodyY = panelY + 50;
@@ -83,7 +92,7 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     const int bodyH = panelH - 170;
     drawTextBox( engineContext, bodyX - 4, bodyY - 4, bodyW + 8, bodyH + 8, rgb( 0, 0, 0 ), rgb( 0, greenDim, 10 ) );
 
-    const int lineStep = 22;
+    const int lineStep = 18;
     const int visibleLines = std::max( 1, bodyH / lineStep );
     int start = 0;
     if ((int)g_mindTrapTerminalLog.size() > visibleLines)
@@ -94,17 +103,20 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     int ty = bodyY;
     for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
     {
+        const std::string renderedLine = "> " + g_mindTrapTerminalLog[ i ];
         const Uint32 lineColor = terminalLineColor( g_mindTrapTerminalLog[ i ], dimText );
-        drawStringTinyScaled( engineContext, bodyX, ty, g_mindTrapTerminalLog[ i ], lineColor, 2, 1, 1, false );
+        drawTerminalText( bodyX, ty, renderedLine, lineColor );
         ty += lineStep;
         if (ty > bodyY + bodyH - lineStep) break;
     }
 
     if (!g_mindTrapTypingLine.empty() && ty <= bodyY + bodyH - lineStep)
     {
+        const bool typingCursorOn = ((SDL_GetTicks() / 250) % 2) == 0;
         const size_t count = std::min( g_mindTrapTypingChars, g_mindTrapTypingLine.size() );
-        const std::string typed = g_mindTrapTypingLine.substr( 0, count );
-        drawStringTinyScaled( engineContext, bodyX, ty, typed, terminalLineColor( g_mindTrapTypingLine, mainText ), 2, 1, 1, false );
+        std::string typed = "> " + g_mindTrapTypingLine.substr( 0, count );
+        if (typingCursorOn) typed += " _";
+        drawTerminalText( bodyX, ty, typed, terminalLineColor( g_mindTrapTypingLine, mainText ) );
     }
 
     const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
@@ -119,19 +131,19 @@ static void renderMindTrapInterface( Engine &engineContext ) {
             const bool selected = (i == g_mindTrapSelectedOption);
             const std::string marker = selected ? ">> " : "   ";
             const Uint32 col = selected ? mainText : dimText;
-            drawStringTinyScaled( engineContext, bodyX, cmdY + i * 20, marker + phase.commands[ i ], col, 2, 1, 1, false );
+            drawTerminalText( bodyX, cmdY + i * 20, marker + phase.commands[ i ], col );
         }
 
         std::string line = "MINDTRAP> " + phase.commands[ g_mindTrapSelectedOption ] + (cursorOn ? " _" : "  ");
-        drawStringTinyScaled( engineContext, bodyX, cmdY + 60, line, mainText, 2, 1, 1, false );
+        drawTerminalText( bodyX, cmdY + 60, line, mainText );
     }
     else if (g_mindTrapReadyToExit)
     {
-        drawStringTinyScaled( engineContext, bodyX, cmdY, "SYNC COMPLETE... TRANSFERRING CONTEXT", mainText, 2, 1, 1, false );
+        drawTerminalText( bodyX, cmdY, "SYNC COMPLETE... TRANSFERRING CONTEXT", mainText );
     }
     else
     {
-        drawStringTinyScaled( engineContext, bodyX, cmdY, "TERMINAL BUSY...", dimText, 2, 1, 1, false );
+        drawTerminalText( bodyX, cmdY, "TERMINAL BUSY...", dimText );
     }
 
     if (g_mindTrapWhiteFlashTimer > 0.0f)
@@ -333,13 +345,14 @@ static ClueNote makeClueNote( Engine &engineContext, const std::string &title, c
     return note;
 }
 
-static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset, Levels level = Levels::MUSEUM ) {
+static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset, Levels level = Levels::MUSEUM, float modelHeightOffset = 0.2f ) {
     KeyPickup out;
     out.keyName = keyName;
     out.x = x;
     out.y = y;
     out.collected = false;
     out.level = level;
+    out.modelHeightOffset = modelHeightOffset;
 
     if (level != engineContext.currentLevel)
     {
@@ -347,10 +360,14 @@ static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::strin
     }
 
     float roll = -1.5707963f;
+	float scale = 0.17f;
+    bool spin = true;
 
     if (keyName == "BLACK PIGMENT" || keyName == "BLUE PIGMENT" || keyName == "RED PIGMENT")
     {
         roll = 0.0f;
+		scale = 0.14f;
+        spin = false;
 	}
 
     int spriteIndex = addKeyPickupSprite( engineContext, x, y, keyName, keyColor );
@@ -358,14 +375,14 @@ static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::strin
         resolveAssetModelPath( modelAsset ),
         x,
         y,
-        0.17f,
+        scale,
         keyColor,
         0.0f,
         0.0f,
         roll,
-        true,
+        spin,
         1.2f,
-        0.2f);
+        modelHeightOffset );
 
     if (spriteIndex >= 0 && spriteIndex < (int)engineContext.props.size() && modelIndex >= 0)
     {
@@ -723,8 +740,8 @@ static void initMuseumPuzzle(Engine& engineContext) {
         {5, 15, "SW Crypt", LockType::KEY, "SILVER KEY", false, Levels::MUSEUM}, // From SW
         {17, 13, "SE Office", LockType::KEY, "BRONZE KEY", false, Levels::MUSEUM}, // From East
         // Second-floor puzzle gates
-        {6, 9, "Infinite Archive", LockType::CODE, "1911", false, Levels::MUSEUM_UPPER},
-        {10, 6, "Taxidermy Studio", LockType::CODE, "0402", false, Levels::MUSEUM_UPPER}
+        {6, 9, "Infinite Archive", LockType::CODE, "1911", true, Levels::MUSEUM_UPPER},
+        {10, 6, "Taxidermy Studio", LockType::CODE, "1490", false, Levels::MUSEUM_UPPER}
     };
 
     g_playerKeys.clear();
@@ -774,6 +791,18 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_mindTrapSelectedOption = 0;
     g_mindTrapAdvanceAfterResult = false;
     g_mindTrapFinalizeAfterResult = false;
+    g_solventLabUnlockCutsceneActive = false;
+    g_solventLabUnlockCutsceneStage = 0;
+    g_solventLabUnlockCutsceneTimer = 0.0f;
+    g_solventLabUnlockTurnStartYaw = 0.0f;
+    g_solventLabUnlockWhiteFlash = 0.0f;
+    g_solventCoolerEntryActive = false;
+    g_solventCoolerBuffer.clear();
+    g_redPigmentDispensed = false;
+    g_redPigmentDispenseCutsceneActive = false;
+    g_redPigmentDispenseCutsceneTimer = 0.0f;
+    g_redPigmentDispenseModelIndex = -1;
+    g_redPigmentDispenseBaseYaw = 0.0f;
     g_restorationWingUnlocked = false;
     g_directorDeskUnlocked = false;
     g_combatState = {};
@@ -811,16 +840,16 @@ static void initMuseumPuzzle(Engine& engineContext) {
 
     g_keyPickups.clear();
 
+    // Upper-floor pigment hunt (always register so they exist even if the run starts on MUSEUM_UPPER)
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLUE PIGMENT", 9.9f, 2.9f, rgb( 90, 140, 220 ), "BluePigment.glb", Levels::MUSEUM_UPPER, 0.25f ) );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLACK PIGMENT", 9.25f, 13.85f, rgb(90, 140, 220), "BlackPigment.glb", Levels::MUSEUM_UPPER, 0.30f));
+
     if (engineContext.currentLevel == Levels::MUSEUM) {
         // Bronze Key in main atrium start
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 15.f, 8.f, rgb(180, 120, 40), "Bronze Key.glb"));
         // Silver Key in North Wing
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "SILVER KEY", 10.5f, 3.5f, rgb(190, 190, 200), "Silver Key.glb"));
-       
-        // Upper-floor pigment hunt (one pigment per distinct room)
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLACK PIGMENT", 4.5f, 4.5f, rgb(70, 70, 85), "BlackPigment.glb", Levels::MUSEUM_UPPER));
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BLUE PIGMENT", 18.5f, 4.5f, rgb(90, 140, 220), "BluePigment.glb", Levels::MUSEUM_UPPER));
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "RED PIGMENT", 18.5f, 15.5f, rgb(215, 75, 70), "RedPigment.glb", Levels::MUSEUM_UPPER));
+
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "DIRECTOR'S KEY", 4.5f, 15.5f, rgb(210, 170, 95), "Bronze Key.glb"));
         // Fallback Gold Key in North Wing so progression cannot dead-end
        // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
@@ -870,15 +899,10 @@ static void initMuseumPuzzle(Engine& engineContext) {
             "Missed Calls",
             "12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
             10.0f, 10.3f));
-        // Atrium note
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Janitor's Log",
-            "Dropped the Bronze Key nearby. It unlocks the West Wing, NW Archives, and SE Office.",
-            6.1f, 10.8f));
         // West Wing Note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Archivist Notebook",
-            "The NW Archives pedestal requires the predator, the deceiver, and the wise one.",
+            "The pedestal requires the predator, the deceiver, and the wise one.",
             3.5f, 8.5f));
         // West Wing progression note (guarantees early North Wing access)
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -888,13 +912,9 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // SW Crypt Note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Director Memo",
-            "The SE Office safe code is current year. It contains the Gold Key.",
+            "The code is current year. It contains the Master key.",
             3.5f, 15.5f));
-        // East Wing Note
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Security Log",
-            "The South Wing emergency code is 7391.",
-            18.5f, 9.5f));
+
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Conservation Log A",
             "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
@@ -909,34 +929,34 @@ static void initMuseumPuzzle(Engine& engineContext) {
             11.4f, 13.8f));
         // NE Vault lore note so the room is still meaningful after progression rebalance
         g_clueNotes.push_back(makeClueNote(engineContext,
-            "Vault Ledger",
-            "Iron access approved. Reserve artifacts moved to East Wing transfer corridor.",
+            "Janitor Note",
+            "The South Wing emergency code is 7391.",
             17.5f, 2.5f));
         // Restoration Wing lore notes
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Spilled Solvent",
-            "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. Wait, I haven't seen anyone in a while. Where are they? How did I get here?",
-            7.3f, 15.6f,
+            "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: One breath held forever",
+            5.5f, 8.7f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Entry #402",
-            "I can still see the fear in his eyes. The color drained from her body. The texture abandoned his face. He went limp. The Director's requests are becoming too much. ",
-            14.9f, 4.2f,
+            "I can still see the fear in his eyes. The color drained from his body. The texture abandoned his face. He went limp. The Director's requests are becoming too much. ",
+            11.1f, 4.5f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Scientist Note",
-            "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now...",
-            3.9f, 10.6f,
+            "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now... The taxidermy studio code is held within the triptych of both human pleasure and torture",
+            9.8f, 15.6f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
-            "Archive Assistant Letter",
-            "Look away. If you look it in the eye it will take you.",
-            18.2f, 8.2f,
+            "Survivor Note",
+            "Look away. If you look it in the eye it will take you. We managed to lock it in the bioroom",
+            14.2f, 9.5f,
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Special Exhibit Intake Receipt",
             "NEW ACQUISITION // SUBJECT: YOU\nCondition: Conscious, disoriented, highly expressive under stress.\nCurator notes: Frame after identity fracture. Keep still. Preserve the moment forever.",
-            11.2f, 11.0f,
+            9.8f, 5.0f,
             Levels::MUSEUM_UPPER));
     }
     g_museumPuzzleInitialized = true;
@@ -1036,6 +1056,11 @@ g_codeEntryBuffer.clear();
     g_mindTrapSelectedOption = 0;
     g_mindTrapAdvanceAfterResult = false;
     g_mindTrapFinalizeAfterResult = false;
+    g_solventLabUnlockCutsceneActive = false;
+    g_solventLabUnlockCutsceneStage = 0;
+    g_solventLabUnlockCutsceneTimer = 0.0f;
+    g_solventLabUnlockTurnStartYaw = 0.0f;
+    g_solventLabUnlockWhiteFlash = 0.0f;
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
     g_restorationWingUnlocked = false;
@@ -1064,6 +1089,29 @@ g_codeEntryBuffer.clear();
     g_gasCanModelIndex = -1;
     g_powerRestoreFlickerActive = false;
     g_powerRestoreFlickerTimer = 0.0f;
+    g_solventCoolerEntryActive = false;
+    g_solventCoolerBuffer.clear();
+    g_redPigmentDispensed = false;
+    g_redPigmentDispenseCutsceneActive = false;
+    g_redPigmentDispenseCutsceneTimer = 0.0f;
+    g_redPigmentDispenseModelIndex = -1;
+    g_redPigmentDispenseBaseYaw = 0.0f;
+    g_wakeCutsceneActive = false;
+    g_wakeCutsceneTimer = 0.0f;
+    g_wakeCutsceneStage = 0;
+    g_wakeCutsceneStageTimer = 0.0f;
+    g_wakeCutsceneTurnStartYaw = 0.0f;
+    g_wakeDarknessOverride = -1.0f;
+    if (g_wakeGeneratorHumSound)
+    {
+        g_wakeGeneratorHumSound->stop();
+        g_wakeGeneratorHumSound.reset();
+    }
+    if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
+    {
+        g_worldModels[ g_wakeMonsterModelIndex ].visible = false;
+    }
+    g_wakeMonsterModelIndex = -1;
     g_dialogue.clear();
     g_cutsceneController.reset();
 }
@@ -1161,7 +1209,8 @@ static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Lev
             k.y,
             keyColorForName( k.keyName ),
             keyModelForName( k.keyName ),
-            k.level );
+            k.level,
+            k.modelHeightOffset );
         k.propIndex = vis.propIndex;
         k.modelIndex = vis.modelIndex;
     }
@@ -1669,8 +1718,25 @@ void handleLevelChange( Engine &engineContext, std::vector<LevelDef> levels, Lev
 static void startWakeCutscene( Engine &engineContext ) {
     g_wakeCutsceneActive = true;
     g_wakeCutsceneTimer = 0.0f;
+    g_wakeCutsceneStage = 0;
+    g_wakeCutsceneStageTimer = 0.0f;
+    g_wakeCutsceneInitialYaw = std::atan2( engineContext.directionY, engineContext.directionX );
+    g_wakeCutsceneTurnStartYaw = g_wakeCutsceneInitialYaw;
+    g_wakeCutsceneReturnStartYaw = g_wakeCutsceneInitialYaw;
+    g_wakeDarknessOverride = 1.0f;
+    if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
+    {
+        g_worldModels[ g_wakeMonsterModelIndex ].visible = false;
+    }
+    g_wakeMonsterModelIndex = -1;
+    if (g_wakeGeneratorHumSound)
+    {
+        g_wakeGeneratorHumSound->stop();
+        g_wakeGeneratorHumSound.reset();
+    }
+    g_cutsceneController.clearHeadShake();
     g_revolverAiming = false;
-    engineContext.pitchOffset = 78.0f;
+    engineContext.pitchOffset = 30.0f;
 }
 
 static void startNewMuseumRun( Engine &engineContext, std::vector<LevelDef> levels ) {
@@ -1701,7 +1767,8 @@ static std::string normalizeMindTrapTerminalText( std::string s ) {
             (c >= '0' && c <= '9') ||
             c == ' ' || c == '.' || c == ',' || c == '-' || c == '_' || c == '/' ||
             c == '>' || c == '<' || c == '[' || c == ']' || c == '(' || c == ')' ||
-            c == ':' || c == '?' || c == '\'';
+            c == ':' || c == '?' || c == '!' || c == '\'' || c == ';' || c == '=' || c == '\\' ||
+            c == '|' || c == '*' || c == '#' || c == '$';
         if (!ok) c = ' ';
     }
     return s;
@@ -1746,11 +1813,23 @@ static void updateMindTrapTypewriter( float dt ) {
         g_mindTrapTypingAccumulator = 0.0f;
     }
 
-    g_mindTrapTypingAccumulator += dt * g_mindTrapTypingCharsPerSecond;
-    while (g_mindTrapTypingAccumulator >= 1.0f && g_mindTrapTypingChars < g_mindTrapTypingLine.size())
+    const float pulse = 0.87f + 0.28f * std::max( 0.0f, std::sin( g_mindTrapFlickerTimer * 19.0f ) );
+    g_mindTrapTypingAccumulator += dt * g_mindTrapTypingCharsPerSecond * pulse;
+
+    auto charCost = []( char c ) -> float {
+        if (c == ' ') return 0.55f;
+        if (c == '.' || c == ',' || c == ':' || c == ';') return 2.1f;
+        if (c == '?' || c == '!') return 2.5f;
+        if (c == '/' || c == '\\' || c == '-' || c == '_' || c == '=') return 1.35f;
+        return 1.0f;
+    };
+
+    while (g_mindTrapTypingChars < g_mindTrapTypingLine.size())
     {
+        const float cost = charCost( g_mindTrapTypingLine[ g_mindTrapTypingChars ] );
+        if (g_mindTrapTypingAccumulator < cost) break;
         ++g_mindTrapTypingChars;
-        g_mindTrapTypingAccumulator -= 1.0f;
+        g_mindTrapTypingAccumulator -= cost;
     }
 
     if (g_mindTrapTypingChars >= g_mindTrapTypingLine.size())
@@ -1759,7 +1838,8 @@ static void updateMindTrapTypewriter( float dt ) {
         g_mindTrapTypingLine.clear();
         g_mindTrapTypingChars = 0;
         g_mindTrapTypingAccumulator = 0.0f;
-        g_mindTrapPostLinePause = 0.055f;
+        const bool shortStatusLine = g_mindTrapTerminalLog.empty() ? false : (g_mindTrapTerminalLog.back().size() <= 18);
+        g_mindTrapPostLinePause = shortStatusLine ? 0.075f : 0.11f;
     }
 }
 static void initMindTrapPhases() {
@@ -1911,6 +1991,174 @@ static bool isPlayerNearMindTrapTrigger( Engine const &engineContext ) {
     const bool nearSolventVault = isPlayerNearPoint( engineContext, 11.2f, 14.4f, 1.15f );
     return nearSealedDoor || nearSolventVault;
 }
+
+static void startMindTrapSequence( Engine &engineContext );
+
+static void startSolventLabUnlockCutscene( Engine &engineContext ) {
+    if (g_solventLabUnlockCutsceneActive) return;
+
+    g_solventLabUnlockCutsceneActive = true;
+    g_solventLabUnlockCutsceneStage = 0;
+    g_solventLabUnlockCutsceneTimer = 0.0f;
+    g_solventLabUnlockWhiteFlash = 0.0f;
+    g_solventLabUnlockTurnStartYaw = std::atan2( engineContext.directionY, engineContext.directionX );
+
+    g_notesOpen = false;
+    g_caveQuizActive = false;
+    g_codeEntryActive = false;
+    g_interactionAnim.active = false;
+    g_levelTransition.active = false;
+    g_revolverAiming = false;
+
+    g_dialogue.start( {
+        {"What, the room is empty?", 2.0f}
+        } );
+}
+
+static void updateSolventLabUnlockCutscene( Engine &engineContext, GameState &currentState, float dt ) {
+    if (!g_solventLabUnlockCutsceneActive) return;
+
+    auto setYaw = [&]( float yaw ) {
+        engineContext.directionX = std::cos( yaw );
+        engineContext.directionY = std::sin( yaw );
+        engineContext.planeX = -engineContext.directionY * FOV_TAN;
+        engineContext.planeY = engineContext.directionX * FOV_TAN;
+        engineContext.yaw = yaw * (180.0f / 3.14159265f);
+        if (engineContext.yaw > 360.0f) engineContext.yaw -= 360.0f;
+        if (engineContext.yaw < 0.0f) engineContext.yaw += 360.0f;
+    };
+
+    g_solventLabUnlockCutsceneTimer += dt;
+
+    if (g_solventLabUnlockCutsceneStage == 0)
+    {
+        if (g_solventLabUnlockCutsceneTimer >= 1.55f)
+        {
+            if (g_whisperBaseFolder != g_currentLevelFolder)
+            {
+                g_whisperBaseFolder = g_currentLevelFolder;
+                g_whisperBufferReady = g_whisperBuffer.loadFromFile( g_currentLevelFolder + "\\whisper.wav" );
+            }
+            if (g_whisperBufferReady)
+            {
+                playWeaponBufferedSound( g_whisperBuffer, 14.5f );
+            }
+
+            g_solventLabUnlockCutsceneStage = 1;
+            g_solventLabUnlockCutsceneTimer = 0.0f;
+            g_solventLabUnlockTurnStartYaw = std::atan2( engineContext.directionY, engineContext.directionX );
+        }
+        return;
+    }
+
+    if (g_solventLabUnlockCutsceneStage == 1)
+    {
+        const float turnProgress = std::clamp( g_solventLabUnlockCutsceneTimer / 0.78f, 0.0f, 1.0f );
+        const float turnEase = turnProgress * turnProgress * (3.0f - 2.0f * turnProgress);
+        setYaw( g_solventLabUnlockTurnStartYaw + turnEase * 3.14159265f );
+
+        if (turnProgress >= 1.0f)
+        {
+            g_dialogue.start( {
+                {"W-w-what is THAT", 2.1f}
+                } );
+            g_solventLabUnlockCutsceneStage = 2;
+            g_solventLabUnlockCutsceneTimer = 0.0f;
+        }
+        return;
+    }
+
+    if (g_solventLabUnlockCutsceneStage == 2)
+    {
+        const float flashProgress = std::clamp( g_solventLabUnlockCutsceneTimer / 0.95f, 0.0f, 1.0f );
+        g_solventLabUnlockWhiteFlash = std::clamp( std::pow( flashProgress, 0.65f ), 0.0f, 1.0f );
+
+        if (g_solventLabUnlockCutsceneTimer >= 1.0f)
+        {
+            g_solventLabUnlockCutsceneActive = false;
+            g_solventLabUnlockCutsceneStage = 0;
+            g_solventLabUnlockCutsceneTimer = 0.0f;
+            g_solventLabUnlockWhiteFlash = 0.0f;
+
+            startMindTrapSequence( engineContext );
+            currentState = STATE_MIND_TRAP;
+        }
+    }
+}
+
+static void startRedPigmentDispenseCutscene( Engine &engineContext ) {
+    if (g_redPigmentDispenseCutsceneActive) return;
+    if (g_playerKeys.contains( "RED PIGMENT" )) return;
+
+    g_redPigmentDispenseCutsceneActive = true;
+    g_redPigmentDispenseCutsceneTimer = 0.0f;
+    g_redPigmentDispenseBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
+    g_revolverAiming = false;
+    g_solventCoolerEntryActive = false;
+
+    g_dialogue.start( {
+        {"...Dispensing requested solvent pigment.", 2.4f}
+        } );
+}
+
+static void updateRedPigmentDispenseCutscene( Engine &engineContext, float dt ) {
+    if (!g_redPigmentDispenseCutsceneActive) return;
+
+    g_redPigmentDispenseCutsceneTimer += dt;
+    engineContext.pitchOffset = 5.0f;
+
+    const float px = engineContext.positionX + engineContext.directionX * 0.56f;
+    const float py = engineContext.positionY + engineContext.directionY * 0.56f;
+
+    if (g_redPigmentDispenseModelIndex < 0 || g_redPigmentDispenseModelIndex >= (int)g_worldModels.size())
+    {
+        g_redPigmentDispenseModelIndex = addWorldModelInstance(
+            resolveAssetModelPath( "RedPigment.glb" ),
+            px,
+            py,
+            0.10f,
+            rgb( 215, 75, 70 ),
+            g_redPigmentDispenseBaseYaw,
+            0.10f,
+            -0.14f,
+            true,
+            3.8f,
+            0.42f );
+    }
+
+    if (g_redPigmentDispenseModelIndex >= 0 && g_redPigmentDispenseModelIndex < (int)g_worldModels.size())
+    {
+        auto &m = g_worldModels[ g_redPigmentDispenseModelIndex ];
+        m.visible = true;
+        m.x = px;
+        m.y = py;
+        m.heightOffset = 0.42f;
+        m.yaw = g_redPigmentDispenseBaseYaw;
+        m.pitch = 0.24f;
+        m.roll = -0.14f;
+        m.spinYaw = true;
+        m.spinSpeed = 3.8f;
+    }
+
+    if (g_redPigmentDispenseCutsceneTimer >= 2.8f && !g_dialogue.isActive())
+    {
+        g_redPigmentDispenseCutsceneActive = false;
+        g_redPigmentDispenseCutsceneTimer = 0.0f;
+        engineContext.pitchOffset = 0.0f;
+
+        if (g_redPigmentDispenseModelIndex >= 0 && g_redPigmentDispenseModelIndex < (int)g_worldModels.size())
+        {
+            g_worldModels[ g_redPigmentDispenseModelIndex ].visible = false;
+        }
+        g_redPigmentDispenseModelIndex = -1;
+
+        g_playerKeys.insert( "RED PIGMENT" );
+        g_redPigmentDispensed = true;
+        showAccessPopup( "Dispensed RED PIGMENT.", 2200 );
+        triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED RED PIGMENT", 0.75f );
+    }
+}
+
 static void startMindTrapSequence(Engine& engineContext) {
     initMindTrapPhases();
 
@@ -1938,13 +2186,15 @@ static void startMindTrapSequence(Engine& engineContext) {
     engineContext.openArtId = -1;
     engineContext.statueChatActive = false;
 
-    queueMindTrapTerminalLine("...");
-    queueMindTrapTerminalLine("FAILED TO HOOK BRAIN STEM.");
-    queueMindTrapTerminalLine("FAILED TO INIT HumanOS.");
-    queueMindTrapTerminalLine("...");
-    queueMindTrapTerminalLine("");
-    queueMindTrapTerminalLine("VOICE> PLEASE DO NOT STRUGGLE");
-    queueMindTrapTerminalLine("");
+    queueMindTrapTerminalLine( "BOOTING DIAGNOSTIC TTY..." );
+    queueMindTrapTerminalLine( "KERNEL: /DEV/CONSCIOUSNESS READY" );
+    queueMindTrapTerminalLine( "ATTACHING STREAM: SUBJECT#01" );
+    queueMindTrapTerminalLine( "FAILED TO HOOK BRAIN STEM." );
+    queueMindTrapTerminalLine( "FAILED TO INIT HUMANOS." );
+    queueMindTrapTerminalLine( "FALLING BACK TO SAFE MODE..." );
+    queueMindTrapTerminalLine( "" );
+    queueMindTrapTerminalLine( "VOICE> PLEASE DO NOT STRUGGLE" );
+    queueMindTrapTerminalLine( "" );
 
 
     queueMindTrapPhasePrompt();
@@ -2624,6 +2874,30 @@ static void renderSymbolEntry( Engine &engineContext ) {
     drawStringTinyScaled( engineContext, x + 16, y + 140, "LEFT/RIGHT SELECT SLOT", rgb( 120, 120, 140 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 16, y + 155, "UP/DOWN CHANGE SYMBOL", rgb( 120, 120, 140 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 16, y + 170, "ENTER TO SUBMIT, ESC TO EXIT", rgb( 120, 120, 140 ), 1, 1, 1, false );
+}
+
+static void renderSolventCoolerEntry( Engine &engineContext ) {
+    if (!g_solventCoolerEntryActive) return;
+
+    int w = 620;
+    int h = 220;
+    int x = (RENDER_W - w) / 2;
+    int y = (RENDER_H - h) / 2;
+
+    drawTextBox( engineContext, x, y, w, h, rgb( 8, 12, 12 ), rgb( 100, 170, 170 ) );
+    drawString16x16( engineContext, x + 16, y + 14, "SOLVENT COOLER AUTHORIZATION", rgb( 170, 235, 235 ), w - 32, 1, 1, false );
+
+    int ry = y + 48;
+    ry = drawWrappedText( engineContext, x + 16, ry, "RIDDLE: I AM THE CURATOR'S CREED OF PERFECT STILLNESS. SPEAK THE PHRASE.", rgb( 195, 210, 210 ), w - 32 );
+    ry += 8;
+
+    drawTextBox( engineContext, x + 16, ry, w - 32, 44, rgb( 0, 0, 0 ), rgb( 65, 95, 105 ) );
+
+    std::string typed = g_solventCoolerBuffer;
+    if (((SDL_GetTicks() / 350) % 2) == 0) typed += "_";
+    drawString16x16( engineContext, x + 24, ry + 13, typed.empty() ? "_" : typed, rgb( 230, 235, 235 ), w - 48, 1, 1, false );
+
+    drawStringTinyScaled( engineContext, x + 16, y + h - 20, "TYPE PHRASE, ENTER CONFIRM, ESC CANCEL", rgb( 120, 150, 155 ), 1, 1, 1, false );
 }
 
 static std::vector<std::string> wrapNoteTextLines( const std::string &text, int maxCharsPerLine ) {
@@ -4394,8 +4668,8 @@ static void render( Engine &engineContext, float dt ) {
 }
 
 static void renderGameplayUiPass( Engine &engineContext ) {
-    const bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
-    const bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
+    const bool overlayBusy = g_interactionAnim.active || g_levelTransition.active || g_notesOpen || g_codeEntryActive || g_caveQuizActive || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive || g_solventLabUnlockCutsceneActive || g_solventCoolerEntryActive || g_redPigmentDispenseCutsceneActive;
+    const bool cutsceneHudSuppressed = g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive || g_solventLabUnlockCutsceneActive || g_redPigmentDispenseCutsceneActive;
     const float shotFx01 = std::clamp( g_revolverRecoilTimer / std::max( 0.001f, kRevolverRecoilDuration ), 0.0f, 1.0f );
     const float museumDarknessAdd = museumPowerDarknessAddForLevel( engineContext.currentLevel );
 
@@ -4444,6 +4718,10 @@ static void renderGameplayUiPass( Engine &engineContext ) {
     renderRevolverShotEffects( engineContext, shotFx01 );
     renderSchoolSafeWeaponBlur( engineContext );
 
+    const float defaultDarkness = std::clamp( g_horrorDarknessOverlay + (engineContext.caveMode ? 0.05f : 0.0f) + museumDarknessAdd, 0.0f, 0.58f );
+    const float darknessAlpha = (g_wakeCutsceneActive && g_wakeDarknessOverride >= 0.0f)
+        ? std::clamp( g_wakeDarknessOverride, 0.0f, 1.0f )
+        : defaultDarkness;
     drawTranslucentBox(
         engineContext,
         0,
@@ -4451,7 +4729,12 @@ static void renderGameplayUiPass( Engine &engineContext ) {
         RENDER_W,
         RENDER_H,
         rgb( 0, 0, 0 ),
-        std::clamp( g_horrorDarknessOverlay + (engineContext.caveMode ? 0.05f : 0.0f) + museumDarknessAdd, 0.0f, 0.58f ) );
+        darknessAlpha );
+
+    if (g_solventLabUnlockWhiteFlash > 0.0f)
+    {
+        drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 255, 255, 255 ), std::clamp( g_solventLabUnlockWhiteFlash, 0.0f, 1.0f ) );
+    }
 
     if (g_wakeCutsceneActive)
     {
@@ -4470,6 +4753,11 @@ static void renderGameplayUiPass( Engine &engineContext ) {
         if (p > 0.38f && p < 0.92f)
         {
             drawStringTinyScaled( engineContext, (RENDER_W / 2) - 45, RENDER_H - 44, "...where am I?", rgb( 185, 185, 200 ), 2, 1, 1, false );
+        }
+
+        if (p > 0.95f)
+        {
+            drawStringTinyScaled(engineContext, (RENDER_W / 2) - 100, RENDER_H - 44, "Wait, what was that thing?", rgb(185, 185, 200), 2, 1, 1, false);
         }
     }
 
@@ -4541,11 +4829,10 @@ static void renderGameplayUiPass( Engine &engineContext ) {
     {
         drawString16x16( engineContext, (RENDER_W / 2) - 145, (RENDER_H / 2) + 105, "[E] Back To Ground Floor", rgb( 205, 220, 255 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
-    if (!overlayBusy && !g_mindTrapTriggerConsumed && isPlayerNearMindTrapTrigger( engineContext ))
+    if (!overlayBusy && isPlayerNearSolventCooler( engineContext ) && !g_playerKeys.contains( "RED PIGMENT" ) && !g_redPigmentDispenseCutsceneActive)
     {
-        drawString16x16( engineContext, (RENDER_W / 2) - 190, (RENDER_H / 2) + 145, "[E] Enter Solvent Diagnostic", rgb( 120, 235, 140 ), RENDER_W, 1, 2, true, rgb( 10, 25, 10 ) );
+        drawString16x16( engineContext, (RENDER_W / 2) - 160, (RENDER_H / 2) + 145, "[E] Use Solvent Cooler", rgb( 180, 235, 235 ), RENDER_W, 1, 2, true, rgb( 12, 25, 30 ) );
     }
-
     int doorTx = 0, doorTy = 0;
     if (isMuseumLikeLevel( engineContext.currentLevel ) && getDoorAheadTile( engineContext, doorTx, doorTy ))
     {
@@ -4612,6 +4899,7 @@ static void renderGameplayUiPass( Engine &engineContext ) {
     renderCodeEntry( engineContext );
     renderSafeEntry( engineContext );
     renderSymbolEntry( engineContext );
+    renderSolventCoolerEntry( engineContext );
     renderCaveQuiz( engineContext );
     renderInteractionAnimation( engineContext );
     renderLevelTransitionOverlay( engineContext );
@@ -4860,4 +5148,6 @@ static void renderModernRevolverHudOverlay( Engine &engineContext ) {
         SDL_RenderRect( engineContext.renderer, &chamberRect );
     }
 }
+
+
 

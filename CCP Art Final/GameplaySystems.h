@@ -27,6 +27,27 @@ static void playWeaponBufferedSound( const sf::SoundBuffer &buffer, float volume
     g_activeWeaponSounds.push_back( snd );
 }
 
+static std::shared_ptr<sf::Sound> playDirectionalBufferedSound(
+    const sf::SoundBuffer &buffer,
+    float worldX,
+    float worldY,
+    float volume,
+    float minDistance,
+    float attenuation,
+    bool looped = false ) {
+    auto snd = std::make_shared<sf::Sound>( buffer );
+    snd->setSpatializationEnabled( true );
+    snd->setRelativeToListener( false );
+    snd->setPosition( sf::Vector3f( worldX, worldY, 0.0f ) );
+    snd->setMinDistance( std::max( 0.1f, minDistance ) );
+    snd->setAttenuation( std::max( 0.0f, attenuation ) );
+    snd->setLooping( looped );
+    snd->setVolume( std::clamp( volume, 0.0f, 100.0f ) );
+    snd->play();
+    g_activeWeaponSounds.push_back( snd );
+    return snd;
+}
+
 static void refreshGeneratorStartSoundBuffer( const std::string &baseFolder ) {
     if (g_generatorStartBufferReady && g_generatorStartSoundBaseFolder == baseFolder) return;
 
@@ -432,8 +453,8 @@ static void applyQualityPresetFromConfig() {
         g_perfLowMode = true;
         g_wallRenderDistance = std::clamp( g_detectedWallRenderDistance * 0.85f, 18.0f, 44.0f );
         g_worldModelRenderDistance = std::clamp( g_detectedWorldModelRenderDistance * 0.72f, 10.0f, 26.0f );
-        g_meshTriangleStride = 3;
-        g_meshRasterStep = 2;
+        g_meshTriangleStride = 2;
+        g_meshRasterStep = 3;
         break;
     default: // Balanced
         g_perfLowMode = g_detectedPerfLowMode;
@@ -613,6 +634,39 @@ static std::string resolveFirstExistingAsset( std::initializer_list<const char *
 static bool isPlayerNearDirectorDesk( Engine const &engineContext ) {
     if (engineContext.currentLevel != Levels::MUSEUM) return false;
     return isPlayerNearPoint( engineContext, 16.36f, 16.55f, 1.45f );
+}
+
+static bool isPlayerNearSolventCooler( Engine const &engineContext ) {
+    if (engineContext.currentLevel != Levels::MUSEUM_UPPER) return false;
+    return isPlayerNearPoint( engineContext, 11.3f, 16.05f, 1.15f );
+}
+
+static std::string normalizePhraseInput( const std::string &input ) {
+    std::string out;
+    out.reserve( input.size() );
+
+    bool lastWasSpace = true;
+    for (char ch : input)
+    {
+        char c = char( std::toupper( unsigned char( ch ) ) );
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '\'')
+        {
+            out.push_back( c );
+            lastWasSpace = false;
+        }
+        else if (!lastWasSpace)
+        {
+            out.push_back( ' ' );
+            lastWasSpace = true;
+        }
+    }
+
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+static bool isSolventCoolerPhraseCorrect( const std::string &input ) {
+    return normalizePhraseInput( input ) == "ONE BREATH HELD FOREVER";
 }
 
 static bool isPlayerInsideUpperStudio( Engine const &engineContext ) {

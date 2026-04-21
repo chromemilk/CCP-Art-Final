@@ -97,12 +97,32 @@ static bool g_mindTrapAwaitingChoice = false;
 static int g_mindTrapSelectedOption = 0;
 static bool g_mindTrapAdvanceAfterResult = false;
 static bool g_mindTrapFinalizeAfterResult = false;
+static bool g_solventLabUnlockCutsceneActive = false;
+static int g_solventLabUnlockCutsceneStage = 0;
+static float g_solventLabUnlockCutsceneTimer = 0.0f;
+static float g_solventLabUnlockTurnStartYaw = 0.0f;
+static float g_solventLabUnlockWhiteFlash = 0.0f;
+static bool g_solventCoolerEntryActive = false;
+static std::string g_solventCoolerBuffer;
+static bool g_redPigmentDispensed = false;
+static bool g_redPigmentDispenseCutsceneActive = false;
+static float g_redPigmentDispenseCutsceneTimer = 0.0f;
+static int g_redPigmentDispenseModelIndex = -1;
+static float g_redPigmentDispenseBaseYaw = 0.0f;
 static bool g_museumPuzzleInitialized = false;
 static bool g_restorationWingUnlocked = false;
 static bool g_unlockAllDoorsOverride = false;
 static bool g_wakeCutsceneActive = false;
 static float g_wakeCutsceneTimer = 0.0f;
-static constexpr float kWakeCutsceneDuration = 6.5f;
+static constexpr float kWakeCutsceneDuration = 8.5f;
+static int g_wakeCutsceneStage = 0;
+static float g_wakeCutsceneStageTimer = 0.0f;
+static float g_wakeCutsceneInitialYaw = 0.0f;
+static float g_wakeCutsceneTurnStartYaw = 0.0f;
+static float g_wakeCutsceneReturnStartYaw = 0.0f;
+static int g_wakeMonsterModelIndex = -1;
+static std::shared_ptr<sf::Sound> g_wakeGeneratorHumSound;
+static float g_wakeDarknessOverride = -1.0f;
 static bool g_generatorNeedsGasLinePlayed = false;
 static bool g_gasCanCollected = false;
 static bool g_generatorFueled = false;
@@ -164,7 +184,7 @@ static bool g_generatorStartBufferReady = false;
 static std::shared_ptr<sf::Sound> g_generatorStartSound;
 static float g_generatorStartSoundTimer = 0.0f;
 static constexpr float kGeneratorStartSoundDuration = 3.0f;
-static constexpr float kGeneratorStartFadeOutDuration = 1.0f;
+static constexpr float kGeneratorStartFadeOutDuration = 2.0f;
 static constexpr float kGeneratorStartSoundVolume = 100.0f;
 static sf::SoundBuffer g_whisperBuffer;
 static bool g_whisperBufferReady = false;
@@ -336,7 +356,7 @@ int main( int argc, char **argv ) {
                 if (g_caveTimerSeconds <= 0.0f)
                 {
                     g_caveTimerActive = false;
-                    showAccessPopup( "Oxygen depleted. Restarting from the museum.", 4000 );
+                    showAccessPopup( "Time's up.Restarting from the museum.", 4000 );
                     startNewMuseumRun( engineContext, levels );
                 }
             }
@@ -347,22 +367,11 @@ int main( int argc, char **argv ) {
 
         static float walkTime = 0.f;
         bool stepTriggered = false;
-        if (!engineContext.isMoving)
-        {
-            engineContext.pitchOffset = engineContext.pitchOffset * 0.9f;
-            if (std::abs( engineContext.pitchOffset ) < 0.5f) engineContext.pitchOffset = 0.0f;
-        }
-        else
+        const bool movingLastFrame = engineContext.isMoving;
+        if (movingLastFrame)
         {
             walkTime += dt * MOVE_SPEED * 5.0f;
-            engineContext.isMoving = false; 
-
             float sinValue = std::sin( walkTime );
-
-            if (config::viewBobbing)
-            {
-                engineContext.pitchOffset = sinValue * 3.0f;
-            }
 
             if (config::useMusic)
             {
@@ -381,6 +390,8 @@ int main( int argc, char **argv ) {
                 }
             }
         }
+        g_cutsceneController.updateViewBobShake( config::viewBobbing, movingLastFrame, dt, MOVE_SPEED );
+        engineContext.isMoving = false;
 
         updateMusicStream();
         g_dialogue.update( dt );
@@ -393,6 +404,12 @@ int main( int argc, char **argv ) {
         if (currentState == STATE_MIND_TRAP)
         {
             updateMindTrapSequence( engineContext, levels, currentState, dt );
+        }
+
+        if (currentState == STATE_GAME)
+        {
+            updateSolventLabUnlockCutscene( engineContext, currentState, dt );
+            updateRedPigmentDispenseCutscene( engineContext, dt );
         }
 
         g_revolverShotCooldown = std::max( 0.0f, g_revolverShotCooldown - dt );
@@ -408,7 +425,7 @@ int main( int argc, char **argv ) {
             {
                 if (g_weaponSoundBuffersReady)
                 {
-                    playWeaponBufferedSound( g_shellDropBuffer, 95.0f );
+                    playWeaponBufferedSound( g_shellDropBuffer, 90.0f );
                 }
                 g_pendingShellDropTimers.erase( g_pendingShellDropTimers.begin() + i );
             }
@@ -544,15 +561,182 @@ int main( int argc, char **argv ) {
         if (g_wakeCutsceneActive)
         {
             g_wakeCutsceneTimer += dt;
-            const float p = std::clamp( g_wakeCutsceneTimer / std::max( 0.001f, kWakeCutsceneDuration ), 0.0f, 1.0f );
-            const float openEase = 1.0f - std::pow( 1.0f - p, 2.2f );
-            engineContext.pitchOffset = (1.0f - openEase) * 78.0f + std::sin( SDL_GetTicks() * 0.004f ) * 0.6f;
-            if (g_wakeCutsceneTimer >= kWakeCutsceneDuration)
+            g_wakeCutsceneStageTimer += dt;
+
+            auto setYaw = [&]( float yaw ) {
+                engineContext.directionX = std::cos( yaw );
+                engineContext.directionY = std::sin( yaw );
+                engineContext.planeX = -engineContext.directionY * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;
+                engineContext.yaw = yaw * (180.0f / 3.14159265f);
+                if (engineContext.yaw > 360.0f) engineContext.yaw -= 360.0f;
+                if (engineContext.yaw < 0.0f) engineContext.yaw += 360.0f;
+            };
+
+            if (g_wakeCutsceneStage == 0)
             {
-                g_wakeCutsceneActive = false;
-                g_wakeCutsceneTimer = 0.0f;
-                g_cutsceneController.reset();
+                const float openDuration = 2.0f;
+                const float p = std::clamp( g_wakeCutsceneStageTimer / openDuration, 0.0f, 1.0f );
+                const float openEase = 1.0f - std::pow( 1.0f - p, 2.2f );
+                engineContext.pitchOffset = (1.0f - openEase) * 30.0f;
+                g_wakeDarknessOverride = std::clamp( 1.0f - openEase, 0.0f, 1.0f );
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
+
+                if (p >= 0.86f)
+                {
+                    g_wakeCutsceneStage = 1;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeDarknessOverride = std::clamp( 1.0f - openEase, 0.0f, 1.0f );
+
+                    if (!g_wakeGeneratorHumSound)
+                    {
+                        refreshGeneratorStartSoundBuffer( g_currentLevelFolder );
+                        if (g_generatorStartBufferReady)
+                        {
+                            g_wakeGeneratorHumSound = playDirectionalBufferedSound(
+                                g_generatorStartBuffer,
+                                kMuseumGeneratorX,
+                                kMuseumGeneratorY,
+                                76.0f,
+                                8.5f,
+                                0.03f,
+                                true );
+                        }
+                    }
+                }
+            }
+            else if (g_wakeCutsceneStage == 1)
+            {
+                const float preTurnDelay = 3.45f;
+                const float p = std::clamp( g_wakeCutsceneStageTimer / preTurnDelay, 0.0f, 1.0f );
+                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0038f ) * 0.22f;
+                g_wakeDarknessOverride = std::clamp( 0.18f * (1.0f - p), 0.0f, 0.18f );
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
+
+                if (g_wakeCutsceneStageTimer >= preTurnDelay)
+                {
+                    g_wakeCutsceneStage = 2;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeCutsceneTurnStartYaw = std::atan2( engineContext.directionY, engineContext.directionX );
+                }
+            }
+            else if (g_wakeCutsceneStage == 2)
+            {
+                const float turnDuration = 1.60f;
+                const float p = std::clamp( g_wakeCutsceneStageTimer / turnDuration, 0.0f, 1.0f );
+                const float ease = p * p * (3.0f - 2.0f * p);
+                const float targetYaw = std::atan2( kMuseumGeneratorY - engineContext.positionY, kMuseumGeneratorX - engineContext.positionX );
+                const float d = std::atan2( std::sin( targetYaw - g_wakeCutsceneTurnStartYaw ), std::cos( targetYaw - g_wakeCutsceneTurnStartYaw ) );
+                setYaw( g_wakeCutsceneTurnStartYaw + d * ease );
+                g_cutsceneController.updateTurnHeadShake( dt, true, 1.05f );
+
+                if (g_wakeMonsterModelIndex < 0)
+                {
+                    constexpr float kWakeMonsterX = 8.3f;
+                    constexpr float kWakeMonsterY = 7.5f;
+                    const float monsterYaw = std::atan2( kMuseumGeneratorY - kWakeMonsterY, kMuseumGeneratorX - kWakeMonsterX ) - 0.18f;
+                    g_wakeMonsterModelIndex = addWorldModelInstance(
+                        resolveFirstExistingAsset( { "Monster.glb", "monster.glb" } ),
+                        kWakeMonsterX,
+                        kWakeMonsterY,
+                        0.96f,
+                        rgb( 120, 120, 120 ),
+                        monsterYaw + 0.6f,
+                        0.0f,
+                        0.0f,
+                        false,
+                        0.0f,
+                        -0.02f );
+                }
+                if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
+                {
+                    g_worldModels[ g_wakeMonsterModelIndex ].visible = true;
+                }
+
+                if (p >= 1.0f)
+                {
+                    g_wakeCutsceneStage = 3;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeDarknessOverride = 0.0f;
+                }
+            }
+            else if (g_wakeCutsceneStage == 3)
+            {
+                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0032f ) * 0.16f;
+                g_wakeDarknessOverride = 0.0f;
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
+
+                if (g_wakeGeneratorHumSound)
+                {
+                    const float fadeP = std::clamp( g_wakeCutsceneStageTimer / 1.7f, 0.0f, 1.0f );
+                    g_wakeGeneratorHumSound->setVolume( 55.0f * (1.0f - fadeP) );
+                }
+
+                if (g_wakeCutsceneStageTimer >= 0.008f)
+                {
+                    g_wakeCutsceneStage = 4;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeDarknessOverride = 1.0f;
+                    if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
+                    {
+                        g_worldModels[ g_wakeMonsterModelIndex ].visible = false;
+                    }
+                    if (g_wakeGeneratorHumSound)
+                    {
+                        g_wakeGeneratorHumSound->stop();
+                        g_wakeGeneratorHumSound.reset();
+                    }
+                }
+            }
+            else if (g_wakeCutsceneStage == 4)
+            {
                 engineContext.pitchOffset = 0.0f;
+                g_wakeDarknessOverride = 1.0f;
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
+
+                if (g_wakeCutsceneStageTimer >= 1.60f)
+                {
+                    g_wakeCutsceneStage = 5;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeCutsceneReturnStartYaw = std::atan2( engineContext.directionY, engineContext.directionX );
+                }
+            }
+            else
+            {
+                const float returnDuration = 4.00f;
+                const float p = std::clamp( g_wakeCutsceneStageTimer / returnDuration, 0.0f, 1.0f );
+                const float ease = p * p * (3.0f - 2.0f * p);
+                g_wakeDarknessOverride = 1.0f + (0.14f - 1.0f) * ease;
+                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0036f ) * 0.18f;
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
+
+                const float yawDelta = std::atan2( std::sin( g_wakeCutsceneInitialYaw - g_wakeCutsceneReturnStartYaw ), std::cos( g_wakeCutsceneInitialYaw - g_wakeCutsceneReturnStartYaw ) );
+                setYaw( g_wakeCutsceneReturnStartYaw + yawDelta * ease );
+
+                if (p >= 1.0f)
+                {
+                    g_wakeCutsceneActive = false;
+                    g_wakeCutsceneTimer = 0.0f;
+                    g_wakeCutsceneStage = 0;
+                    g_wakeCutsceneStageTimer = 0.0f;
+                    g_wakeDarknessOverride = -1.0f;
+                    g_cutsceneController.clearHeadShake();
+                    engineContext.pitchOffset = 0.0f;
+                }
+            }
+
+            if (!g_wakeCutsceneActive)
+            {
+                if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
+                {
+                    g_worldModels[ g_wakeMonsterModelIndex ].visible = false;
+                }
+                g_wakeMonsterModelIndex = -1;
+                if (g_wakeGeneratorHumSound)
+                {
+                    g_wakeGeneratorHumSound->stop();
+                    g_wakeGeneratorHumSound.reset();
+                }
             }
         }
 
@@ -745,6 +929,48 @@ int main( int argc, char **argv ) {
                     }
                 }
 
+                if (g_solventCoolerEntryActive && ev.type == SDL_EVENT_TEXT_INPUT)
+                {
+                    bool submitFromTextEvent = false;
+                    for (const char *p = ev.text.text; *p != '\0'; ++p)
+                    {
+                        if (*p == '\r' || *p == '\n')
+                        {
+                            submitFromTextEvent = true;
+                            continue;
+                        }
+
+                        if ((int)g_solventCoolerBuffer.size() >= 52) break;
+                        const char c = char( std::toupper( unsigned char( *p ) ) );
+                        const bool allowed =
+                            (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') ||
+                            c == ' ' || c == '\'';
+                        if (allowed)
+                        {
+                            g_solventCoolerBuffer.push_back( c );
+                        }
+                    }
+
+                    if (submitFromTextEvent)
+                    {
+                        if (isSolventCoolerPhraseCorrect( g_solventCoolerBuffer ))
+                        {
+                            g_solventCoolerEntryActive = false;
+                            g_solventCoolerBuffer.clear();
+                            SDL_StopTextInput( engineContext.window );
+                            showAccessPopup( "Authorization accepted. Dispensing pigment.", 2200 );
+                            startRedPigmentDispenseCutscene( engineContext );
+                        }
+                        else
+                        {
+                            showAccessPopup( "Phrase rejected.", 1800 );
+                        }
+                    }
+
+                    continue;
+                }
+
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
                     if (g_levelTransition.active || g_wakeCutsceneActive)
@@ -759,6 +985,39 @@ int main( int argc, char **argv ) {
 
                     if (g_revolverInspectCutsceneActive)
                     {
+                        continue;
+                    }
+
+                    if (g_solventCoolerEntryActive)
+                    {
+                        if (ev.key.key == SDLK_ESCAPE)
+                        {
+                            g_solventCoolerEntryActive = false;
+                            g_solventCoolerBuffer.clear();
+                            SDL_StopTextInput( engineContext.window );
+                        }
+                        else if (ev.key.key == SDLK_BACKSPACE)
+                        {
+                            if (!g_solventCoolerBuffer.empty())
+                            {
+                                g_solventCoolerBuffer.pop_back();
+                            }
+                        }
+                        else if (ev.key.key == SDLK_RETURN || ev.key.key == SDLK_KP_ENTER || ev.key.scancode == SDL_SCANCODE_RETURN || ev.key.scancode == SDL_SCANCODE_KP_ENTER)
+                        {
+                            if (isSolventCoolerPhraseCorrect( g_solventCoolerBuffer ))
+                            {
+                                g_solventCoolerEntryActive = false;
+                                g_solventCoolerBuffer.clear();
+                                SDL_StopTextInput( engineContext.window );
+                                showAccessPopup( "Authorization accepted. Dispensing pigment.", 2200 );
+                                startRedPigmentDispenseCutscene( engineContext );
+                            }
+                            else
+                            {
+                                showAccessPopup( "Phrase rejected.", 1800 );
+                            }
+                        }
                         continue;
                     }
 
@@ -1103,10 +1362,13 @@ int main( int argc, char **argv ) {
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
-                        if (!g_mindTrapTriggerConsumed && isPlayerNearMindTrapTrigger( engineContext ))
+                        if (engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearSolventCooler( engineContext ) &&
+                            !g_playerKeys.contains( "RED PIGMENT" ) && !g_redPigmentDispenseCutsceneActive)
                         {
-                            startMindTrapSequence( engineContext );
-                            currentState = STATE_MIND_TRAP;
+                            g_solventCoolerEntryActive = true;
+                            g_solventCoolerBuffer.clear();
+                            SDL_StartTextInput( engineContext.window );
+                            showAccessPopup( "Solvent Cooler awaiting authorization phrase.", 1800 );
                             continue;
                         }
 
@@ -1193,7 +1455,6 @@ int main( int argc, char **argv ) {
                             {
                                 g_worldModels[ k.modelIndex ].visible = false;
                             }
-                            hideWorldModelsNear( k.x, k.y );
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
                             playPickup(levels[engineContext.currentLevel].folder);
                             triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
@@ -1207,7 +1468,7 @@ int main( int argc, char **argv ) {
                             {
                                 g_worldModels[ g_revolverPickup.modelIndex ].visible = false;
                             }
-                            hideWorldModelsNear( g_revolverPickup.x, g_revolverPickup.y, 0.9f );
+                            
                             g_revolverPickup.modelIndex = -1;
                             g_combatState.active = true;
                             g_combatState.hasRevolver = true;
@@ -1228,22 +1489,21 @@ int main( int argc, char **argv ) {
                         int nearbyNote = getNearbyClueNote( engineContext );
                         if (nearbyNote >= 0)
                         {
-                            auto &n = g_clueNotes[ nearbyNote ];
-                            n.collected = true;
-                            g_foundNotes.push_back( nearbyNote );
-                            g_notesCollectedRun++;
-                            if (n.propIndex >= 0 && n.propIndex < (int)engineContext.props.size())
-                            {
+                             auto &n = g_clueNotes[ nearbyNote ];
+                             n.collected = true;
+                             g_foundNotes.push_back( nearbyNote );
+                             g_notesCollectedRun++;
+                             if (n.propIndex >= 0 && n.propIndex < (int)engineContext.props.size())
+                             {
                                 engineContext.props[ n.propIndex ].scale = 0.0f;
                             }
-                            if (n.modelIndex >= 0 && n.modelIndex < (int)g_worldModels.size())
-                            {
-                                g_worldModels[ n.modelIndex ].visible = false;
-                            }
-                            hideWorldModelsNear( n.x, n.y );
-                            showAccessPopup( "Collected note: " + n.title, 2200 );
-							playPaperRustle( levels[ engineContext.currentLevel ].folder );
-                            triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
+                             if (n.modelIndex >= 0 && n.modelIndex < (int)g_worldModels.size())
+                             {
+                                 g_worldModels[ n.modelIndex ].visible = false;
+                             }
+                             showAccessPopup( "Collected note: " + n.title, 2200 );
+ 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
+                             triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
 
                             if (g_cutsceneController.canTriggerPhoneCutscene() &&
                                 engineContext.currentLevel == Levels::MUSEUM &&
@@ -1363,8 +1623,9 @@ int main( int argc, char **argv ) {
                                 {
                                     engineContext.map.tiles[ idx ] = 0;
                                 }
-                                showAccessPopup( "Taxidermy seal broken. Restoration Wing unlocked.", 2400 );
+                                showAccessPopup( "Access override.Restoration Wing unlocked.", 2400 );
                                 triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORATION WING UNSEALED", 1.0f );
+                                startSolventLabUnlockCutscene( engineContext );
                             }
                             else
                             {
@@ -1531,7 +1792,8 @@ int main( int argc, char **argv ) {
             {
                 ms += 0.8f * dt;
             }
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive || g_solventCoolerEntryActive || g_redPigmentDispenseCutsceneActive) ms = 0.0f;
+            if (g_solventLabUnlockCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
@@ -1673,6 +1935,31 @@ int main( int argc, char **argv ) {
                 g_cutsceneController.triggerStudioCutscene( engineContext, g_dialogue );
             }
         }
+        const float headShakeYaw = g_cutsceneController.headShakeYawOffset();
+        const float headShakePitch = g_cutsceneController.headShakePitchOffset();
+        const float savedPitchOffset = engineContext.pitchOffset;
+        const float savedDirX = engineContext.directionX;
+        const float savedDirY = engineContext.directionY;
+        const float savedPlaneX = engineContext.planeX;
+        const float savedPlaneY = engineContext.planeY;
+        const float savedYawDeg = engineContext.yaw;
+
+        engineContext.pitchOffset = savedPitchOffset + headShakePitch;
+        if (std::fabs( headShakeYaw ) > 0.00001f)
+        {
+            const float c = std::cos( headShakeYaw );
+            const float s = std::sin( headShakeYaw );
+            const float ndx = savedDirX * c - savedDirY * s;
+            const float ndy = savedDirX * s + savedDirY * c;
+            engineContext.directionX = ndx;
+            engineContext.directionY = ndy;
+            engineContext.planeX = -engineContext.directionY * FOV_TAN;
+            engineContext.planeY = engineContext.directionX * FOV_TAN;
+            float yaw = std::atan2( engineContext.directionY, engineContext.directionX ) * (180.0f / 3.14159265f);
+            if (yaw < 0.0f) yaw += 360.0f;
+            engineContext.yaw = yaw;
+        }
+
         if (currentState == STATE_MIND_TRAP)
         {
             drawTextBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
@@ -1709,6 +1996,14 @@ int main( int argc, char **argv ) {
         {
             renderMindTrapInterface( engineContext );
         }
+
+        engineContext.pitchOffset = savedPitchOffset;
+        engineContext.directionX = savedDirX;
+        engineContext.directionY = savedDirY;
+        engineContext.planeX = savedPlaneX;
+        engineContext.planeY = savedPlaneY;
+        engineContext.yaw = savedYawDeg;
+
         // Present to window (nearest-neighbor scale)
         SDL_UpdateTexture( engineContext.backtexure, nullptr, engineContext.backbuffer.data(), RENDER_W * 4  );
         SDL_RenderClear( engineContext.renderer );
@@ -1778,6 +2073,7 @@ int main( int argc, char **argv ) {
     SDL_Quit();
     return 0;
 }
+
 
 
 

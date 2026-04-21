@@ -37,6 +37,7 @@ struct KeyPickup
     int propIndex = -1;
     int modelIndex = -1;
     Levels level = Levels::MUSEUM;
+    float modelHeightOffset = 0.2f;
 };
 
 struct CaveQuizQuestion
