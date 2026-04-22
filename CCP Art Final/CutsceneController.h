@@ -83,14 +83,9 @@ public:
                 scriptedPanActive = false;
                 scriptedPanElapsed = 0.0f;
             }
+        }
 
-            const float turnIntensity = std::clamp( std::fabs( scriptedPanSpeed ) * 12.0f, 0.2f, 1.0f );
-            updateTurnHeadShake( dt, true, turnIntensity );
-        }
-        else
-        {
-            updateTurnHeadShake( dt, false, 0.0f );
-        }
+        updateTurnHeadShake( dt, false, 0.0f );
 
         if (!phoneCutsceneActive) return;
 

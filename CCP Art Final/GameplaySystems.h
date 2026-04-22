@@ -118,7 +118,7 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
     g_whisperTimer = 0.0f;
     g_whisperNextDelay = g_mindTrapActive ? randomRange01( 1.2f, 3.2f ) : randomRange01( 36.0f, 64.0f );
 
-    playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 16.0f : 13.0f );
+    playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 10.0f : 13.0f );
 
     const bool shouldSpeak = (std::rand() % 100) < 70;
     const bool canSpeak =

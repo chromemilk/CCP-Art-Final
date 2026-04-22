@@ -97,11 +97,20 @@ static bool g_mindTrapAwaitingChoice = false;
 static int g_mindTrapSelectedOption = 0;
 static bool g_mindTrapAdvanceAfterResult = false;
 static bool g_mindTrapFinalizeAfterResult = false;
+static int g_mindTrapLastHoveredOption = -1;
+static float g_mindTrapHoverTimer = 0.0f;
+static bool g_mindTrapForcedCorrectionActive = false;
+static float g_mindTrapForcedCorrectionTimer = 0.0f;
+static int g_mindTrapForcedOption = -1;
+static float g_mindTrapChoiceJitterTimer = 0.0f;
+static bool g_mindTrapTearActive = false;
+static float g_mindTrapTearTimer = 0.0f;
 static bool g_solventLabUnlockCutsceneActive = false;
 static int g_solventLabUnlockCutsceneStage = 0;
 static float g_solventLabUnlockCutsceneTimer = 0.0f;
 static float g_solventLabUnlockTurnStartYaw = 0.0f;
 static float g_solventLabUnlockWhiteFlash = 0.0f;
+static int g_solventLabMonsterModelIndex = -1;
 static bool g_solventCoolerEntryActive = false;
 static std::string g_solventCoolerBuffer;
 static bool g_redPigmentDispensed = false;
@@ -390,7 +399,12 @@ int main( int argc, char **argv ) {
                 }
             }
         }
-        g_cutsceneController.updateViewBobShake( config::viewBobbing, movingLastFrame, dt, MOVE_SPEED );
+        const bool allowViewBob =
+            config::viewBobbing &&
+            !g_cutsceneController.isCameraLockActive() &&
+            !g_wakeCutsceneActive &&
+            !g_solventLabUnlockCutsceneActive;
+        g_cutsceneController.updateViewBobShake( allowViewBob, movingLastFrame, dt, MOVE_SPEED );
         engineContext.isMoving = false;
 
         updateMusicStream();
@@ -609,7 +623,8 @@ int main( int argc, char **argv ) {
             {
                 const float preTurnDelay = 3.45f;
                 const float p = std::clamp( g_wakeCutsceneStageTimer / preTurnDelay, 0.0f, 1.0f );
-                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0038f ) * 0.22f;
+                const float uDip = 4.0f * p * (1.0f - p);
+                engineContext.pitchOffset = uDip * 1.3f;
                 g_wakeDarknessOverride = std::clamp( 0.18f * (1.0f - p), 0.0f, 0.18f );
                 g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
 
@@ -625,10 +640,12 @@ int main( int argc, char **argv ) {
                 const float turnDuration = 1.60f;
                 const float p = std::clamp( g_wakeCutsceneStageTimer / turnDuration, 0.0f, 1.0f );
                 const float ease = p * p * (3.0f - 2.0f * p);
+                const float uDip = 4.0f * p * (1.0f - p);
                 const float targetYaw = std::atan2( kMuseumGeneratorY - engineContext.positionY, kMuseumGeneratorX - engineContext.positionX );
                 const float d = std::atan2( std::sin( targetYaw - g_wakeCutsceneTurnStartYaw ), std::cos( targetYaw - g_wakeCutsceneTurnStartYaw ) );
                 setYaw( g_wakeCutsceneTurnStartYaw + d * ease );
-                g_cutsceneController.updateTurnHeadShake( dt, true, 1.05f );
+                engineContext.pitchOffset = uDip * 2.6f;
+                g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
 
                 if (g_wakeMonsterModelIndex < 0)
                 {
@@ -662,7 +679,7 @@ int main( int argc, char **argv ) {
             }
             else if (g_wakeCutsceneStage == 3)
             {
-                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0032f ) * 0.16f;
+                engineContext.pitchOffset = 0.0f;
                 g_wakeDarknessOverride = 0.0f;
                 g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
 
@@ -706,8 +723,9 @@ int main( int argc, char **argv ) {
                 const float returnDuration = 4.00f;
                 const float p = std::clamp( g_wakeCutsceneStageTimer / returnDuration, 0.0f, 1.0f );
                 const float ease = p * p * (3.0f - 2.0f * p);
+                const float uDip = 4.0f * p * (1.0f - p);
                 g_wakeDarknessOverride = 1.0f + (0.14f - 1.0f) * ease;
-                engineContext.pitchOffset = std::sin( SDL_GetTicks() * 0.0036f ) * 0.18f;
+                engineContext.pitchOffset = uDip * 1.1f;
                 g_cutsceneController.updateTurnHeadShake( dt, false, 0.0f );
 
                 const float yawDelta = std::atan2( std::sin( g_wakeCutsceneInitialYaw - g_wakeCutsceneReturnStartYaw ), std::cos( g_wakeCutsceneInitialYaw - g_wakeCutsceneReturnStartYaw ) );
@@ -1734,11 +1752,11 @@ int main( int argc, char **argv ) {
             {
                 if (ev.type == SDL_EVENT_KEY_DOWN)
                 {
-                    if ((ev.key.key == SDLK_UP || ev.key.key == SDLK_W) && g_mindTrapAwaitingChoice)
+                    if ((ev.key.key == SDLK_UP || ev.key.key == SDLK_W) && g_mindTrapAwaitingChoice && !g_mindTrapForcedCorrectionActive)
                     {
                         g_mindTrapSelectedOption = (g_mindTrapSelectedOption + 2) % 3;
                     }
-                    else if ((ev.key.key == SDLK_DOWN || ev.key.key == SDLK_S) && g_mindTrapAwaitingChoice)
+                    else if ((ev.key.key == SDLK_DOWN || ev.key.key == SDLK_S) && g_mindTrapAwaitingChoice && !g_mindTrapForcedCorrectionActive)
                     {
                         g_mindTrapSelectedOption = (g_mindTrapSelectedOption + 1) % 3;
                     }

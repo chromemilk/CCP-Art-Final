@@ -1,4 +1,7 @@
 #pragma once
+static std::string normalizeMindTrapTerminalText( std::string s );
+static bool isMindTrapDenialOption( const std::string &optionText );
+static std::string mindTrapCorruptOptionText( std::string text, float intensity );
 
 static void renderCaveQuiz( Engine &engineContext ) {
     if (!g_caveQuizActive || g_caveQuiz.empty()) return;
@@ -33,89 +36,210 @@ static void renderMindTrapInterface(Engine& engineContext) {
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
 
     drawTextBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(0, 0, 0), rgb(0, 0, 0));
+    drawTranslucentBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(4, 4, 6), 0.60f);
 
-    float petrification = (float)g_mindTrapPhaseIndex / (float)g_mindTrapPhases.size();
-    Uint8 textLuma = Uint8(std::clamp(255.0f - (petrification * 120.0f), 80.0f, 255.0f));
-    Uint8 dimLuma = Uint8(std::clamp(180.0f - (petrification * 100.0f), 50.0f, 180.0f));
+    const float petrification = (float)g_mindTrapPhaseIndex / std::max(1.0f, (float)g_mindTrapPhases.size());
+    const Uint8 luma = Uint8(std::clamp(250.0f - (petrification * 120.0f), 110.0f, 250.0f));
+    const Uint32 ink = rgb(luma, luma, luma);
+    const Uint32 dimInk = rgb(std::max(45, int(luma) - 90), std::max(45, int(luma) - 90), std::max(55, int(luma) - 82));
+    const Uint32 dangerInk = rgb(235, 85, 85);
+    const Uint32 archiveInk = rgb(190, 210, 230);
+    const Uint32 mindInk = rgb(245, 245, 245);
+    const Uint32 subjectInk = rgb(150, 220, 165);
+    const Uint32 noteInk = rgb(205, 175, 235);
 
-    const Uint32 voiceText = rgb(textLuma, textLuma, textLuma); // Pure, cold white/gray
-    const Uint32 playerText = rgb(dimLuma, dimLuma, dimLuma); // Darker fading thought
-    const Uint32 dimText = rgb(60, 60, 60); // Almost gone
+    int panelX = 88;
+    int panelY = 44;
+    int panelW = RENDER_W - 176;
+    int panelH = RENDER_H - 88;
+    drawTranslucentBox(engineContext, panelX, panelY, panelW, panelH, rgb(0, 0, 0), 0.68f);
 
-    auto renderLineCleaned = [&](int tx, int ty, const std::string& rawLine, Uint32 color) {
-        std::string cleanLine = rawLine;
-        if (cleanLine.rfind("VOICE> ", 0) == 0) cleanLine = cleanLine.substr(7);
-        if (cleanLine.rfind("THOUGHT> ", 0) == 0) cleanLine = cleanLine.substr(9);
-        if (cleanLine.rfind("MIND> ", 0) == 0) cleanLine = cleanLine.substr(6);
-        if (cleanLine.rfind("YOU> ", 0) == 0) cleanLine = cleanLine.substr(5);
+    const int charAdv = 6;
+    const int rowStep = 12;
+    const int cols = std::max(40, (panelW - 20) / charAdv);
+    const int rows = std::max(20, (panelH - 20) / rowStep);
+    const int tx = panelX + 10;
+    const int ty = panelY + 8;
 
-        if (cleanLine.rfind("> ", 0) == 0) cleanLine = cleanLine.substr(2);
+    const bool fractured = (std::sin(g_mindTrapFlickerTimer * 3.9f) > 0.84f);
+    std::string topBorder = "+" + std::string(cols - 2, '-') + "+";
+    std::string botBorder = topBorder;
+    if (fractured && cols > 20)
+    {
+        topBorder.replace( cols / 2 - 4, 8, "/V\\/\\/" );
+    }
 
-        drawStringTinyScaled(engineContext, tx + 1, ty + 1, cleanLine, rgb(0, 0, 0), 2, 1, 1, false);
-        drawStringTinyScaled(engineContext, tx, ty, cleanLine, color, 2, 1, 1, false);
-        };
+    drawStringTinyScaled(engineContext, tx, ty, topBorder, ink, 1, 1, 1, false);
+    for (int r = 1; r < rows - 1; ++r)
+    {
+        drawStringTinyScaled(engineContext, tx, ty + r * rowStep, "|", dimInk, 1, 1, 1, false);
+        drawStringTinyScaled(engineContext, tx + (cols - 1) * charAdv, ty + r * rowStep, "|", dimInk, 1, 1, 1, false);
+    }
+    drawStringTinyScaled(engineContext, tx, ty + (rows - 1) * rowStep, botBorder, ink, 1, 1, 1, false);
 
-    auto terminalLineColor = [&](const std::string& line) -> Uint32 {
-        if (line.rfind("VOICE>", 0) == 0 || line.rfind("MIND>", 0) == 0) return voiceText;
-        if (line.rfind("YOU>", 0) == 0) return playerText;
-        if (line.rfind("THOUGHT>", 0) == 0) return playerText;
-        return playerText;
-        };
+    drawStringTinyScaled(engineContext, tx + 12, ty + 14, "[ARCHIVE_TERMINAL::MUSEUM_INTERNAL]", ink, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 12, ty + 26, "[OBJECT_ID: THE_DIRECTOR]  [CURATORIAL_STATUS: OBSERVED]", ink, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 12, ty + 38, "ARCHIVE", archiveInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 58, ty + 38, "MIND", mindInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 86, ty + 38, "SUBJECT", subjectInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 134, ty + 38, "NOTE", noteInk, 1, 1, 1, false);
 
-    int panelX = 80;
-    int panelY = 80;
-    int panelW = RENDER_W - 160;
-    int panelH = RENDER_H - 160;
+    if (((int)(g_mindTrapFlickerTimer * 2.0f) % 5) == 1)
+    {
+        drawTranslucentBox(engineContext, tx + 12 * charAdv, ty + 26, 10 * charAdv, rowStep - 2, rgb(0, 0, 0), 0.96f);
+    }
 
-    const int bodyX = panelX;
-    const int bodyY = panelY;
-    const int bodyH = panelH - 100;
+    auto cleanLine = [&](const std::string& raw) {
+        std::string out = raw;
+        if (out.rfind("VOICE> ", 0) == 0) out = "ARCHIVE> " + out.substr(7);
+        else if (out.rfind("MIND> ", 0) == 0) out = "MIND> " + out.substr(6);
+        else if (out.rfind("THOUGHT> ", 0) == 0) out = "NOTE> " + out.substr(9);
+        else if (out.rfind("YOU> ", 0) == 0) out = "SUBJECT> " + out.substr(5);
+        return normalizeMindTrapTerminalText( out );
+    };
 
-    const int lineStep = 22; // Slightly larger spacing for dramatic effect
-    const int visibleLines = std::max(1, bodyH / lineStep);
+    auto isHeavyLine = [](const std::string& s) {
+        return s.find("MARBLE") != std::string::npos ||
+            s.find("PRESERV") != std::string::npos ||
+            s.find("MASTERPIECE") != std::string::npos ||
+            s.find("CONSCIOUS") != std::string::npos ||
+            s.find("804") != std::string::npos;
+    };
+
+    const int logX = tx + 12;
+    const int logY = ty + 48;
+    const int logWChars = std::max(26, cols - 30);
+    const int logRows = std::max(8, rows - 12);
+    const int visibleLines = std::max(1, logRows);
+
     int start = 0;
     if ((int)g_mindTrapTerminalLog.size() > visibleLines)
     {
         start = (int)g_mindTrapTerminalLog.size() - visibleLines;
     }
 
-    int ty = bodyY;
+    int ly = logY;
     for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
     {
-        const std::string line = g_mindTrapTerminalLog[i];
-        if (line.empty()) { ty += lineStep; continue; } // Keep spacing for empty lines
+        std::string line = cleanLine( g_mindTrapTerminalLog[i] );
+        if ((int)line.size() > logWChars) line = line.substr(0, logWChars - 3) + "...";
+        Uint32 col = ink;
+        Uint32 marker = dimInk;
+        if (line.rfind("ARCHIVE>", 0) == 0) { col = archiveInk; marker = archiveInk; }
+        else if (line.rfind("MIND>", 0) == 0) { col = mindInk; marker = mindInk; }
+        else if (line.rfind("SUBJECT>", 0) == 0) { col = subjectInk; marker = subjectInk; }
+        else if (line.rfind("NOTE>", 0) == 0) { col = noteInk; marker = noteInk; }
+        if (line.find("CRITICAL_LOGIC_FAIL") != std::string::npos) col = dangerInk;
 
-        const Uint32 lineColor = terminalLineColor(line);
-        renderLineCleaned(bodyX, ty, line, lineColor);
-        ty += lineStep;
-        if (ty > bodyY + bodyH - lineStep) break;
+        const bool heavy = isHeavyLine( line );
+        drawTranslucentBox(engineContext, logX - 8, ly - 1, 4, rowStep - 2, marker, 0.95f);
+        drawTranslucentBox(engineContext, logX - 2, ly - 1, (logWChars * charAdv) + 4, rowStep - 2, rgb(0, 0, 0), 0.35f);
+        if (heavy)
+        {
+            drawStringTinyScaled(engineContext, logX + 1, ly, line, col, 1, 1, 1, false);
+        }
+        drawStringTinyScaled(engineContext, logX, ly, line, col, 1, 1, 1, false);
+
+        ly += rowStep;
+        if (ly > logY + (logRows - 1) * rowStep) break;
     }
 
-    if (!g_mindTrapTypingLine.empty() && ty <= bodyY + bodyH - lineStep)
+    if (!g_mindTrapTypingLine.empty() && ly <= logY + (logRows - 1) * rowStep)
     {
-        const size_t count = std::min(g_mindTrapTypingChars, g_mindTrapTypingLine.size());
-        std::string typed = g_mindTrapTypingLine.substr(0, count);
-        renderLineCleaned(bodyX, ty, typed, terminalLineColor(g_mindTrapTypingLine));
+        std::string typed = cleanLine( g_mindTrapTypingLine.substr(0, std::min(g_mindTrapTypingChars, g_mindTrapTypingLine.size())) );
+        if ((int)typed.size() > logWChars) typed = typed.substr(0, logWChars - 3) + "...";
+        Uint32 typeCol = ink;
+        if (typed.rfind("ARCHIVE>", 0) == 0) typeCol = archiveInk;
+        else if (typed.rfind("MIND>", 0) == 0) typeCol = mindInk;
+        else if (typed.rfind("SUBJECT>", 0) == 0) typeCol = subjectInk;
+        else if (typed.rfind("NOTE>", 0) == 0) typeCol = noteInk;
+        drawTranslucentBox(engineContext, logX - 2, ly - 1, (logWChars * charAdv) + 4, rowStep - 2, rgb(0, 0, 0), 0.35f);
+        drawStringTinyScaled(engineContext, logX, ly, typed, typeCol, 1, 1, 1, false);
     }
 
     const MindTrapPhase& phase = g_mindTrapPhases[g_mindTrapPhaseIndex];
-    int cmdY = panelY + panelH - 80;
+    const int galleryY = ty + (rows - 7) * rowStep;
+    drawStringTinyScaled(engineContext, tx + 12, galleryY - 10, "[SELECTION_GALLERY::INTERPRETATIONS]", ink, 1, 1, 1, false);
 
     if (g_mindTrapAwaitingChoice)
     {
         for (int i = 0; i < 3; ++i)
         {
             const bool selected = (i == g_mindTrapSelectedOption);
-            const Uint32 col = selected ? voiceText : dimText;
-            renderLineCleaned(bodyX, cmdY + i * 24, phase.options[i], col);
+            float sabotage = 0.0f;
+            if (selected && isMindTrapDenialOption( phase.options[i] ))
+            {
+                sabotage = std::clamp((g_mindTrapHoverTimer - 0.75f) / 1.65f, 0.0f, 1.0f);
+            }
+
+            std::string opt = phase.options[i];
+            if (selected && sabotage > 0.01f)
+            {
+                opt = mindTrapCorruptOptionText( opt, sabotage );
+            }
+
+            int jitter = 0;
+            if (selected && sabotage > 0.01f)
+            {
+                jitter = int(std::round(std::sin(g_mindTrapChoiceJitterTimer * (18.0f + sabotage * 8.0f) + i * 0.7f) * std::min(1.0f, 0.35f + sabotage * 0.9f)));
+            }
+
+            std::string line = std::to_string(i + 1) + ") " + opt;
+            if ((int)line.size() > (cols - 18)) line = line.substr(0, cols - 21) + "...";
+            const Uint32 col = selected ? (g_mindTrapForcedCorrectionActive ? dangerInk : ink) : dimInk;
+            drawTranslucentBox(engineContext, tx + 12, galleryY + i * rowStep - 1, (cols - 22) * charAdv, rowStep - 2, rgb(0, 0, 0), selected ? 0.55f : 0.30f);
+            drawStringTinyScaled(engineContext, tx + 14 + jitter, galleryY + i * rowStep, line, col, 1, 1, 1, false);
         }
     }
-    else if (g_mindTrapReadyToExit)
+
+    if (g_mindTrapForcedCorrectionActive)
     {
-        renderLineCleaned(bodyX, cmdY, "CONSCIOUSNESS FADING...", voiceText);
+        drawStringTinyScaled(engineContext, tx + 12, galleryY + 3 * rowStep + 2, "CRITICAL_LOGIC_FAIL: SUBJECT_MEMORY_CORRUPTED", dangerInk, 1, 1, 1, false);
     }
 
-    // The white flash at the end
+    const std::vector<std::vector<std::string>> morphFrames = {
+        {"   ./\\.", "  /    \\", " | /\\  |", " | \/\/ |", "  \\__/ /", "   |  |"},
+        {"   ./\\.", "  / /\\ \\", " | |  | |", " | |\/| |", "  \\_  _/", "   /  \\", "  /_||_\\"},
+        {"   .----.", "  / /\\\\ \\", " | |--| |", " | |  | |", "  \\_==_/", "   /  \\", "  /_/\\_\\"},
+        {"   .----.", "  / /..\\ \\", " | | []| |", " | |__| |", "  /|==|\\", " /_||  ||_\\"},
+        {"   .------.", "  /  /\\   \\", " |  |  |  |", " |  |__|  |", " |  .--.  |", " |  |  |  |", "  \\_|__|_/"}
+    };
+
+    float morphP = std::clamp(((float)g_mindTrapPhaseIndex - 6.0f) / 3.5f, 0.0f, 1.0f);
+    if (g_mindTrapTearActive) morphP = 1.0f;
+    const int frameIdx = std::clamp((int)(morphP * (float)(morphFrames.size() - 1) + 0.01f), 0, (int)morphFrames.size() - 1);
+    const auto &frame = morphFrames[ frameIdx ];
+    int artX = tx + (cols - 24) * charAdv;
+    int artY = ty + 54;
+    for (int i = 0; i < (int)frame.size(); ++i)
+    {
+        drawStringTinyScaled(engineContext, artX, artY + i * rowStep, frame[i], ink, 1, 1, 1, false);
+    }
+
+    if (g_mindTrapTearActive)
+    {
+        const float tearP = std::clamp(g_mindTrapTearTimer / 2.25f, 0.0f, 1.0f);
+        const int tearRows = int(RENDER_H * tearP);
+        const std::string glyphs = "#/\\|_-=+*[]{}";
+        for (int y = 0; y < tearRows; y += 12)
+        {
+            std::string row;
+            row.reserve( cols );
+            for (int c = 0; c < cols; ++c)
+            {
+                int pick = int(std::fabs(std::sin((float)c * 0.67f + (float)y * 0.11f + g_mindTrapTearTimer * 12.0f)) * (glyphs.size() - 1));
+                row.push_back( glyphs[ std::clamp(pick, 0, (int)glyphs.size() - 1) ] );
+            }
+            drawStringTinyScaled(engineContext, tx, y, row, rgb(190, 190, 190), 1, 1, 1, false);
+        }
+
+        if (tearP > 0.58f)
+        {
+            drawTextBox(engineContext, 0, (RENDER_H / 2) - 22, RENDER_W, 44, rgb(0, 0, 0), rgb(0, 0, 0));
+            drawString16x16(engineContext, (RENDER_W / 2) - 170, (RENDER_H / 2) - 4, "THE MASTERPIECE IS YOU.", rgb(245, 245, 245), 360, 1, 1, false);
+        }
+    }
+
     if (g_mindTrapWhiteFlashTimer > 0.0f)
     {
         const float flash = std::clamp(g_mindTrapWhiteFlashTimer / 0.65f, 0.0f, 1.0f);
@@ -741,6 +865,14 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_mindTrapSelectedOption = 0;
     g_mindTrapAdvanceAfterResult = false;
     g_mindTrapFinalizeAfterResult = false;
+    g_mindTrapLastHoveredOption = -1;
+    g_mindTrapHoverTimer = 0.0f;
+    g_mindTrapForcedCorrectionActive = false;
+    g_mindTrapForcedCorrectionTimer = 0.0f;
+    g_mindTrapForcedOption = -1;
+    g_mindTrapChoiceJitterTimer = 0.0f;
+    g_mindTrapTearActive = false;
+    g_mindTrapTearTimer = 0.0f;
     g_mindTrapTerminalLog.clear();
     g_mindTrapTypeQueue.clear();
     g_mindTrapTypingLine.clear();
@@ -751,11 +883,24 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_mindTrapSelectedOption = 0;
     g_mindTrapAdvanceAfterResult = false;
     g_mindTrapFinalizeAfterResult = false;
+    g_mindTrapLastHoveredOption = -1;
+    g_mindTrapHoverTimer = 0.0f;
+    g_mindTrapForcedCorrectionActive = false;
+    g_mindTrapForcedCorrectionTimer = 0.0f;
+    g_mindTrapForcedOption = -1;
+    g_mindTrapChoiceJitterTimer = 0.0f;
+    g_mindTrapTearActive = false;
+    g_mindTrapTearTimer = 0.0f;
     g_solventLabUnlockCutsceneActive = false;
     g_solventLabUnlockCutsceneStage = 0;
     g_solventLabUnlockCutsceneTimer = 0.0f;
     g_solventLabUnlockTurnStartYaw = 0.0f;
     g_solventLabUnlockWhiteFlash = 0.0f;
+    if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+    {
+        g_worldModels[ g_solventLabMonsterModelIndex ].visible = false;
+    }
+    g_solventLabMonsterModelIndex = -1;
     g_solventCoolerEntryActive = false;
     g_solventCoolerBuffer.clear();
     g_redPigmentDispensed = false;
@@ -990,6 +1135,14 @@ g_codeEntryBuffer.clear();
     g_mindTrapAdvanceOnResult = false;
     g_mindTrapExitOnResult = false;
     g_mindTrapReadyToExit = false;
+    g_mindTrapLastHoveredOption = -1;
+    g_mindTrapHoverTimer = 0.0f;
+    g_mindTrapForcedCorrectionActive = false;
+    g_mindTrapForcedCorrectionTimer = 0.0f;
+    g_mindTrapForcedOption = -1;
+    g_mindTrapChoiceJitterTimer = 0.0f;
+    g_mindTrapTearActive = false;
+    g_mindTrapTearTimer = 0.0f;
     g_mindTrapTerminalLog.clear();
     g_mindTrapTypeQueue.clear();
     g_mindTrapTypingLine.clear();
@@ -1005,6 +1158,11 @@ g_codeEntryBuffer.clear();
     g_solventLabUnlockCutsceneTimer = 0.0f;
     g_solventLabUnlockTurnStartYaw = 0.0f;
     g_solventLabUnlockWhiteFlash = 0.0f;
+    if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+    {
+        g_worldModels[ g_solventLabMonsterModelIndex ].visible = false;
+    }
+    g_solventLabMonsterModelIndex = -1;
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
     g_restorationWingUnlocked = false;
@@ -1751,6 +1909,67 @@ static bool mindTrapTypewriterIdle() {
     return g_mindTrapTypeQueue.empty() && g_mindTrapTypingLine.empty();
 }
 
+static bool isMindTrapDenialOption( const std::string &optionText ) {
+    const std::string opt = normalizeMindTrapTerminalText( optionText );
+    return
+        opt.find( "NO" ) != std::string::npos ||
+        opt.find( "HELP" ) != std::string::npos ||
+        opt.find( "WHO" ) != std::string::npos ||
+        opt.find( "FAMILY" ) != std::string::npos ||
+        opt.find( "NAME" ) != std::string::npos ||
+        opt.find( "DIE" ) != std::string::npos ||
+        opt.find( "RUN" ) != std::string::npos ||
+        opt.find( "BREAK" ) != std::string::npos ||
+        opt.find( "SCREAM" ) != std::string::npos ||
+        opt.find( "BLINK" ) != std::string::npos ||
+        opt.find( "STILL HERE" ) != std::string::npos;
+}
+
+static std::string mindTrapCorruptOptionText( std::string text, float intensity ) {
+    if (intensity <= 0.02f) return text;
+
+    auto replaceOnce = [&]( const std::string &from, const std::string &to ) {
+        const size_t at = text.find( from );
+        if (at != std::string::npos)
+        {
+            text.replace( at, from.size(), to );
+        }
+    };
+
+    replaceOnce( "HELP", "CONFESS" );
+    replaceOnce( "NO", "YES" );
+    replaceOnce( "MY", "THE" );
+    replaceOnce( "I ", "HE " );
+    replaceOnce( "ME", "IT" );
+
+    if (intensity > 0.46f)
+    {
+        text = "[ " + text + " ]";
+    }
+    if (intensity > 0.72f)
+    {
+        text = "INTERPRETATION: " + text;
+    }
+
+    return normalizeMindTrapTerminalText( text );
+}
+
+static int chooseMindTrapForcedOption( const MindTrapPhase &phase ) {
+    int fallback = 0;
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool denial = isMindTrapDenialOption( phase.options[ i ] );
+        if (denial) fallback = i;
+    }
+
+    if (phase.surrenderOption >= 0 && phase.surrenderOption < 3)
+    {
+        return phase.surrenderOption;
+    }
+
+    return std::clamp( fallback, 0, 2 );
+}
+
 static void updateMindTrapTypewriter( float dt ) {
     if (g_mindTrapPostLinePause > 0.0f)
     {
@@ -1996,6 +2215,30 @@ static void startSolventLabUnlockCutscene( Engine &engineContext ) {
     g_solventLabUnlockWhiteFlash = 0.0f;
     g_solventLabUnlockTurnStartYaw = std::atan2( engineContext.directionY, engineContext.directionX );
 
+    if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+    {
+        g_worldModels[ g_solventLabMonsterModelIndex ].visible = false;
+    }
+    g_solventLabMonsterModelIndex = -1;
+
+    const float rightX = -engineContext.directionY;
+    const float rightY = engineContext.directionX;
+    const float spawnX = engineContext.positionX - engineContext.directionX * 3.1f + rightX * 0.32f;
+    const float spawnY = engineContext.positionY - engineContext.directionY * 3.1f + rightY * 0.32f;
+    const float spawnYaw = std::atan2( engineContext.positionY - spawnY, engineContext.positionX - spawnX );
+    g_solventLabMonsterModelIndex = addWorldModelInstance(
+        resolveFirstExistingAsset( { "Monster.glb", "monster.glb" } ),
+        spawnX,
+        spawnY,
+        1.02f,
+        rgb( 130, 130, 130 ),
+        spawnYaw,
+        0.0f,
+        0.0f,
+        false,
+        0.0f,
+        -0.05f );
+
     g_notesOpen = false;
     g_caveQuizActive = false;
     g_codeEntryActive = false;
@@ -2025,6 +2268,7 @@ static void updateSolventLabUnlockCutscene( Engine &engineContext, GameState &cu
 
     if (g_solventLabUnlockCutsceneStage == 0)
     {
+        engineContext.pitchOffset = 0.0f;
         if (g_solventLabUnlockCutsceneTimer >= 1.55f)
         {
             if (g_whisperBaseFolder != g_currentLevelFolder)
@@ -2048,20 +2292,78 @@ static void updateSolventLabUnlockCutscene( Engine &engineContext, GameState &cu
     {
         const float turnProgress = std::clamp( g_solventLabUnlockCutsceneTimer / 0.78f, 0.0f, 1.0f );
         const float turnEase = turnProgress * turnProgress * (3.0f - 2.0f * turnProgress);
+        const float headDip = 4.0f * turnProgress * (1.0f - turnProgress);
         setYaw( g_solventLabUnlockTurnStartYaw + turnEase * 3.14159265f );
+        engineContext.pitchOffset = headDip * 3.2f;
 
-        if (turnProgress >= 1.0f)
+        bool reachedPlayer = false;
+        if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+        {
+            auto &monster = g_worldModels[ g_solventLabMonsterModelIndex ];
+            monster.visible = true;
+
+            const float targetX = engineContext.positionX + engineContext.directionX * 0.62f;
+            const float targetY = engineContext.positionY + engineContext.directionY * 0.62f;
+            const float dx = targetX - monster.x;
+            const float dy = targetY - monster.y;
+            const float dist = std::sqrt( dx * dx + dy * dy );
+
+            if (dist > 0.0001f)
+            {
+                const float step = std::min( dist, 11.5f * dt );
+                monster.x += (dx / dist) * step;
+                monster.y += (dy / dist) * step;
+            }
+
+            monster.yaw = std::atan2( engineContext.positionY - monster.y, engineContext.positionX - monster.x );
+            reachedPlayer = dist <= 0.16f;
+        }
+
+        if ((turnProgress >= 0.75f && reachedPlayer) || g_solventLabUnlockCutsceneTimer >= 1.35f)
         {
             g_dialogue.start( {
                 {"W-w-what is THAT", 2.1f}
                 } );
             g_solventLabUnlockCutsceneStage = 2;
             g_solventLabUnlockCutsceneTimer = 0.0f;
+            engineContext.pitchOffset = 0.0f;
         }
         return;
     }
 
     if (g_solventLabUnlockCutsceneStage == 2)
+    {
+        const float stareProgress = std::clamp( g_solventLabUnlockCutsceneTimer / 0.70f, 0.0f, 1.0f );
+        const float uDip = 4.0f * stareProgress * (1.0f - stareProgress);
+        engineContext.pitchOffset = uDip * 0.95f;
+
+        if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+        {
+            auto &monster = g_worldModels[ g_solventLabMonsterModelIndex ];
+            const float targetX = engineContext.positionX + engineContext.directionX * 0.54f;
+            const float targetY = engineContext.positionY + engineContext.directionY * 0.54f;
+            const float dx = targetX - monster.x;
+            const float dy = targetY - monster.y;
+            const float dist = std::sqrt( dx * dx + dy * dy );
+            if (dist > 0.0001f)
+            {
+                const float step = std::min( dist, 6.2f * dt );
+                monster.x += (dx / dist) * step;
+                monster.y += (dy / dist) * step;
+            }
+            monster.yaw = std::atan2( engineContext.positionY - monster.y, engineContext.positionX - monster.x );
+        }
+
+        if (g_solventLabUnlockCutsceneTimer >= 0.70f)
+        {
+            g_solventLabUnlockCutsceneStage = 3;
+            g_solventLabUnlockCutsceneTimer = 0.0f;
+            engineContext.pitchOffset = 0.0f;
+        }
+        return;
+    }
+
+    if (g_solventLabUnlockCutsceneStage == 3)
     {
         const float flashProgress = std::clamp( g_solventLabUnlockCutsceneTimer / 0.95f, 0.0f, 1.0f );
         g_solventLabUnlockWhiteFlash = std::clamp( std::pow( flashProgress, 0.65f ), 0.0f, 1.0f );
@@ -2072,6 +2374,13 @@ static void updateSolventLabUnlockCutscene( Engine &engineContext, GameState &cu
             g_solventLabUnlockCutsceneStage = 0;
             g_solventLabUnlockCutsceneTimer = 0.0f;
             g_solventLabUnlockWhiteFlash = 0.0f;
+            engineContext.pitchOffset = 0.0f;
+
+            if (g_solventLabMonsterModelIndex >= 0 && g_solventLabMonsterModelIndex < (int)g_worldModels.size())
+            {
+                g_worldModels[ g_solventLabMonsterModelIndex ].visible = false;
+            }
+            g_solventLabMonsterModelIndex = -1;
 
             startMindTrapSequence( engineContext );
             currentState = STATE_MIND_TRAP;
@@ -2197,6 +2506,11 @@ static void commitMindTrapChoice( int choiceIndex ) {
     const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = choiceIndex;
+    g_mindTrapLastHoveredOption = -1;
+    g_mindTrapHoverTimer = 0.0f;
+    g_mindTrapForcedCorrectionActive = false;
+    g_mindTrapForcedCorrectionTimer = 0.0f;
+    g_mindTrapForcedOption = -1;
 
     pushMindTrapTerminalLine( normalizeMindTrapTerminalText( "YOU> " + phase.options[ choiceIndex ] ) );
 
@@ -2230,7 +2544,50 @@ static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef>
     if (!g_mindTrapActive) return;
 
     g_mindTrapFlickerTimer += dt;
+    g_mindTrapChoiceJitterTimer += dt;
     updateMindTrapTypewriter( dt );
+
+    if (!g_mindTrapShowingResult && !g_mindTrapReadyToExit && g_mindTrapAwaitingChoice &&
+        g_mindTrapPhaseIndex >= 0 && g_mindTrapPhaseIndex < (int)g_mindTrapPhases.size())
+    {
+        const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
+        g_mindTrapSelectedOption = std::clamp( g_mindTrapSelectedOption, 0, 2 );
+
+        if (g_mindTrapSelectedOption != g_mindTrapLastHoveredOption)
+        {
+            g_mindTrapLastHoveredOption = g_mindTrapSelectedOption;
+            g_mindTrapHoverTimer = 0.0f;
+        }
+        else
+        {
+            g_mindTrapHoverTimer += dt;
+        }
+
+        if (g_mindTrapForcedCorrectionActive)
+        {
+            g_mindTrapForcedCorrectionTimer -= dt;
+            g_mindTrapSelectedOption = std::clamp( g_mindTrapForcedOption, 0, 2 );
+            if (g_mindTrapForcedCorrectionTimer <= 0.0f)
+            {
+                g_mindTrapForcedCorrectionActive = false;
+            }
+        }
+        else
+        {
+            const bool denialHover = isMindTrapDenialOption( phase.options[ g_mindTrapSelectedOption ] );
+            const bool lateStage = g_mindTrapPhaseIndex >= 2;
+            if (denialHover && lateStage && g_mindTrapHoverTimer >= 2.2f)
+            {
+                g_mindTrapForcedCorrectionActive = true;
+                g_mindTrapForcedCorrectionTimer = 1.15f;
+                g_mindTrapForcedOption = chooseMindTrapForcedOption( phase );
+                g_mindTrapSelectedOption = g_mindTrapForcedOption;
+                queueMindTrapTerminalLine( "[CRITICAL_LOGIC_FAIL: SUBJECT_MEMORY_CORRUPTED]" );
+                queueMindTrapTerminalLine( "ARCHIVE> FORCED CORRECTION APPLIED." );
+                g_mindTrapHoverTimer = 0.0f;
+            }
+        }
+    }
 
     if (g_mindTrapShowingResult)
     {
@@ -2252,7 +2609,10 @@ static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef>
             else if (g_mindTrapFinalizeAfterResult)
             {
                 g_mindTrapReadyToExit = true;
-                g_mindTrapWhiteFlashTimer = 0.01f;
+                g_mindTrapWhiteFlashTimer = 0.0f;
+                g_mindTrapTearActive = true;
+                g_mindTrapTearTimer = 0.0f;
+                queueMindTrapTerminalLine( "ARCHIVE CORE UNSTABLE." );
             }
             else
             {
@@ -2272,13 +2632,21 @@ static void updateMindTrapSequence( Engine &engineContext, std::vector<LevelDef>
 
     if (g_mindTrapReadyToExit)
     {
-        g_mindTrapWhiteFlashTimer += dt;
-        if (g_mindTrapWhiteFlashTimer >= 1.5f)
+        if (!g_mindTrapTearActive)
+        {
+            g_mindTrapTearActive = true;
+            g_mindTrapTearTimer = 0.0f;
+        }
+
+        g_mindTrapTearTimer += dt;
+        if (g_mindTrapTearTimer >= 2.25f)
         {
             g_mindTrapActive = false;
             g_mindTrapReadyToExit = false;
             g_mindTrapShowingResult = false;
             g_mindTrapWhiteFlashTimer = 0.0f;
+            g_mindTrapTearActive = false;
+            g_mindTrapTearTimer = 0.0f;
 
             handleLevelChange( engineContext, levels, Levels::TRANSITION );
             currentState = STATE_GAME;
