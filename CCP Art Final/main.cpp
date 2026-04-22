@@ -227,7 +227,7 @@ int main( int argc, char **argv ) {
 
     Engine engineContext;
     engineContext.backbuffer.resize( RENDER_W * RENDER_H );
-    engineContext.window = SDL_CreateWindow( "Micro Museum", RENDER_W * WIN_SCALE, RENDER_H * WIN_SCALE, 0 );
+    engineContext.window = SDL_CreateWindow( "Still Life", RENDER_W * WIN_SCALE, RENDER_H * WIN_SCALE, 0 );
     SDL_SetWindowPosition( engineContext.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED );
 
     if (!engineContext.window)
@@ -597,7 +597,7 @@ int main( int argc, char **argv ) {
                                 g_generatorStartBuffer,
                                 kMuseumGeneratorX,
                                 kMuseumGeneratorY,
-                                76.0f,
+                                60.0f,
                                 8.5f,
                                 0.03f,
                                 true );
@@ -646,7 +646,7 @@ int main( int argc, char **argv ) {
                         0.0f,
                         false,
                         0.0f,
-                        -0.02f );
+                        -0.05f );
                 }
                 if (g_wakeMonsterModelIndex >= 0 && g_wakeMonsterModelIndex < (int)g_worldModels.size())
                 {
@@ -1458,6 +1458,7 @@ int main( int argc, char **argv ) {
                             showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
                             playPickup(levels[engineContext.currentLevel].folder);
                             triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
+                            hideExactInteractableVisualsAt(engineContext, k.x, k.y);
                             continue;
                         }
 
@@ -1502,9 +1503,10 @@ int main( int argc, char **argv ) {
                                  g_worldModels[ n.modelIndex ].visible = false;
                              }
                              showAccessPopup( "Collected note: " + n.title, 2200 );
- 							playPaperRustle( levels[ engineContext.currentLevel ].folder );
+ 							 playPaperRustle( levels[ engineContext.currentLevel ].folder );
                              triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
 
+                            hideExactInteractableVisualsAt(engineContext, n.x, n.y);
                             if (g_cutsceneController.canTriggerPhoneCutscene() &&
                                 engineContext.currentLevel == Levels::MUSEUM &&
                                 n.title == "Missed Calls")
@@ -1706,39 +1708,10 @@ int main( int argc, char **argv ) {
                             handleLevelChange( engineContext, levels, Levels::CAVE );
                         }
                     }
-                    else if (ev.key.scancode == SDL_SCANCODE_P)
-                    {
-                        float2 pos( engineContext.positionX, engineContext.positionY );
-                        placePlant( engineContext, pos, levels[ curLevel ].folder + "/plant.bmp" );
-                    }
-                    else if (ev.key.scancode == SDL_SCANCODE_R)
-                    {
-                        float2 pos( engineContext.positionX, engineContext.positionY );
-                        placeRope( engineContext, pos, levels[ curLevel ].folder + "/rope.bmp" );
-                    }
-                    else if (ev.key.scancode == SDL_SCANCODE_T)
-                    {
-                        float2 pos( engineContext.positionX, engineContext.positionY );
-                        placeStatue( engineContext, pos, levels[ curLevel ].folder + "/statue.bmp" );
-                    }
-                    else if (ev.key.scancode == SDL_SCANCODE_V)
-                    {
-                        float2 pos( engineContext.positionX, engineContext.positionY );
-                        placeVase( engineContext, pos, levels[ curLevel ].folder );
-                    }
-                    else if (ev.key.scancode == SDL_SCANCODE_C)
-                    {
-                        float2 pos( engineContext.positionX, engineContext.positionY );
-                        placeCan( engineContext, pos, levels[ curLevel ].folder + "/trashcan.bmp" );
-                    }
-                    else if (ev.key.scancode == SDL_SCANCODE_O)
-                    {
-                        saveProps( (levels[ curLevel ].folder + "/props.txt"),
-                            engineContext.props, engineContext.propImages, engineContext.quads );
-                    }
+           
                     else if (ev.key.scancode == SDL_SCANCODE_K)
                     {
-                        handleLevelChange( engineContext, levels, Levels::MUSEUM );
+                        handleLevelChange( engineContext, levels, static_cast<Levels>((static_cast<int>(engineContext.currentLevel) + 1) % static_cast<int>(Levels::COUNT)));
                     }
                 }
             }
@@ -1778,7 +1751,7 @@ int main( int argc, char **argv ) {
                         g_mindTrapAwaitingChoice = false;
                         pushMindTrapTerminalLine( "> EXIT" );
                         pushMindTrapTerminalLine( "[ENTER]" );
-                        queueMindTrapTerminalLine( "EXIT COMMAND DENIED. COMPLETE THE SYNC." );
+                        queueMindTrapTerminalLine( "EXIT COMMAND DENIED." );
                     }
                 }
             }

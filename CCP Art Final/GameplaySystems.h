@@ -118,7 +118,7 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
     g_whisperTimer = 0.0f;
     g_whisperNextDelay = g_mindTrapActive ? randomRange01( 1.2f, 3.2f ) : randomRange01( 36.0f, 64.0f );
 
-    playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 16.0f : 9.0f );
+    playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 16.0f : 13.0f );
 
     const bool shouldSpeak = (std::rand() % 100) < 70;
     const bool canSpeak =
@@ -601,7 +601,7 @@ static bool museumPowerFlickerLowPhase() {
 
 static float museumPowerLightMultiplierForLevel( Levels level ) {
     if (!isMuseumLikeLevel( level )) return 1.0f;
-    if (!g_generatorFueled) return 0.56f;
+    if (!g_generatorFueled) return 0.20f;
     if (museumPowerFlickerLowPhase()) return 0.44f;
     return 1.12f;
 }
@@ -819,3 +819,28 @@ static void triggerInteractionAnim( InteractionAnimType type, const std::string 
     g_interactionAnim.label = label;
 }
 
+static void hideExactInteractableVisualsAt(Engine& engineContext, float exactX, float exactY) {
+    const float epsilon = 0.05f;
+    const float r2 = epsilon * epsilon;
+
+    for (auto& m : g_worldModels) {
+        // Never delete level architecture or manually placed props
+        if (!m.visible || m.editorPlaced) continue;
+
+        float dx = m.x - exactX;
+        float dy = m.y - exactY;
+        if ((dx * dx + dy * dy) <= r2) {
+            m.visible = false;
+        }
+    }
+
+    for (auto& p : engineContext.props) {
+        if (p.scale <= 0.0f) continue;
+
+        float dx = p.x - exactX;
+        float dy = p.y - exactY;
+        if ((dx * dx + dy * dy) <= r2) {
+            p.scale = 0.0f;
+        }
+    }
+}

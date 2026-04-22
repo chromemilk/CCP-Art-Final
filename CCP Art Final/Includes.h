@@ -21,7 +21,8 @@ enum Levels
     MUSEUM = 1,
     MUSEUM_UPPER = 2,
     TRANSITION = 3,
-    CAVE = 4
+    CAVE = 4,
+    COUNT
 };
 
 

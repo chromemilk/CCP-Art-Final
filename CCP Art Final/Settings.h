@@ -7,7 +7,7 @@ namespace config
 	float musicVolume = 100.0f;
 	// Set back to true later
 	bool viewBobbing = false;
-  int antiAliasingMode = 1; // 0=Off, 1=Linear, 2=FXAA
+  int antiAliasingMode = 0; // 0=Off, 1=Linear, 2=FXAA
 	int modelQualityPreset = 1; // 0=High, 1=Balanced, 2=Performance
     int gpuRenderMode = 0; // 0=None (CPU), 1=Smart, 2=Full
 	bool schoolMode = false;

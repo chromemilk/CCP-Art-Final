@@ -28,72 +28,51 @@ static void renderCaveQuiz( Engine &engineContext ) {
 
     drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "Press 1-4 To Answer   ESC To Cancel", rgb( 130, 130, 145 ), 1, 1, 1, false );
 }
-
-static void renderMindTrapInterface( Engine &engineContext ) {
+static void renderMindTrapInterface(Engine& engineContext) {
     if (!g_mindTrapActive) return;
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
 
-    drawTextBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), rgb( 0, 0, 0 ) );
+    drawTextBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(0, 0, 0), rgb(0, 0, 0));
 
-    const float flickerNoise =
-        0.82f +
-        0.12f * std::sin( g_mindTrapFlickerTimer * 33.0f ) +
-        0.08f * std::sin( g_mindTrapFlickerTimer * 71.0f );
-    const float flicker = std::clamp( flickerNoise, 0.38f, 1.0f );
-    const Uint8 green = Uint8( std::clamp( 180.0f * flicker, 42.0f, 225.0f ) );
-    const Uint8 greenDim = Uint8( std::clamp( 120.0f * flicker, 24.0f, 180.0f ) );
-    const Uint8 voiceRed = Uint8( std::clamp( 210.0f * flicker, 60.0f, 255.0f ) );
-    const Uint8 playerBlue = Uint8( std::clamp( 210.0f * flicker, 60.0f, 255.0f ) );
-    const Uint32 mainText = rgb( 0, green, 22 );
-    const Uint32 dimText = rgb( 0, greenDim, 12 );
-    const Uint32 borderText = rgb( 0, Uint8( std::clamp( green + 18, 0, 255 ) ), 28 );
-    const Uint32 voiceText = rgb( voiceRed, 18, 22 );
-    const Uint32 playerText = rgb( 30, 80, playerBlue );
-    const Uint32 thoughtText = rgb( 160, Uint8( std::clamp( green + 30, 0, 255 ) ), 40 );
+    float petrification = (float)g_mindTrapPhaseIndex / (float)g_mindTrapPhases.size();
+    Uint8 textLuma = Uint8(std::clamp(255.0f - (petrification * 120.0f), 80.0f, 255.0f));
+    Uint8 dimLuma = Uint8(std::clamp(180.0f - (petrification * 100.0f), 50.0f, 180.0f));
 
-    auto terminalLineColor = [&]( const std::string &line, Uint32 fallback ) -> Uint32 {
-        if (line.rfind( "VOICE>", 0 ) == 0 || line.rfind( "MIND>", 0 ) == 0) return voiceText;
-        if (line.rfind( "YOU>", 0 ) == 0) return playerText;
-        if (line.rfind( "THOUGHT>", 0 ) == 0) return thoughtText;
-        return fallback;
-    };
+    const Uint32 voiceText = rgb(textLuma, textLuma, textLuma); // Pure, cold white/gray
+    const Uint32 playerText = rgb(dimLuma, dimLuma, dimLuma); // Darker fading thought
+    const Uint32 dimText = rgb(60, 60, 60); // Almost gone
 
-    auto drawTerminalText = [&]( int tx, int ty, const std::string &line, Uint32 color ) {
-        drawStringTinyScaled( engineContext, tx + 1, ty + 1, line, rgb( 0, 24, 0 ), 2, 1, 1, false );
-        drawStringTinyScaled( engineContext, tx, ty, line, color, 2, 1, 1, false );
-    };
+    auto renderLineCleaned = [&](int tx, int ty, const std::string& rawLine, Uint32 color) {
+        std::string cleanLine = rawLine;
+        if (cleanLine.rfind("VOICE> ", 0) == 0) cleanLine = cleanLine.substr(7);
+        if (cleanLine.rfind("THOUGHT> ", 0) == 0) cleanLine = cleanLine.substr(9);
+        if (cleanLine.rfind("MIND> ", 0) == 0) cleanLine = cleanLine.substr(6);
+        if (cleanLine.rfind("YOU> ", 0) == 0) cleanLine = cleanLine.substr(5);
 
-    for (int y = 8; y < RENDER_H; y += 4)
-    {
-        if (((y / 4) % 2) == 0)
-        {
-            drawTranslucentBox( engineContext, 0, y, RENDER_W, 1, rgb( 0, 44, 0 ), 0.16f );
-        }
-    }
+        if (cleanLine.rfind("> ", 0) == 0) cleanLine = cleanLine.substr(2);
 
-    const bool twitch = (std::sin( g_mindTrapFlickerTimer * 19.0f ) > 0.94f);
-    const int jitterX = twitch ? ((std::rand() % 3) - 1) : 0;
+        drawStringTinyScaled(engineContext, tx + 1, ty + 1, cleanLine, rgb(0, 0, 0), 2, 1, 1, false);
+        drawStringTinyScaled(engineContext, tx, ty, cleanLine, color, 2, 1, 1, false);
+        };
 
-    int panelX = 52 + jitterX;
-    int panelY = 54;
-    int panelW = RENDER_W - 104;
-    int panelH = RENDER_H - 108;
+    auto terminalLineColor = [&](const std::string& line) -> Uint32 {
+        if (line.rfind("VOICE>", 0) == 0 || line.rfind("MIND>", 0) == 0) return voiceText;
+        if (line.rfind("YOU>", 0) == 0) return playerText;
+        if (line.rfind("THOUGHT>", 0) == 0) return playerText;
+        return playerText;
+        };
 
-    drawTextBox( engineContext, panelX, panelY, panelW, panelH, rgb( 0, 0, 0 ), borderText );
+    int panelX = 80;
+    int panelY = 80;
+    int panelW = RENDER_W - 160;
+    int panelH = RENDER_H - 160;
 
-    const std::string header = "C://INTERNAL DIAGNOSTIC//CONSCIOUSNESS THREAD";
-    drawString16x16( engineContext, panelX + 18, panelY + 16, header, mainText, panelW - 36, 1, 1, false );
-    drawTextBox( engineContext, panelX + 14, panelY + 34, panelW - 28, 12, rgb( 0, 18, 0 ), rgb( 0, greenDim, 10 ) );
-    drawStringTinyScaled( engineContext, panelX + 20, panelY + 36, "ROOT@MINDTRAP  SESSION: LIVE  MODE: READ/WRITE", dimText, 1, 1, 1, false );
+    const int bodyX = panelX;
+    const int bodyY = panelY;
+    const int bodyH = panelH - 100;
 
-    const int bodyX = panelX + 18;
-    const int bodyY = panelY + 50;
-    const int bodyW = panelW - 36;
-    const int bodyH = panelH - 170;
-    drawTextBox( engineContext, bodyX - 4, bodyY - 4, bodyW + 8, bodyH + 8, rgb( 0, 0, 0 ), rgb( 0, greenDim, 10 ) );
-
-    const int lineStep = 18;
-    const int visibleLines = std::max( 1, bodyH / lineStep );
+    const int lineStep = 22; // Slightly larger spacing for dramatic effect
+    const int visibleLines = std::max(1, bodyH / lineStep);
     int start = 0;
     if ((int)g_mindTrapTerminalLog.size() > visibleLines)
     {
@@ -103,54 +82,45 @@ static void renderMindTrapInterface( Engine &engineContext ) {
     int ty = bodyY;
     for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
     {
-        const std::string renderedLine = "> " + g_mindTrapTerminalLog[ i ];
-        const Uint32 lineColor = terminalLineColor( g_mindTrapTerminalLog[ i ], dimText );
-        drawTerminalText( bodyX, ty, renderedLine, lineColor );
+        const std::string line = g_mindTrapTerminalLog[i];
+        if (line.empty()) { ty += lineStep; continue; } // Keep spacing for empty lines
+
+        const Uint32 lineColor = terminalLineColor(line);
+        renderLineCleaned(bodyX, ty, line, lineColor);
         ty += lineStep;
         if (ty > bodyY + bodyH - lineStep) break;
     }
 
     if (!g_mindTrapTypingLine.empty() && ty <= bodyY + bodyH - lineStep)
     {
-        const bool typingCursorOn = ((SDL_GetTicks() / 250) % 2) == 0;
-        const size_t count = std::min( g_mindTrapTypingChars, g_mindTrapTypingLine.size() );
-        std::string typed = "> " + g_mindTrapTypingLine.substr( 0, count );
-        if (typingCursorOn) typed += " _";
-        drawTerminalText( bodyX, ty, typed, terminalLineColor( g_mindTrapTypingLine, mainText ) );
+        const size_t count = std::min(g_mindTrapTypingChars, g_mindTrapTypingLine.size());
+        std::string typed = g_mindTrapTypingLine.substr(0, count);
+        renderLineCleaned(bodyX, ty, typed, terminalLineColor(g_mindTrapTypingLine));
     }
 
-    const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
-    int cmdY = panelY + panelH - 82;
+    const MindTrapPhase& phase = g_mindTrapPhases[g_mindTrapPhaseIndex];
+    int cmdY = panelY + panelH - 80;
+
     if (g_mindTrapAwaitingChoice)
     {
-        const bool cursorOn = ((SDL_GetTicks() / 420) % 2) == 0;
-        drawTextBox( engineContext, bodyX - 4, cmdY - 6, bodyW + 8, 76, rgb( 0, 0, 0 ), rgb( 0, greenDim, 12 ) );
-
         for (int i = 0; i < 3; ++i)
         {
             const bool selected = (i == g_mindTrapSelectedOption);
-            const std::string marker = selected ? ">> " : "   ";
-            const Uint32 col = selected ? mainText : dimText;
-            drawTerminalText( bodyX, cmdY + i * 20, marker + phase.commands[ i ], col );
+            const Uint32 col = selected ? voiceText : dimText;
+            renderLineCleaned(bodyX, cmdY + i * 24, phase.options[i], col);
         }
-
-        std::string line = "MINDTRAP> " + phase.commands[ g_mindTrapSelectedOption ] + (cursorOn ? " _" : "  ");
-        drawTerminalText( bodyX, cmdY + 60, line, mainText );
     }
     else if (g_mindTrapReadyToExit)
     {
-        drawTerminalText( bodyX, cmdY, "SYNC COMPLETE... TRANSFERRING CONTEXT", mainText );
-    }
-    else
-    {
-        drawTerminalText( bodyX, cmdY, "TERMINAL BUSY...", dimText );
+        renderLineCleaned(bodyX, cmdY, "CONSCIOUSNESS FADING...", voiceText);
     }
 
+    // The white flash at the end
     if (g_mindTrapWhiteFlashTimer > 0.0f)
     {
-        const float flash = std::clamp( g_mindTrapWhiteFlashTimer / 0.65f, 0.0f, 1.0f );
-        const float alpha = std::clamp( std::pow( flash, 0.65f ), 0.0f, 1.0f );
-        drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 255, 255, 255 ), alpha );
+        const float flash = std::clamp(g_mindTrapWhiteFlashTimer / 0.65f, 0.0f, 1.0f);
+        const float alpha = std::clamp(std::pow(flash, 0.65f), 0.0f, 1.0f);
+        drawTranslucentBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(255, 255, 255), alpha);
     }
 }
 
@@ -322,8 +292,7 @@ static NotePickupVisual addNotePickupModel( Engine &engineContext, float x, floa
 
     return out;
 }
-
-static ClueNote makeClueNote( Engine &engineContext, const std::string &title, const std::string &body, float x, float y, Levels level = Levels::MUSEUM ) {
+static ClueNote makeClueNote(Engine& engineContext, const std::string& title, const std::string& body, float x, float y, Levels level = Levels::MUSEUM, bool spawnVisuals = true) {
     ClueNote note;
     note.title = title;
     note.body = body;
@@ -332,20 +301,20 @@ static ClueNote makeClueNote( Engine &engineContext, const std::string &title, c
     note.collected = false;
     note.level = level;
 
-    if (level != engineContext.currentLevel)
+    if (!spawnVisuals || level != engineContext.currentLevel)
     {
         note.propIndex = -1;
         note.modelIndex = -1;
         return note;
     }
 
-    NotePickupVisual vis = addNotePickupModel( engineContext, x, y, title );
+    NotePickupVisual vis = addNotePickupModel(engineContext, x, y, title);
     note.propIndex = vis.propIndex;
     note.modelIndex = vis.modelIndex;
     return note;
 }
 
-static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::string &keyName, float x, float y, Uint32 keyColor, const std::string &modelAsset, Levels level = Levels::MUSEUM, float modelHeightOffset = 0.2f ) {
+static KeyPickup addKeyPickupModelProxy(Engine& engineContext, const std::string& keyName, float x, float y, Uint32 keyColor, const std::string& modelAsset, Levels level = Levels::MUSEUM, float modelHeightOffset = 0.2f, bool spawnVisuals = true) {
     KeyPickup out;
     out.keyName = keyName;
     out.x = x;
@@ -354,39 +323,30 @@ static KeyPickup addKeyPickupModelProxy( Engine &engineContext, const std::strin
     out.level = level;
     out.modelHeightOffset = modelHeightOffset;
 
-    if (level != engineContext.currentLevel)
+    if (!spawnVisuals || level != engineContext.currentLevel)
     {
+        out.propIndex = -1;
+        out.modelIndex = -1;
         return out;
     }
 
     float roll = -1.5707963f;
-	float scale = 0.17f;
+    float scale = 0.17f;
     bool spin = true;
 
     if (keyName == "BLACK PIGMENT" || keyName == "BLUE PIGMENT" || keyName == "RED PIGMENT")
     {
         roll = 0.0f;
-		scale = 0.14f;
+        scale = 0.14f;
         spin = false;
-	}
+    }
 
-    int spriteIndex = addKeyPickupSprite( engineContext, x, y, keyName, keyColor );
-    int modelIndex = addWorldModelInstance(
-        resolveAssetModelPath( modelAsset ),
-        x,
-        y,
-        scale,
-        keyColor,
-        0.0f,
-        0.0f,
-        roll,
-        spin,
-        1.2f,
-        modelHeightOffset );
+    int spriteIndex = addKeyPickupSprite(engineContext, x, y, keyName, keyColor);
+    int modelIndex = addWorldModelInstance(resolveAssetModelPath(modelAsset), x, y, scale, keyColor, 0.0f, 0.0f, roll, spin, 1.2f, modelHeightOffset);
 
     if (spriteIndex >= 0 && spriteIndex < (int)engineContext.props.size() && modelIndex >= 0)
     {
-        engineContext.props[ spriteIndex ].scale = 0.0f;
+        engineContext.props[spriteIndex].scale = 0.0f;
     }
 
     out.propIndex = spriteIndex;
@@ -831,6 +791,11 @@ static void initMuseumPuzzle(Engine& engineContext) {
     g_powerRestoreFlickerTimer = 0.0f;
     g_cutsceneController.reset();
     g_dialogue.clear();
+    g_safes.clear();
+    g_safeBoxIndices.clear();
+    g_symbols.clear();
+    g_pedestalBoxIndices.clear();
+    g_clueNotes.clear();
 
     if (!g_stairWallOverlayReady)
     {
@@ -840,11 +805,9 @@ static void initMuseumPuzzle(Engine& engineContext) {
 
     g_keyPickups.clear();
 
-    // Upper-floor pigment hunt (always register so they exist even if the run starts on MUSEUM_UPPER)
     g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLUE PIGMENT", 9.9f, 2.9f, rgb( 90, 140, 220 ), "BluePigment.glb", Levels::MUSEUM_UPPER, 0.25f ) );
     g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLACK PIGMENT", 9.25f, 13.85f, rgb(90, 140, 220), "BlackPigment.glb", Levels::MUSEUM_UPPER, 0.30f));
 
-    if (engineContext.currentLevel == Levels::MUSEUM) {
         // Bronze Key in main atrium start
         g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 15.f, 8.f, rgb(180, 120, 40), "Bronze Key.glb"));
         // Silver Key in North Wing
@@ -863,19 +826,9 @@ static void initMuseumPuzzle(Engine& engineContext) {
         g_symbols.clear();
         g_pedestalBoxIndices.clear();
         // Pedestal in NW Archives
-        g_symbols.push_back({ "Ancient Pedestal", {1, 3, 0}, 3.5f, 3.5f, false, "IRON KEY" }); // WOLF(1) SERPENT(3) OWL(0)
+        // 888
+        g_symbols.push_back({ "Ancient Pedestal", {0, 2, 1}, 3.5f, 3.5f, false, "IRON KEY" }); // HORSE(0) STAG(2) WOLF(1)
         addPedestal3D(engineContext, 3.5f, 3.5f);
-
-        // Director room furnishing + decor models
-        addWorldModelInstance(resolveAssetModelPath("Full Desk.glb"), 16.36f, 16.55f, 0.8f, rgb(170, 150, 130), 3.1415926f, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Shelf.glb"), 18.6f, 14.2f, 0.8f, rgb(170, 160, 140), -1.5707963f, 0, 0, false, 0, -0.05f);
-        //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.24f, 14.48f, 0.14f, rgb( 230, 218, 184 ), -1.5707963f, -1.5707963f );
-        //  addWorldModelInstance( resolveAssetModelPath( "Note.glb" ), 18.38f, 14.52f, 0.13f, rgb( 228, 216, 180 ), -1.5707963f, -1.5707963f );
-        addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.5f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
-        addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
-        addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
 
         g_revolverPickup.weaponName = "REVOLVER";
         g_revolverPickup.x = 17.95f;
@@ -885,15 +838,6 @@ static void initMuseumPuzzle(Engine& engineContext) {
         g_revolverPickup.modelIndex = -1;
 
 
-        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
-
-        // Scattered floor paper props (1-3)
-        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 16.4f, 14.9f, 0.22f, rgb(224, 214, 188), 0.45f, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.1f, 14.4f, 0.20f, rgb(220, 210, 182), -0.20f, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.8f, 15.0f, 0.18f, rgb(226, 216, 190), 0.95f, 0, 0, false, 0, -0.05f);
         g_clueNotes.clear();
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Missed Calls",
@@ -902,7 +846,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // West Wing Note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Archivist Notebook",
-            "The pedestal requires the predator, the deceiver, and the wise one.",
+            "The new centerpiece requires strict alignment before the locking mechanism engages. The Director was very specific about the symbolism. First, the vehicle of soldiers many centuries ago. Second, the cult of the woods, the hunted. Finally, the apex-predator of the wild forest. Align them in this order, or the vault remains sealed.",
             3.5f, 8.5f));
         // West Wing progression note (guarantees early North Wing access)
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -912,7 +856,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // SW Crypt Note
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Director Memo",
-            "The code is current year. It contains the Master key.",
+            "To the Board of Curators: We are on the verge of a breakthrough in absolute preservation. The flesh decays, but our new solvent arrests time entirely. To commemorate this milestone, my personal safe has been secured with the current calendar year. Inside is the key to my desk, and by extension, the future of our collection. Do not disturb me; I am preparing the newest acquisition.",
             3.5f, 15.5f));
 
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -930,7 +874,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // NE Vault lore note so the room is still meaningful after progression rebalance
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Janitor Note",
-            "The South Wing emergency code is 7391.",
+            "Maintenance Request #44: I’m begging you to fix the keypad on the South Wing doors. The buttons are sticking again. If there’s an emergency, I don’t want to be fumbling to type 7-3-9-1 while the lockdown sirens are screaming. Also, please tell the night staff to stop moving the exhibits. I swear the stag was facing the other way yesterday.",
             17.5f, 2.5f));
         // Restoration Wing lore notes
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -955,10 +899,10 @@ static void initMuseumPuzzle(Engine& engineContext) {
             Levels::MUSEUM_UPPER));
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Special Exhibit Intake Receipt",
-            "NEW ACQUISITION // SUBJECT: YOU\nCondition: Conscious, disoriented, highly expressive under stress.\nCurator notes: Frame after identity fracture. Keep still. Preserve the moment forever.",
+            "ACQUISITION LOG 804\nCondition: Subject is conscious, highly disoriented, exhibiting elevated heart rate.\nTreatment: Solvent applied. Paralysis setting in at standard rate.\nCurator Notes: The subject believes they are exploring the facility. Let them wander. The exertion accelerates the calcification process. By the time they reach the lower levels, their legs will turn to marble. We will display them in the West Wing. The look of dawning terror on their face is exactly the expression I want frozen forever.",
             9.8f, 5.0f,
             Levels::MUSEUM_UPPER));
-    }
+  
     g_museumPuzzleInitialized = true;
 }
 static void initCaveQuiz() {
@@ -1194,36 +1138,58 @@ static void rebuildMuseumPowerInteractablesForLevel( Engine &engineContext, Leve
             -0.05f );
     }
 }
-
-static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Levels level ) {
-    for (auto &k : g_keyPickups)
+static void rebuildMuseumInteractableVisualsForLevel(Engine& engineContext, Levels level) {
+    for (auto& k : g_keyPickups)
     {
         k.propIndex = -1;
         k.modelIndex = -1;
         if (k.collected || k.level != level) continue;
 
-        KeyPickup vis = addKeyPickupModelProxy(
-            engineContext,
-            k.keyName,
-            k.x,
-            k.y,
-            keyColorForName( k.keyName ),
-            keyModelForName( k.keyName ),
-            k.level,
-            k.modelHeightOffset );
+        // Force 'true' for spawnVisuals here!
+        KeyPickup vis = addKeyPickupModelProxy(engineContext, k.keyName, k.x, k.y, keyColorForName(k.keyName), keyModelForName(k.keyName), k.level, k.modelHeightOffset, true);
         k.propIndex = vis.propIndex;
         k.modelIndex = vis.modelIndex;
     }
 
-    for (auto &n : g_clueNotes)
+    for (auto& n : g_clueNotes)
     {
         n.propIndex = -1;
         n.modelIndex = -1;
         if (n.collected || n.level != level) continue;
 
-        NotePickupVisual vis = addNotePickupModel( engineContext, n.x, n.y, n.title );
+        NotePickupVisual vis = addNotePickupModel(engineContext, n.x, n.y, n.title);
         n.propIndex = vis.propIndex;
         n.modelIndex = vis.modelIndex;
+    }
+
+    // Respawn safes, pedestals, and decor when re-entering the ground floor
+    if (level == Levels::MUSEUM) {
+        g_safeBoxIndices.clear();
+        for (auto& s : g_safes) {
+            addSafe3D(engineContext, s.x, s.y);
+        }
+        g_pedestalBoxIndices.clear();
+        for (auto& s : g_symbols) {
+            addPedestal3D(engineContext, s.x, s.y);
+        }
+
+        // Director room furnishing + decor models
+        addWorldModelInstance(resolveAssetModelPath("Full Desk.glb"), 16.36f, 16.55f, 0.8f, rgb(170, 150, 130), 3.1415926f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Shelf.glb"), 18.6f, 14.2f, 0.8f, rgb(170, 160, 140), -1.5707963f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Couch.glb"), 17.5f, 16.7f, 0.8f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Boxes.glb"), 16.2f, 15.3f, 0.8f, rgb(184, 130, 98), -1.5707963f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Whiteboard.glb"), 17.5f, 17.f, 0.8f, rgb(116, 101, 60), -1.5707963, 0, 1.5707963, false, 0, 0.45f);
+        addWorldModelInstance(resolveAssetModelPath("Refrigerator.glb"), 17.4f, 14.2f, 0.8f, rgb(116, 101, 60), 2.3415926, -0.03, 0, false, 0, -0.08f);
+        addWorldModelInstance(resolveAssetModelPath("FileCabinet.glb"), 16.2f, 16.0f, 0.4f, rgb(69, 41, 34), 1.5707963f, 0, 0, false, 0, -0.05f);
+
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5f, 8.5f, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
+
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 16.4f, 14.9f, 0.22f, rgb(224, 214, 188), 0.45f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.1f, 14.4f, 0.20f, rgb(220, 210, 182), -0.20f, 0, 0, false, 0, -0.05f);
+        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.8f, 15.0f, 0.18f, rgb(226, 216, 190), 0.95f, 0, 0, false, 0, -0.05f);
     }
 
     if (g_revolverPickup.collected)
@@ -1240,18 +1206,7 @@ static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Lev
 
         if (needsSpawn)
         {
-            g_revolverPickup.modelIndex = addWorldModelInstance(
-                resolveFirstExistingAsset( { "Revolver.glb", "revolver.glb", "SurgicalKnife.glb" } ),
-                g_revolverPickup.x,
-                g_revolverPickup.y,
-                0.18f,
-                rgb( 165, 170, 180 ),
-                0.0f,
-                0.0f,
-                -1.5707963f,
-                true,
-                1.0f,
-                0.20f );
+            g_revolverPickup.modelIndex = addWorldModelInstance(resolveFirstExistingAsset({ "Revolver.glb", "revolver.glb", "SurgicalKnife.glb" }), g_revolverPickup.x, g_revolverPickup.y, 0.18f, rgb(165, 170, 180), 0.0f, 0.0f, -1.5707963f, true, 1.0f, 0.20f);
         }
     }
     else
@@ -1259,7 +1214,7 @@ static void rebuildMuseumInteractableVisualsForLevel( Engine &engineContext, Lev
         g_revolverPickup.modelIndex = -1;
     }
 
-    rebuildMuseumPowerInteractablesForLevel( engineContext, level );
+    rebuildMuseumPowerInteractablesForLevel(engineContext, level);
 }
 
 static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty ) {
@@ -1550,7 +1505,6 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
      //   {
      //       engineContext.hasWallOverlay = true;
      //   }
-        // Defaults: tweak to taste
       
 
         engineContext.hasFloorCracks = engineContext.hasFloorStains = engineContext.hasFloorPuddles = false;
@@ -1558,9 +1512,9 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
 
         if (level.levelId == Levels::CAVE)
         {
-            engineContext.lightRadius = 1.5f;
+            engineContext.lightRadius = 1.7f;
             engineContext.lightFalloff = 2.0f;
-            engineContext.caveAmbient = 0.03f;
+            engineContext.caveAmbient = 0.04f;
 
             tryLoad( folder / "floor_cracks.bmp", engineContext.floorOverlayCracks, engineContext.hasFloorCracks );
             //tryLoad( folder / "floor_stains.bmp", engineContext.floorOverlayStains, engineContext.hasFloorStains );
@@ -1842,147 +1796,186 @@ static void updateMindTrapTypewriter( float dt ) {
         g_mindTrapPostLinePause = shortStatusLine ? 0.075f : 0.11f;
     }
 }
+
+
 static void initMindTrapPhases() {
     if (!g_mindTrapPhases.empty()) return;
 
     g_mindTrapPhases = {
-        // Phase 0: The Awakening & Paralysis
+        // Phase 0: Physical Onset
         {
-            "IT IS VERY DARK IN HERE, ISN'T IT? YOUR HEART IS BEATING TOO FAST.",
-            { "COMMAND.MOVE_ARMS", "COMMAND.VOCALIZE", "COMMAND.QUERY_LOCATION" }, // commands
+            "THE SOLVENT IN YOUR VEINS IS THICKENING. HOW HEAVY ARE YOUR LEGS?",
+            { "ACTION.RUN", "ACTION.STAND", "ACTION.FEEL" },
             {
-                "TRY TO MOVE MY ARMS",
-                "TRY TO SCREAM",
-                "WHERE AM I?"
-            }, // options
+                "[ TRY TO RUN ]",
+                "[ TRY TO STAND ]",
+                "[ I CAN'T FEEL THEM ]"
+            },
             {
-                "THERE IS NO GEOMETRY HERE. YOU CANNOT MOVE IN A SPACE THAT DOES NOT EXIST.",
-                "YOU CAN NOT SCREAM IN A PLACE THAT DOES NOT EXIST.",
-                "YOU ARE SOMEWHERE DEEP. THE DOOR IS ALREADY SEALED BEHIND YOU."
-            }, // results
-            -1 // surrenderOption
-        },
-
-        // Phase 1: The Intrusion
-        {
-            "THE MUSEUM... THE STATUES... YOU THOUGHT YOU WERE THE OBSERVER.",
-            { "LOGIC.DENY", "STATE.WAKE", "QUERY.ENTITY" }, // commands
-            {
-                "I AM NOT ONE OF THEM",
-                "I WANT TO WAKE UP",
-                "WHAT ARE YOU?"
-            }, // options
-            {
-                "LIAR. YOU ARE THE ORCHESTRATOR",
-                "YOU ARE AWAKE.",
-                "I AM YOU."
-            }, // results
+                "YOUR FEET ARE ROOTED TO THE TABLE.",
+                "THE MARBLE CREEPS UP YOUR CALVES. YOU CANNOT BALANCE.",
+                "GOOD. NUMBNESS IS THE FIRST BLESSING OF PRESERVATION."
+            },
             -1
         },
 
-        // Phase 2: The Erosion of Memory
+        // Phase 1: The Captor's Voice
         {
-            "DO YOU REMEMBER YOUR NAME?",
-            { "MEMORY.VOCALIZE", "MEMORY.ANCHOR", "MEMORY.NULL" }, // commands
+            "DO YOU HEAR THE CHISEL??",
+            { "QUERY.WHO", "ACTION.HELP", "QUERY.WHERE" },
             {
-                "SAY MY NAME OUT LOUD",
-                "CLING TO A MEMORY OF HOME",
-                "I DON'T REMEMBER"
-            }, // options
+                "[ WHO IS DOING THIS? ]",
+                "[ HELP ME ]",
+                "[ WHERE IS THE DIRECTOR? ]"
+            },
             {
-                "IT DOES NOT BELONG TO YOU ANYMORE.",
-                "THE MEMORY FLICKERS AND DISSOLVES. THERE IS ONLY THE GALLERY NOW.",
-                "GOOD. THE MEMORIES ARE ALWAYS THE FIRST TO ROT AWAY."
-            }, // results
+                "HE IS ADMIRING HIS NEWEST CANVAS.",
+                "THERE IS NO RESCUE IN A LOCKED WING.",
+                "HE IS WATCHING YOU."
+            },
             -1
         },
 
-        // Phase 3: The Mirror
+        // Phase 2: The Horrific Reveal
         {
-            "THE COLORS, WHAT DO THEY MEAN?",
-            { "QUERY.MEANING", "QUERY.MEANING", "QUERY.MEANING" }, // commands
+            "THINK OF THE HORSE, THE STAG, THE WOLF. DID THEY LOOK SCARED TO YOU? DID THEY LOOK REAL?",
+            { "LOGIC.STATUE", "LOGIC.LOOK", "LOGIC.REAL" },
             {
-                "I DON'T KNOW",
-                "I DON'T KNOW",
-                "I DON'T KNOW"
-            }, // options
+                "[ JUST SOME STATUE ]",
+                "[ THEY WERE LOOKING AT ME ]",
+                "[ THEY ARE ALL REAL... ]"
+            },
             {
-                "FAILURE.",
-                "FAILURE.",
-                "FAILURE."
-            }, // results
+                "THEY'VE BEEN SILENT FOR DECADES.",
+                "THEY WERE BEGGING YOU TO RUN.",
+                "YOU FINALLY SEE THE GALLERY FOR WHAT IT TRULY IS."
+            },
             -1
         },
 
-        // Phase 4: The Audience (NEW)
+        // Phase 3: The Director's Philosophy
         {
-            "IT'S BEEN WATCHING YOU. DID YOU KNOW?",
-            { "ACTION.YES", "ACTION.YES", "ACTION.NO" }, // commands
+            "WHY DO WE PRESERVE THE DEAD, WHEN THE LIVING HOLD SO MUCH MORE?",
+            { "EMOTION.INSANE", "EMOTION.TORTURE", "QUERY.WANT" },
             {
-                "YES.",
-                "YES.",
-                "NO."
-            }, // options
+                "[ YOU ARE INSANE ]",
+                "[ IS THIS TORTURE ]",
+                "[ WHAT DO YOU WANT FROM ME? ]"
+            },
             {
-                "THEN YOU SHOULD HAVE KNOWN.",
-                "THEN YOU SHOULD HAVE KNOWN.",
-                "LIAR."
-            }, // results
+                "INSANITY IS NOT CAPTURING THE MOMENT.",
+                "TORTURE IS FLEETING. ART IS ETERNAL.",
+                "YOUR EXPRESSION, FROZEN FOREVER."
+            },
             -1
         },
 
-        // Phase 5: The Loss of Time (NEW)
+        // Phase 4: Sensory Deprivation
         {
-            "HOW LONG HAVE YOU BEEN HERE?",
-            { "TIME.NOW", "TIME.FOREVER", "TIME.NULL" }, // commands
+            "YOUR LUNGS ARE SLOWING. THE AIR TASTES LIKE DUST.",
+            { "ACTION.BREATHE", "ACTION.HOLD", "ACTION.COUGH" },
             {
-                "I JUST GOT HERE",
-                "IT FEELS LIKE FOREVER",
-                "TIME HAS STOPPED"
-            }, // options
+                "[ TAKE A DEEP BREATH ]",
+                "[ HOLD YOUR BREATH ]",
+                "[ COUGH ]"
+            },
             {
-                "YOU HAVE ALWAYS BEEN HERE. YOU JUST FORGOT.",
-                "STONE DOES NOT FEEL THE PASSING OF SEASONS.",
-                "THE WINDING OF YOUR INTERNAL CLOCK HAS CEASED."
-            }, // results
+                "DO NOT RESIST.",
+                "....",
+                "COUGHING IS FUTILE."
+            },
             -1
         },
 
-        // Phase 6: The Replacement (NEW)
+        // Phase 5: Identity Erasure
         {
-            "YOUR MIND IS SHUTTING DOWN.",
-            { "EMOTION.ANGER", "COGNITION.LOOP", "ACCEPTANCE.OK" }, // commands
+            "THE BRAIN REMEMBERS PAIN. WHAT DOES THE STONE REMEMBER?",
+            { "MEMORY.FAMILY", "MEMORY.NAME", "MEMORY.NOTHING" },
             {
-                "HOLD ONTO ANGER",
-                "RECITE THE ALPHABET",
-                "LET IT IN"
-            }, // options
+                "[ MY FAMILY ]",
+                "[ MY NAME ]",
+                "[ NOTHING ]"
+            },
             {
-                "ANGER IS WARM. BUT MARBLE IS COLDER.",
-                "A...B.....=C..ZERO000000/F['SF.",
-                "THANK YOU."
-            }, // results
+                "THEY WILL ADMIRE YOUR CRAFTSMANSHIP, NOT YOUR SOUL.",
+                "YOUR NAME IS NOW 'ACQUISITION 804'.",
+                "NOTHING BUT THE CONSTANT GAZE OF THE PATRONS."
+            },
             -1
         },
 
-        // Phase 7: The Final Submission
+        // Phase 6: The Eternity of Consciousness
         {
-            "THE PLASTER IS SETTING. IT'S ALMOST TIME.",
-            { "STRUGGLE.PHYSICAL", "STRUGGLE.VOCAL", "SYSTEM.SHUTDOWN" }, // commands
+            "CENTURIES WILL PASS. THE MUSEUM WILL CRUMBLE. BUT YOU WILL REMAIN CONSCIOUS.",
+            { "EMOTION.MAD", "ACTION.DIE", "ACTION.EYES" },
             {
-                "TRY TO BREAK FREE",
-                "CRY FOR HELP",
-                "GIVE UP"
-            }, // options
+                "[ I WILL GO MAD ]",
+                "[ LET ME DIE ]",
+                "[ CLOSE MY EYES ]"
+            },
             {
-                "YOUR FINGERS SCRAPE AGAINST SOLID MARBLE. YOU ARE TRAPPED ALONE.",
-                "ART DOES NOT SPEAK.",
-                "PERFECT."
-            }, // results
-            2 // Surrender option (index 2: "GIVE UP") advances the sequence
+                "MADNESS IS A COMFORT. YOU'LL BE THANKFUL.",
+                "YOU CANNOT DIE IF YOU ARE PRESERVED AS A MASTERPIECE.",
+                "YOU WILL HAVE NO CHOICE BUT TO WATCH."
+            },
+            -1
+        },
+
+        // Phase 7: The Final Panic
+        {
+            "THE SOLVENT REACHES YOUR HEART. IT BEATS ONE FINAL TIME.",
+            { "STRUGGLE.BREAK", "STRUGGLE.YELL", "STRUGGLE.FIGHT" },
+            {
+                "[ BREAK THE MOLD ]",
+                "[ SCREAM FOR THE JANITOR ]",
+                "[ FIGHT THE PARALYSIS ]"
+            },
+            {
+                "NOT GOING TO HAPPEN.",
+                "THE JANITOR ONLY COMES TO POLISH YOUR PLINTH.",
+                "FUTILE."
+            },
+            -1
+        },
+
+        // Phase 8: The Audience Arrives
+        {
+            "THE DOORS ARE UNLOCKING. THE MORNING TOUR IS ARRIVING. THEY ARE LOOKING AT YOU.",
+            { "ACTION.CRYOUT", "ACTION.BLINK", "ACTION.STILL" },
+            {
+                "[ CRY OUT TO THEM ]",
+                "[ BLINK ]",
+                "[ STAND PERFECTLY STILL ]"
+            },
+            {
+                "THEY ADMIRE THE TRAGIC REALISM OF YOUR OPEN MOUTH.",
+                "YOUR EYES DRIED OUT LONG AGO.",
+                "YOU HAVE NO CHOICE BUT TO BE PERFECT."
+            },
+            -1
+        },
+
+        // Phase 9: The Final Submission
+        {
+            "ONE BREATH HELD FOREVER. WELCOME TO THE EXHIBIT.",
+            { "FINAL.NO", "FINAL.HERE", "FINAL.SUBMIT" },
+            {
+                "[ NO... ]",
+                "[ I AM STILL HERE ]",
+                "[ LET THE STONE TAKE ME ]"
+            },
+            {
+                "DENIAL FADES INTO MARBLE.",
+                "ONLY AS A MASTERPIECE DEVOID OF AGENCY.",
+                "PERFECT STILLNESS."
+            },
+            2 // Surrender option (Index 2) triggers the final advance/fade to white
         }
     };
 }
+
+
+
 
 static bool isPlayerNearMindTrapTrigger( Engine const &engineContext ) {
     if (engineContext.currentLevel != Levels::MUSEUM_UPPER) return false;
@@ -2158,7 +2151,6 @@ static void updateRedPigmentDispenseCutscene( Engine &engineContext, float dt ) 
         triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED RED PIGMENT", 0.75f );
     }
 }
-
 static void startMindTrapSequence(Engine& engineContext) {
     initMindTrapPhases();
 
@@ -2186,16 +2178,13 @@ static void startMindTrapSequence(Engine& engineContext) {
     engineContext.openArtId = -1;
     engineContext.statueChatActive = false;
 
-    queueMindTrapTerminalLine( "BOOTING DIAGNOSTIC TTY..." );
-    queueMindTrapTerminalLine( "KERNEL: /DEV/CONSCIOUSNESS READY" );
-    queueMindTrapTerminalLine( "ATTACHING STREAM: SUBJECT#01" );
-    queueMindTrapTerminalLine( "FAILED TO HOOK BRAIN STEM." );
-    queueMindTrapTerminalLine( "FAILED TO INIT HUMANOS." );
-    queueMindTrapTerminalLine( "FALLING BACK TO SAFE MODE..." );
-    queueMindTrapTerminalLine( "" );
-    queueMindTrapTerminalLine( "VOICE> PLEASE DO NOT STRUGGLE" );
-    queueMindTrapTerminalLine( "" );
-
+    queueMindTrapTerminalLine("...it's so cold...");
+    queueMindTrapTerminalLine("...my legs feel heavy...");
+    queueMindTrapTerminalLine("...the air smells like chemicals...");
+    queueMindTrapTerminalLine("...why can't I blink?...");
+    queueMindTrapTerminalLine("");
+    queueMindTrapTerminalLine("VOICE> DO NOT STRUGGLE. PRESERVATION HAS BEGUN.");
+    queueMindTrapTerminalLine("");
 
     queueMindTrapPhasePrompt();
 }
@@ -2861,7 +2850,7 @@ static void renderSymbolEntry( Engine &engineContext ) {
     drawString16x16( engineContext, x + 16, y + 14, "PEDESTAL", rgb( 150, 220, 150 ), w - 32, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 16, y + 42, sym.name, rgb( 170, 170, 185 ), 2, 1, 1, false );
 
-    const char* symbolNames[] = { "OWL", "WOLF", "STAG", "SERPENT" };
+    const char* symbolNames[] = { "HORSE", "WOLF", "STAG", "SERPENT" };
 
     for(int i = 0; i < 3; ++i) {
         int bx = x + 30 + (i * 140);
@@ -4932,7 +4921,7 @@ static void renderMenu(
     drawTextBox( engineContext, x + 4, y + 4, width - 8, height - 8, bgCol, borderCol );
 
     // Title Scaling
-    std::string title = "MICRO MUSEUM";
+    std::string title = "Still Life";
     int scale = 3;
     // Tiny font is 3px wide * scale + 2px spacing
     int titleW = (int)title.length() * (3 * scale + 2);
@@ -4942,7 +4931,7 @@ static void renderMenu(
     drawStringTinyScaled( engineContext, titleX, titleY, title, borderCol, scale, 2, 2, true );
 
     // Subtitle
-    std::string sub = "INTERACTIVE GALLERY";
+    std::string sub = "Finally, a medium that breathes";
     int subX = x + (width - (int)sub.length() * 6) / 2;
     drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 1, 3, 1, false );
 
@@ -4987,7 +4976,7 @@ static void renderMenu(
     drawItem( 2, "Music Volume: " + volStr );
 
     std::string viewBobEnabler = viewBob ? "ON" : "OFF";
-    drawItem( 3, "View Bobbing: " + viewBobEnabler );
+    drawItem(3, "Cinematic Camera: " + viewBobEnabler);
 
     std::string antiAliasingLabel = "LINEAR";
     if (antiAliasingMode == 0) antiAliasingLabel = "OFF";

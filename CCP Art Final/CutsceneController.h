@@ -120,23 +120,24 @@ public:
         return 0.0f;
     }
 
-    void updateViewBobShake( bool enabled, bool moving, float dt, float speedScale = 1.0f ) {
+    void updateViewBobShake(bool enabled, bool moving, float dt, float speedScale = 1.0f) {
         const bool bobActive = enabled && moving;
         const float targetBlend = bobActive ? 1.0f : 0.0f;
         const float blendSpeed = bobActive ? 12.0f : 7.5f;
-        const float alpha = std::clamp( dt * blendSpeed, 0.0f, 1.0f );
+        const float alpha = std::clamp(dt * blendSpeed, 0.0f, 1.0f);
         viewBobBlend += (targetBlend - viewBobBlend) * alpha;
 
-        const float phaseAdvance = std::max( 0.2f, speedScale ) * dt * 7.5f;
+        const float phaseAdvance = std::max(0.2f, speedScale) * dt * 4.5f;
         viewBobPhase += phaseAdvance;
 
-        const float bobS = std::sin( viewBobPhase );
-        const float bobC = std::cos( viewBobPhase * 2.0f );
-        viewBobYawOffset = bobS * 0.0045f * viewBobBlend;
-        viewBobPitchOffset = (bobS * 1.15f + bobC * 0.30f) * viewBobBlend;
+        const float bobS = std::sin(viewBobPhase);
+        const float bobC = std::cos(viewBobPhase * 2.0f);
+
+        viewBobYawOffset = bobS * 0.001f * viewBobBlend;
+        viewBobPitchOffset = (bobS * 0.15f + bobC * 0.05f) * viewBobBlend;
     }
 
-    void updateTurnHeadShake( float dt, bool active, float intensity = 1.0f ) {
+    void updateTurnHeadShake(float dt, bool active, float intensity = 1.0f) {
         if (!active)
         {
             turnShakeBlend = 0.0f;
@@ -145,10 +146,10 @@ public:
             return;
         }
 
-        intensity = std::clamp( intensity, 0.0f, 1.25f );
+        intensity = std::clamp(intensity, 0.0f, 1.25f);
         const float target = 1.0f;
         const float blendSpeed = 10.0f;
-        const float alpha = std::clamp( dt * blendSpeed, 0.0f, 1.0f );
+        const float alpha = std::clamp(dt * blendSpeed, 0.0f, 1.0f);
         turnShakeBlend += (target - turnShakeBlend) * alpha;
 
         if (turnShakeBlend <= 0.0001f)
@@ -158,9 +159,10 @@ public:
             return;
         }
 
-        turnShakePhase += dt * (6.2f + intensity * 2.4f);
-        turnShakeYawOffset = std::sin( turnShakePhase * 1.15f ) * 0.0075f * turnShakeBlend * intensity;
-        turnShakePitchOffset = std::sin( turnShakePhase * 0.92f + 0.65f ) * 0.55f * turnShakeBlend * intensity;
+        turnShakePhase += dt * (4.0f + intensity * 1.5f);
+
+        turnShakeYawOffset = std::sin(turnShakePhase * 1.15f) * 0.002f * turnShakeBlend * intensity;
+        turnShakePitchOffset = std::sin(turnShakePhase * 0.92f + 0.65f) * 0.08f * turnShakeBlend * intensity;
     }
 
     float headShakeYawOffset() const {
