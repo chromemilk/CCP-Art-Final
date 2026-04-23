@@ -57,7 +57,7 @@ public:
             kPhoneHeight );
 
         dialogue.start( {
-            {"Huh, that's weird... it was just at 100%. Wait... where am I, where is everyone? Ugh my head hurts", 6.5f}
+            {"Huh, that's weird... it was just at 100%. Ugh my head hurts", 6.5f}
             } );
     }
 

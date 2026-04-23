@@ -2247,7 +2247,7 @@ static void startSolventLabUnlockCutscene( Engine &engineContext ) {
     g_revolverAiming = false;
 
     g_dialogue.start( {
-        {"What, the room is empty?", 2.0f}
+        {"What, the room is empty? Where is the monster", 2.0f}
         } );
 }
 
@@ -2488,11 +2488,11 @@ static void startMindTrapSequence(Engine& engineContext) {
     engineContext.statueChatActive = false;
 
     queueMindTrapTerminalLine("...it's so cold...");
-    queueMindTrapTerminalLine("...my legs feel heavy...");
+    queueMindTrapTerminalLine("...i feel heavy...");
     queueMindTrapTerminalLine("...the air smells like chemicals...");
     queueMindTrapTerminalLine("...why can't I blink?...");
     queueMindTrapTerminalLine("");
-    queueMindTrapTerminalLine("VOICE> DO NOT STRUGGLE. PRESERVATION HAS BEGUN.");
+    queueMindTrapTerminalLine("VOICE> HELLO.");
     queueMindTrapTerminalLine("");
 
     queueMindTrapPhasePrompt();
@@ -2526,7 +2526,7 @@ static void commitMindTrapChoice( int choiceIndex ) {
     {
         if (choiceIndex == phase.surrenderOption)
         {
-            queueMindTrapTerminalLine( "MIND> YES. YOU STOP FIGHTING." );
+            queueMindTrapTerminalLine( "MIND> GOOD CHOICE" );
             g_mindTrapFinalizeAfterResult = true;
         }
         else
@@ -3164,7 +3164,7 @@ static void renderAccessPopup( Engine &engineContext ) {
         (g_accessPopup.find( "required" ) != std::string::npos);
     Uint32 border = denied ? rgb( 200, 40, 40 ) : rgb( 120, 170, 70 );
     Uint32 head = denied ? rgb( 255, 80, 80 ) : rgb( 180, 230, 120 );
-    std::string title = denied ? "The Door Is Locked" : "LOG UPDATED";
+    std::string title = denied ? "It's Locked" : "LOG UPDATED";
     drawTextBox( engineContext, x, y, w, h, rgb( 12, 12, 16 ), border );
     drawString16x16( engineContext, x + 12, y + 10, title, head, w - 24, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 38, g_accessPopup, rgb( 230, 230, 230 ), 2, 1, 1, false );
@@ -3242,10 +3242,10 @@ static void renderSolventCoolerEntry( Engine &engineContext ) {
     int y = (RENDER_H - h) / 2;
 
     drawTextBox( engineContext, x, y, w, h, rgb( 8, 12, 12 ), rgb( 100, 170, 170 ) );
-    drawString16x16( engineContext, x + 16, y + 14, "SOLVENT COOLER AUTHORIZATION", rgb( 170, 235, 235 ), w - 32, 1, 1, false );
+    drawString16x16( engineContext, x + 16, y + 14, "SOLVENT COOLER", rgb( 170, 235, 235 ), w - 32, 1, 1, false );
 
     int ry = y + 48;
-    ry = drawWrappedText( engineContext, x + 16, ry, "RIDDLE: I AM THE CURATOR'S CREED OF PERFECT STILLNESS. SPEAK THE PHRASE.", rgb( 195, 210, 210 ), w - 32 );
+    ry = drawWrappedText( engineContext, x + 16, ry, "I AM THE CURATOR'S CREED OF PERFECT STILLNESS. What's his phrase?", rgb( 195, 210, 210 ), w - 32 );
     ry += 8;
 
     drawTextBox( engineContext, x + 16, ry, w - 32, 44, rgb( 0, 0, 0 ), rgb( 65, 95, 105 ) );
@@ -3308,7 +3308,7 @@ static void renderNotesScreen( Engine &engineContext ) {
 
     drawTranslucentBox( engineContext, x + 8, y + 8, panelW, panelH, rgb( 0, 0, 0 ), 100.0f / 255.0f );
     drawTextBox( engineContext, x, y, panelW, panelH, rgb( 240, 240, 235 ), rgb( 212, 212, 206 ) );
-    drawString16x16( engineContext, x + 18, y + 16, "FIELD NOTES", rgb( 30, 30, 30 ), panelW - 36, 1, 1, false );
+    drawString16x16( engineContext, x + 18, y + 16, "NOTES", rgb( 30, 30, 30 ), panelW - 36, 1, 1, false );
     drawStringTinyScaled( engineContext, x + panelW - 290, y + 22, "UP/DOWN SELECT  PGUP/PGDN SCROLL  N/ESC CLOSE", rgb( 70, 70, 70 ), 1, 1, 1, false );
 
     int listX = x + 16;

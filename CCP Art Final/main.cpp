@@ -978,7 +978,7 @@ int main( int argc, char **argv ) {
                             g_solventCoolerEntryActive = false;
                             g_solventCoolerBuffer.clear();
                             SDL_StopTextInput( engineContext.window );
-                            showAccessPopup( "Authorization accepted. Dispensing pigment.", 2200 );
+                            showAccessPopup( "Dispensing pigment.", 2200 );
                             startRedPigmentDispenseCutscene( engineContext );
                         }
                         else
@@ -1029,7 +1029,7 @@ int main( int argc, char **argv ) {
                                 g_solventCoolerEntryActive = false;
                                 g_solventCoolerBuffer.clear();
                                 SDL_StopTextInput( engineContext.window );
-                                showAccessPopup( "Authorization accepted. Dispensing pigment.", 2200 );
+                                showAccessPopup( "Authorization accepted.", 2200 );
                                 startRedPigmentDispenseCutscene( engineContext );
                             }
                             else
@@ -1062,7 +1062,7 @@ int main( int argc, char **argv ) {
                     {
                         g_unlockAllDoorsOverride = true;
                         applyUnlockAllDoorsOverride( engineContext );
-                        showAccessPopup( "Door override enabled. All doors unlocked.", 2200 );
+                        showAccessPopup( "Door override enabled", 2200 );
                         continue;
                     }
 
@@ -1226,13 +1226,13 @@ int main( int argc, char **argv ) {
                                     }
                                     else
                                     {
-                                        showAccessPopup( "Correct. Next question.", 1200 );
+                                        showAccessPopup( "Correct.", 1200 );
                                     }
                                 }
                                 else
                                 {
                                     playFailedDoorOpen( levels[ engineContext.currentLevel ].folder );
-                                    showAccessPopup( "Incorrect. Check cave notes in the camp area.", 2200 );
+                                    showAccessPopup( "Incorrect.", 2200 );
                                 }
                             }
                         }
@@ -1270,7 +1270,7 @@ int main( int argc, char **argv ) {
                                 if (g_symbolState[0] == sym.targetCombo[0] && g_symbolState[1] == sym.targetCombo[1] && g_symbolState[2] == sym.targetCombo[2])
                                 {
                                     sym.solved = true;
-                                    showAccessPopup( sym.name + " solved! Obtained " + sym.rewardKey, 2800 );
+                                  //  showAccessPopup( sym.name + " solved! Obtained " + sym.rewardKey, 2800 );
                                     g_playerKeys.insert( sym.rewardKey );
                                     triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + sym.rewardKey, 0.8f );
                                     g_dialogue.start( {
@@ -1279,7 +1279,7 @@ int main( int argc, char **argv ) {
                                 }
                                 else
                                 {
-                                    showAccessPopup( "Pedestal mechanism is jammed." );
+                                    showAccessPopup( "Pedestal is jammed." );
                                 }
                                 g_codeEntryActive = false;
                                 g_symbolEntryIndex = -1;
@@ -1327,7 +1327,7 @@ int main( int argc, char **argv ) {
                                     {
 
                                         playFailedDoorOpen(levels[engineContext.currentLevel].folder);
-                                        showAccessPopup( "Wrong code. Access denied." );
+                                        showAccessPopup( "Wrong code" );
                                     }
                                 }
                                 else if (g_safeEntryIndex >= 0 && g_safeEntryIndex < (int)g_safes.size())
@@ -1387,7 +1387,7 @@ int main( int argc, char **argv ) {
                             g_solventCoolerEntryActive = true;
                             g_solventCoolerBuffer.clear();
                             SDL_StartTextInput( engineContext.window );
-                            showAccessPopup( "Solvent Cooler awaiting authorization phrase.", 1800 );
+                           // showAccessPopup( "Solvent Cooler awaiting authorization phrase.", 1800 );
                             continue;
                         }
 
@@ -1421,7 +1421,7 @@ int main( int argc, char **argv ) {
                         {
                             if (g_generatorFueled)
                             {
-                                showAccessPopup( "Generator is humming.", 1200 );
+                                showAccessPopup( "Generator is fueled.", 1200 );
                                 continue;
                             }
 
@@ -1436,7 +1436,7 @@ int main( int argc, char **argv ) {
                                 }
                                 else
                                 {
-                                    showAccessPopup( "Generator is empty. Need gas can.", 1800 );
+                                    showAccessPopup( "Generator is empty.", 1800 );
                                 }
                                 continue;
                             }
@@ -1452,7 +1452,7 @@ int main( int argc, char **argv ) {
                                 g_worldModels[ g_generatorModelIndex ].tint = rgb( 225, 225, 205 );
                             }
 
-                            showAccessPopup( "Generator fueled. Power restored.", 2500 );
+                            showAccessPopup( "Power has been restored to all levels", 2500 );
                             triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORING POWER", 0.85f );
                             g_dialogue.start( {
                                 {"That should get the lights back on", 2.1f}
@@ -1615,9 +1615,9 @@ int main( int argc, char **argv ) {
                                     g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
                                     g_revolverAiming = false;
                                     g_dialogue.start( {
-                                        {"Why would the director have this?", 2.5f}
+                                        {"Why would the director have this? Doesn't matter.", 2.5f}
                                         } );
-                                    showAccessPopup( "Director's Desk unlocked. Revolver acquired.", 1900 );
+                                    showAccessPopup( "Director's Desk unlocked", 1900 );
                                     triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
                                 }
                                 else
@@ -1627,7 +1627,7 @@ int main( int argc, char **argv ) {
                             }
                             else
                             {
-                                showAccessPopup( "The desk is locked. Director's Key required.", 2200 );
+                                showAccessPopup( "The desk is locked", 2200 );
                             }
                             continue;
                         }
@@ -1644,13 +1644,13 @@ int main( int argc, char **argv ) {
                                 {
                                     engineContext.map.tiles[ idx ] = 0;
                                 }
-                                showAccessPopup( "Access override.Restoration Wing unlocked.", 2400 );
+                                showAccessPopup( "Access override.", 2400 );
                                 triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORATION WING UNSEALED", 1.0f );
                                 startSolventLabUnlockCutscene( engineContext );
                             }
                             else
                             {
-                                showAccessPopup( "Seal active. Gather Black, Blue, and Red Pigment.", 2300 );
+                                showAccessPopup( "Seal active.", 2300 );
                             }
                             continue;
                         }
