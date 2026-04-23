@@ -1,7 +1,604 @@
-#pragma once
+ï»¿#pragma once
 static std::string normalizeMindTrapTerminalText( std::string s );
 static bool isMindTrapDenialOption( const std::string &optionText );
 static std::string mindTrapCorruptOptionText( std::string text, float intensity );
+
+
+struct MindTrapMovieFrame {
+    std::vector<std::string> lines;
+    std::string subtitle;
+    float timestamp; // At what second (from 0 to 15) does this frame APPEAR?
+};
+
+static std::vector<std::vector<std::vector<MindTrapMovieFrame>>> g_mindTrapMovies;
+
+static void initMindTrapMovies() {
+    if (!g_mindTrapMovies.empty()) return;
+
+    g_mindTrapMovies.resize(5); // 5 Phases
+    for (int i = 0; i < 5; ++i) g_mindTrapMovies[i].resize(3); // 3 Choices per Phase
+
+
+    // 
+    // Choice 0: "I CAN SEE MY OWN BREATH"
+    // Theme: Person exhaling -> Cloud of smoke -> Cluster of crystals -> Ice and icicles -> Freezing
+    // 
+    g_mindTrapMovies[0][0] = {
+        // "YOU EXHALE." (Person exhaling)
+        { { "   .----.   ", "  / o  o \\  ", " |  /\\  | ", " | .||. | ", "  \\ ---- /  " }, "YOU EXHALE.", 0.00f },
+        { { "   .----.   ", "  / o  o \\  ", " |  /\\  | ", " | .||. |~", "  \\ ---- /  " }, "YOU EXHALE.", 0.60f },
+        { { "   .----.   ", "  / o  o \\  ", " |  /\\  |~", " | .||. |~", "  \\ ---- /~ " }, "YOU EXHALE.", 1.20f },
+        { { "   .----.   ", "  / -  - \\ ~", " |  /\\  |~", " | .||. |~~", "  \\ ---- /~~" }, "YOU EXHALE.", 1.80f },
+        { { "   .----.  ~", "  / -  - \\~~", " |  /\\  |~~", " | .||. |~~", "  \\ ---- /~~" }, "YOU EXHALE.", 2.40f },
+        // "THE VAPOR HANGS IN THE AIR." (Cloud of smoke)
+        { { "    ~~~~    ", "  ~~    ~~  ", " ~~      ~~ ", "  ~~    ~~  ", "    ~~~~    " }, "THE VAPOR HANGS IN THE AIR.", 3.00f },
+        { { "   ~~~~~~   ", " ~~~~  ~~~~ ", "~~~~    ~~~~", " ~~~~  ~~~~ ", "   ~~~~~~   " }, "THE VAPOR HANGS IN THE AIR.", 3.60f },
+        { { "  ~~~~~~~~  ", " ~~~~~~~~~~ ", "~~~~~~~~~~~~", " ~~~~~~~~~~ ", "  ~~~~~~~~  " }, "THE VAPOR HANGS IN THE AIR.", 4.20f },
+        { { " ~~~~~~~~~~ ", "~~~~~~~~~~~~", "~~~~~~~~~~~~", "~~~~~~~~~~~~", " ~~~~~~~~~~ " }, "THE VAPOR HANGS IN THE AIR.", 4.80f },
+        { { "~~~~~~~~~~~~", "~~~~~~~~~~~~", "~~~~~~~~~~~~", "~~~~~~~~~~~~", "~~~~~~~~~~~~" }, "THE VAPOR HANGS IN THE AIR.", 5.40f },
+        // "IT CRYSTALLIZES." (Cluster of crystals)
+        { { "~~~~ * ~~~~~", "~~~~~*~~~~~~", "~~~ * ~~~~~~", "~~~~~~~~ * ~", "~~~~~ * ~~~~" }, "IT CRYSTALLIZES.", 6.00f },
+        { { "~~~ *** ~~~~", "~~~~***~~~~~", "~~~ *** ~~~~", "~~~~~~~ *** ", "~~~~ *** ~~~" }, "IT CRYSTALLIZES.", 6.60f },
+        { { "~~  /\\\\  ~~~", "~~~//  \\\\~~~", "~~ \\\\  //~~~", "~~~~\\\\//~~~~", "~~~~ \\/ ~~~~" }, "IT CRYSTALLIZES.", 7.20f },
+        { { "    /\\\\     ", "   //  \\\\   ", "   \\\\  //   ", "    \\\\//    ", "     \\/     " }, "IT CRYSTALLIZES.", 7.80f },
+        { { "     /\\     ", "   //  \\\\   ", "  /\\\\  //\\  ", "  \\//  \\\\/  ", "   \\\\  //   " }, "IT CRYSTALLIZES.", 8.40f },
+        // "THE AIR IS DEAD." (Ice and icicles)
+        { { " \\/ | \\/ | \\", "  | |  | |  ", "  |    |    ", "            ", "            " }, "THE AIR IS DEAD.", 9.00f },
+        { { " \\/ | \\/ | \\", "  | |  | |  ", "  | |  | |  ", "    |       ", "            " }, "THE AIR IS DEAD.", 9.60f },
+        { { " \\/ | \\/ | \\", " \\| | \\| | \\", "  | |  | |  ", "  | |  |    ", "    |       " }, "THE AIR IS DEAD.", 10.20f },
+        { { " \\/ | \\/ | \\", " \\| | \\| | \\", " \\| | \\| | \\", "  | |  | |  ", "  |    |    " }, "THE AIR IS DEAD.", 10.80f },
+        { { " \\/ | \\/ | \\", " \\| | \\| | \\", " \\| | \\| | \\", " \\| | \\| | \\", " \\| | \\| | \\" }, "THE AIR IS DEAD.", 11.40f },
+        // "YOU ARE FREEZING." (Frozen block)
+        { { " \\/ | \\/ | \\", " \\| | \\| | \\", " \\| | \\| | \\", " [########] ", " [########] " }, "YOU ARE FREEZING.", 12.00f },
+        { { " \\/ | \\/ | \\", " \\| | \\| | \\", " [########] ", " [########] ", " [########] " }, "YOU ARE FREEZING.", 12.60f },
+        { { " \\/ | \\/ | \\", " [########] ", " [########] ", " [########] ", " [########] " }, "YOU ARE FREEZING.", 13.20f },
+        { { " [########] ", " [########] ", " [########] ", " [########] ", " [########] " }, "YOU ARE FREEZING.", 13.80f },
+        { { " [========] ", " [========] ", " [========] ", " [========] ", " [========] " }, "YOU ARE FREEZING.", 14.40f }
+    };
+
+    // 
+    // Choice 1: "IT'S SO COLD I CAN'T MOVE"
+    // Theme: Walk/Fall -> Neuron firing -> Flexing arm -> Mountain -> Mummy
+    // 
+    g_mindTrapMovies[0][1] = {
+        // "YOU COMMAND YOUR LEGS." (Person walking then falling)
+        { { "      O     ", "     /|\\    ", "     / \\    ", "            ", "            " }, "YOU COMMAND YOUR LEGS.", 0.00f },
+        { { "      O     ", "     /|     ", "     / \\    ", "            ", "            " }, "YOU COMMAND YOUR LEGS.", 0.60f },
+        { { "            ", "     \\O/    ", "      |     ", "     / \\    ", "            " }, "YOU COMMAND YOUR LEGS.", 1.20f },
+        { { "            ", "            ", "    __O__   ", "      |     ", "     / \\    " }, "YOU COMMAND YOUR LEGS.", 1.80f },
+        { { "            ", "            ", "            ", "    __O__   ", "___/\\_/\\____" }, "YOU COMMAND YOUR LEGS.", 2.40f },
+        // "THE SYNAPSE FIRES." (Neuron firing)
+        { { "            ", "      O     ", "     / \\    ", "            ", "            " }, "THE SYNAPSE FIRES.", 3.00f },
+        { { "      |     ", "    - O -   ", "      |     ", "            ", "            " }, "THE SYNAPSE FIRES.", 3.60f },
+        { { "    \\ | /   ", "   -- O --  ", "    / | \\   ", "            ", "            " }, "THE SYNAPSE FIRES.", 4.20f },
+        { { " * \\ | /  *", " * -- O -- *", " * / | \\  *", "            ", "            " }, "THE SYNAPSE FIRES.", 4.80f },
+        { { " ** \\ | / **", " **-- O --**", " ** / | \\ **", "   * * ", "            " }, "THE SYNAPSE FIRES.", 5.40f },
+        // "THE MUSCLE STRAINS." (Person flexing their arm)
+        { { "      O     ", "      |     ", "     / \\    ", "            ", "            " }, "THE MUSCLE STRAINS.", 6.00f },
+        { { "      O_    ", "     /|     ", "     / \\    ", "            ", "            " }, "THE MUSCLE STRAINS.", 6.60f },
+        { { "     _O_    ", "    / | \\   ", "     / \\    ", "            ", "            " }, "THE MUSCLE STRAINS.", 7.20f },
+        { { "    \\_O_    ", "      | \\   ", "     / \\    ", "            ", "            " }, "THE MUSCLE STRAINS.", 7.80f },
+        { { "    \\_O_/   ", "      |     ", "     / \\    ", "            ", "            " }, "THE MUSCLE STRAINS.", 8.40f },
+        // "THE STONE DOES NOT LISTEN." (A mountain)
+        { { "      ^     ", "            ", "            ", "            ", "            " }, "THE STONE DOES NOT LISTEN.", 9.00f },
+        { { "      ^     ", "     / \\    ", "            ", "            ", "            " }, "THE STONE DOES NOT LISTEN.", 9.60f },
+        { { "      ^     ", "     / \\    ", "    /   \\   ", "            ", "            " }, "THE STONE DOES NOT LISTEN.", 10.20f },
+        { { "      ^     ", "     / \\    ", "    /   \\   ", "   /     \\  ", "            " }, "THE STONE DOES NOT LISTEN.", 10.80f },
+        { { "      ^     ", "     / \\    ", "    /   \\   ", "   /     \\  ", "  /_______\\ " }, "THE STONE DOES NOT LISTEN.", 11.40f },
+        // "YOU CANNOT MOVE." (A mummy)
+        { { "   .----.   ", "  /      \\  ", " |        | ", " |        | ", "  \\      /  " }, "YOU CANNOT MOVE.", 12.00f },
+        { { "   .----.   ", "  / =  = \\  ", " | ====== | ", " | ====== | ", "  \\======/  " }, "YOU CANNOT MOVE.", 12.60f },
+        { { "   .----.   ", "  / == ==\\  ", " | ====== | ", " | ====== | ", "  \\======/  " }, "YOU CANNOT MOVE.", 13.20f },
+        { { "   .====.   ", "  / == ==\\  ", " | ====== | ", " | ====== | ", "  \\======/  " }, "YOU CANNOT MOVE.", 13.80f },
+        { { "   [====]   ", "  [======]  ", " [========] ", " [========] ", "  [======]  " }, "YOU CANNOT MOVE.", 14.40f }
+    };
+
+    // 
+    // Choice 2: "WHO ARE YOU?"
+    // Theme: Mirror -> Cave/Dark Void -> Empty Shell -> Creator -> Director
+    // 
+    g_mindTrapMovies[0][2] = {
+        // "LOOK IN THE MIRROR." (A mirror)
+        { { "  .------.  ", "  |      |  ", "  |      |  ", "  |      |  ", "  '------'  " }, "LOOK IN THE MIRROR.", 0.00f },
+        { { "  .------.  ", "  |  ()  |  ", "  |  /\\  |  ", "  |      |  ", "  '------'  " }, "LOOK IN THE MIRROR.", 0.60f },
+        { { "  .------.  ", "  |  ()  |  ", "  | /||\\ |  ", "  |  /\\  |  ", "  '------'  " }, "LOOK IN THE MIRROR.", 1.20f },
+        { { "  .------.  ", "  | *()  |  ", "  | /||\\ |  ", "  |  /\\  |  ", "  '------'  " }, "LOOK IN THE MIRROR.", 1.80f },
+        { { "  .------.  ", "  | *()* |  ", "  | /||\\ |  ", "  |  /\\  |  ", "  '------'  " }, "LOOK IN THE MIRROR.", 2.40f },
+        // "THERE IS NO ONE ELSE." (A cave or dark void)
+        { { "   /    \\   ", "  |      |  ", "  |      |  ", "  |      |  ", "   \\____/   " }, "THERE IS NO ONE ELSE.", 3.00f },
+        { { "  /      \\  ", " |        | ", " |        | ", " |        | ", "  \\      /  " }, "THERE IS NO ONE ELSE.", 3.60f },
+        { { " /        \\ ", "|          |", "|          |", "|          |", " \\        / " }, "THERE IS NO ONE ELSE.", 4.20f },
+        { { "            ", "|          |", "|          |", "|          |", "            " }, "THERE IS NO ONE ELSE.", 4.80f },
+        { { "            ", "            ", "            ", "            ", "            " }, "THERE IS NO ONE ELSE.", 5.40f },
+        // "JUST AN EMPTY SHELL." (An empty shell)
+        { { "    __      ", "   /  \\     ", "   \\__/     ", "            ", "            " }, "JUST AN EMPTY SHELL.", 6.00f },
+        { { "    _.-.    ", "   /    \\   ", "   \\    /   ", "    '--'    ", "            " }, "JUST AN EMPTY SHELL.", 6.60f },
+        { { "   _.-._    ", "  / _.-.\\   ", " | (   ) |  ", "  \\ '-' /   ", "   '-.-'    " }, "JUST AN EMPTY SHELL.", 7.20f },
+        { { "   _.-._    ", "  / _.--\\   ", " | (    )|  ", "  \\ '--' /  ", "   '----'   " }, "JUST AN EMPTY SHELL.", 7.80f },
+        { { "   _.-._    ", "  /      \\  ", " | (    )|  ", "  \\      /  ", "   '----'   " }, "JUST AN EMPTY SHELL.", 8.40f },
+        // "ONLY THE CREATOR." (Face of the creator)
+        { { "   .----.   ", "  /      \\  ", " |        | ", " |        | ", "  \\      /  " }, "ONLY THE CREATOR.", 9.00f },
+        { { "   .----.   ", "  / o  o \\  ", " |        | ", " |        | ", "  \\      /  " }, "ONLY THE CREATOR.", 9.60f },
+        { { "   .----.   ", "  / O  O \\  ", " |   /\\   | ", " |        | ", "  \\      /  " }, "ONLY THE CREATOR.", 10.20f },
+        { { "   .----.   ", "  / O  O \\  ", " |   /\\   | ", " |  ----  | ", "  \\      /  " }, "ONLY THE CREATOR.", 10.80f },
+        { { "   _----_   ", "  / O  O \\  ", " |   /\\   | ", " |  ====  | ", "  \\      /  " }, "ONLY THE CREATOR.", 11.40f },
+        // "ONLY THE DIRECTOR." (The director)
+        { { "   ^----^   ", "  / @  @ \\  ", " |   /\\   | ", " |  \\||/  | ", "  \\======/  " }, "ONLY THE DIRECTOR.", 12.00f },
+        { { "  <^----^>  ", " </ @  @ \\> ", "<|   /\\   |>", "<|  \\||/  |>", " <\\======/> " }, "ONLY THE DIRECTOR.", 12.60f },
+        { { " <<^----^>> ", "<</ @  @ \\>>", "<<|  /\\  |>>", "<<| \\||/ |>>", "<<\\======/>>" }, "ONLY THE DIRECTOR.", 13.20f },
+        { { " ||^----^|| ", "||/ @  @ \\||", "|||  /\\  |||", "||| \\||/ |||", "||\\======/||" }, "ONLY THE DIRECTOR.", 13.80f },
+        { { " [|^----^|] ", "[/| @  @ |\\]", "[||  /\\  ||]", "[|| \\||/ ||]", "[|\\======/|]" }, "ONLY THE DIRECTOR.", 14.40f }
+    };
+
+    // 
+        // PHASE 1
+        // 
+    g_mindTrapMovies[1].resize(3);
+
+    // 
+    // Choice 0: "IT IS JUST STONE"
+    // Theme: Large stone -> Shattered heart -> Fire -> Dead person -> Particles
+    // 
+    g_mindTrapMovies[1][0] = {
+        // "IT IS JUST STONE." (Large stone)
+        {{"   /======\\   ", "  |########|  ", "  |########|  ", "  |########|  ", "   \\======/   "}, "IT IS JUST STONE.", 0.00f},
+        {{"   /======\\   ", "  |########|  ", "  |########|  ", "  |########|  ", "   \\======/   "}, "IT IS JUST STONE.", 0.60f},
+        {{"   /======\\   ", "  |###/\\###|  ", "  |##/  \\##|  ", "  |########|  ", "   \\======/   "}, "IT IS JUST STONE.", 1.20f},
+        {{"   /======\\   ", "  |##/  \\##|  ", "  |#/    \\#|  ", "  |##\\  /##|  ", "   \\======/   "}, "IT IS JUST STONE.", 1.80f},
+        {{"   /==  ==\\   ", "  |/      \\|  ", "  /        \\  ", "  \\        /  ", "   \\==  ==/   "}, "IT IS JUST STONE.", 2.40f},
+        // "NO BEATING HEART." (Shattered heart)
+        {{"   __    __   ", "  /  \\  /  \\  ", "  \\   \\/   /  ", "   \\      /   ", "    \\    /    "}, "NO BEATING HEART.", 3.00f},
+        {{"   __    __   ", "  /  \\  /  \\  ", "  \\   \\/   /  ", "   \\      /   ", "    \\    /    "}, "NO BEATING HEART.", 3.60f},
+        {{"   __    __   ", "  /  \\// /  \\ ", "  \\   /\\   /  ", "   \\ //   /   ", "    \\/   /    "}, "NO BEATING HEART.", 4.20f},
+        {{"   _      _   ", "  / \\    / \\  ", "  \\  \\  /  /  ", "   \\  \\/  /   ", "    \\    /    "}, "NO BEATING HEART.", 4.80f},
+        {{"              ", "   /\\    /\\   ", "  /  \\  /  \\  ", "  \\  /  \\  /  ", "   \\/    \\/   "}, "NO BEATING HEART.", 5.40f},
+        // "NO WARMTH." (Fire)
+        {{"              ", "      ()      ", "     (  )     ", "    (    )    ", "   (______)   "}, "NO WARMTH.", 6.00f},
+        {{"      ()      ", "     (  )     ", "    (    )    ", "   (  ()  )   ", "  (________)  "}, "NO WARMTH.", 6.60f},
+        {{"      ()      ", "    (    )    ", "   )  ()  (   ", "  (   )(   )  ", "  (________)  "}, "NO WARMTH.", 7.20f},
+        {{"     (  )     ", "   )      (   ", "  (  (  )  )  ", "  )  )( (  (  ", "  (________)  "}, "NO WARMTH.", 7.80f},
+        {{"    (    )    ", "  )  (  )  (  ", " (  (    )  ) ", " )  )    (  ( ", " (__________) "}, "NO WARMTH.", 8.40f},
+        // "NO LIFE." (Dead person)
+        {{"      ()      ", "    ) )( (    ", "   ( .--. )   ", "   )/    \\(   ", "   (______)   "}, "NO LIFE.", 9.00f},
+        {{"     .--.     ", "    /    \\    ", "    |    |    ", "    \\____/    ", "              "}, "NO LIFE.", 9.60f},
+        {{"     .--.     ", "    / x x\\    ", "    | /\\ |    ", "    \\____/    ", "      ||      "}, "NO LIFE.", 10.20f},
+        {{"     .--.     ", "    / X X\\    ", "    | /\\ |    ", "    \\_--_/    ", "     /||\\     "}, "NO LIFE.", 10.80f},
+        {{"    _.--._    ", "   / X  X \\   ", "   |  /\\  |   ", "   \\_====_/   ", "    //||\\\\    "}, "NO LIFE.", 11.40f},
+        // "JUST DEAD MATTER." (Particles fizzling away)
+        {{"    _.--._    ", "   / X  X \\   ", "   |  /\\  |   ", "   \\_====_/   ", "    //||\\\\    "}, "JUST DEAD MATTER.", 12.00f},
+        {{"    . .. .    ", "   . .  . .   ", "   .  ..  .   ", "   ..    ..   ", "    ..  ..    "}, "JUST DEAD MATTER.", 12.60f},
+        {{"      ..      ", "   .      .   ", "      ..      ", "   .      .   ", "      ..      "}, "JUST DEAD MATTER.", 13.20f},
+        {{"              ", "      .       ", "              ", "       .      ", "              "}, "JUST DEAD MATTER.", 13.80f},
+        {{"              ", "              ", "              ", "              ", "              "}, "JUST DEAD MATTER.", 14.40f}
+    };
+
+    // 
+    // Choice 1: "IT WAS CREEPY"
+    // Theme: Slender figures -> Ear -> Director's face -> Pair of eyes -> Screaming mouth
+    // 
+    g_mindTrapMovies[1][1] = {
+        // "THEY WERE STILL." (Cluster of slender figures)
+        {{"   o  o  o    ", "  /|\\/|\\/|\\   ", "  / \\/ \\/ \\   ", "              ", "              "}, "THEY WERE STILL.", 0.00f},
+        {{"   o  o  o    ", "  /|\\/|\\/|\\   ", "  / \\/ \\/ \\   ", "              ", "              "}, "THEY WERE STILL.", 0.60f},
+        {{"    O  O  O   ", "   /|\\/|\\/|\\  ", "   / \\/ \\/ \\  ", "              ", "              "}, "THEY WERE STILL.", 1.20f},
+        {{"  O  O  O  O  ", " /|\\/|\\/|\\/|\\ ", " / \\/ \\/ \\/ \\ ", "              ", "              "}, "THEY WERE STILL.", 1.80f},
+        {{" O O O O O O  ", "/|/|/|/|/|/|\\ ", "/|/|/|/|/|/|\\ ", "/ \\/ \\/ \\/ \\/ ", "              "}, "THEY WERE STILL.", 2.40f},
+        // "BUT THEY HEARD YOU." (Ear)
+        {{"    .-.       ", "   /   |      ", "   | ) |      ", "   \\__/       ", "              "}, "BUT THEY HEARD YOU.", 3.00f},
+        {{"     .--.     ", "    /    |    ", "    | )) |    ", "    \\____/    ", "              "}, "BUT THEY HEARD YOU.", 3.60f},
+        {{"      .---.   ", "     /     |  ", "     | ))) |  ", "     \\_____/  ", "              "}, "BUT THEY HEARD YOU.", 4.20f},
+        {{"      .---.   ", "    //     |  ", "   ((( ))) |  ", "    \\\\_____/  ", "              "}, "BUT THEY HEARD YOU.", 4.80f},
+        {{"      .---.   ", "  ////     |  ", " ((((( ))) |  ", "  \\\\\\\\_____/  ", "              "}, "BUT THEY HEARD YOU.", 5.40f},
+        // "THEY FELT YOUR PRESENCE." (Director's face)
+        {{"    ^----^    ", "   / @  @ \\   ", "   |  /\\  |   ", "   | \\||/ |   ", "    \\====/    "}, "THEY FELT YOUR PRESENCE.", 6.00f},
+        {{"    ^----^    ", "   / @  @ \\   ", "   |  /\\  |   ", "   | \\||/ |   ", "    \\====/    "}, "THEY FELT YOUR PRESENCE.", 6.60f},
+        {{"   <^----^>   ", "  </ @  @ \\>  ", "  <|  /\\  |>  ", "  <| \\||/ |>  ", "   <\\====/>   "}, "THEY FELT YOUR PRESENCE.", 7.20f},
+        {{"  <<^----^>>  ", " <</ @  @ \\>> ", " <<|  /\\  |>> ", " <<| \\||/ |>> ", "  <<\\====/>>  "}, "THEY FELT YOUR PRESENCE.", 7.80f},
+        {{" <<<^----^>>> ", "<<</ @  @ \\>>>", "<<<|  /\\  |>>>", "<<<| \\||/ |>>>", " <<<\\====/>>> "}, "THEY FELT YOUR PRESENCE.", 8.40f},
+        // "THEY ARE WATCHING." (Pair of eyes)
+        {{"    ______    ", "   / @  @ \\   ", "   --------   ", "              ", "              "}, "THEY ARE WATCHING.", 9.00f},
+        {{"   ________   ", "  /  @  @  \\  ", "  ----------  ", "              ", "              "}, "THEY ARE WATCHING.", 9.60f},
+        {{"  __________  ", " /   @  @   \\ ", " ------------ ", "              ", "              "}, "THEY ARE WATCHING.", 10.20f},
+        {{" ____________ ", "/    O  O    \\", "--------------", "              ", "              "}, "THEY ARE WATCHING.", 10.80f},
+        {{" ____________ ", "/   (O)(O)   \\", "--------------", "              ", "              "}, "THEY ARE WATCHING.", 11.40f},
+        // "THEY ARE SCREAMING." (Screaming mouth)
+        {{"    .----.    ", "   /| || |\\   ", "   || || ||   ", "   \\| || |/   ", "    '----'    "}, "THEY ARE SCREAMING.", 12.00f},
+        {{"    .----.    ", "   /| || |\\   ", "   || || ||   ", "   \\| || |/   ", "    '----'    "}, "THEY ARE SCREAMING.", 12.60f},
+        {{"   _.----._   ", "  / | || | \\  ", "  | | || | |  ", "  \\ | || | /  ", "   '------'   "}, "THEY ARE SCREAMING.", 13.20f},
+        {{"  __.----.__  ", " /  | || |  \\ ", " |  | || |  | ", " \\  | || |  / ", "  '--------'  "}, "THEY ARE SCREAMING.", 13.80f},
+        {{" ___.----.___ ", "/   | || |   \\", "|   (    )   |", "\\   | || |   /", " '----------' "}, "THEY ARE SCREAMING.", 14.40f}
+    };
+
+    // 
+    // Choice 2: "I THINK THEY LOOKED VERY REAL"
+    // Theme: Scattered bones -> Bottle of solvent -> Blood hardening -> Brain -> Awake eyes
+    // 
+    g_mindTrapMovies[1][2] = {
+        // "FLESH AND BONE." (Scattered bones)
+        {{"   .-.  .-.   ", "   | |  \\ \\   ", "  / /   | |   ", "  \\ \\   / /   ", "   '-'  '-'   "}, "FLESH AND BONE.", 0.00f},
+        {{"   .-.  .-.   ", "   | |  \\ \\   ", "  / /   | |   ", "  \\ \\   / /   ", "   '-'  '-'   "}, "FLESH AND BONE.", 0.60f},
+        {{"    .-.  .-.  ", "    | |  | |  ", "  .-| |  | |  ", "  \\ \\ /  \\ \\  ", "   '-'    '-' "}, "FLESH AND BONE.", 1.20f},
+        {{"      .-.     ", "  .-. | | .-. ", "  | |/ /  | | ", "  \\ \\ /   / / ", "   '-'    '-' "}, "FLESH AND BONE.", 1.80f},
+        {{"       _      ", "   .-.| |.-.  ", "  / / | | \\ \\ ", "  \\ \\ \\ / / / ", "   '-'   '-'  "}, "FLESH AND BONE.", 2.40f},
+        // "THE SOLVENT SEEPS IN." (Bottle of solvent)
+        {{"      ||      ", "     /__\\     ", "    |====|    ", "    |====|    ", "     ----     "}, "THE SOLVENT SEEPS IN.", 3.00f},
+        {{"      ||      ", "     /__\\     ", "    |====|    ", "    |====|    ", "     ----     "}, "THE SOLVENT SEEPS IN.", 3.60f},
+        {{"     \\||/     ", "     /__\\     ", "    |====|    ", "    |====|    ", "     ----     "}, "THE SOLVENT SEEPS IN.", 4.20f},
+        {{"    \\\\||//    ", "     /__\\     ", "    |====|    ", "    |====|    ", "     ----     "}, "THE SOLVENT SEEPS IN.", 4.80f},
+        {{"   \\\\\\||///   ", "     /__\\     ", "    |    |    ", "    |    |    ", "     ----     "}, "THE SOLVENT SEEPS IN.", 5.40f},
+        // "THE VEINS CALCIFY." (Blood hardening)
+        {{"      ||      ", "      ||      ", "      ||      ", "     /  \\     ", "    /    \\    "}, "THE VEINS CALCIFY.", 6.00f},
+        {{"      ||      ", "      ||      ", "     /||\\     ", "    /||||\\    ", "   /||||||\\   "}, "THE VEINS CALCIFY.", 6.60f},
+        {{"      ||      ", "     [##]     ", "    [####]    ", "   [######]   ", "  [########]  "}, "THE VEINS CALCIFY.", 7.20f},
+        {{"     [##]     ", "    [####]    ", "   [######]   ", "  [########]  ", " [##########] "}, "THE VEINS CALCIFY.", 7.80f},
+        {{"    [####]    ", "   [######]   ", "  [########]  ", " [##########] ", "[############]"}, "THE VEINS CALCIFY.", 8.40f},
+        // "THE MIND IS TRAPPED." (Brain)
+        {{"    _----_    ", "   (%%%%%%)   ", "   (%%%%%%)   ", "    \\----/    ", "              "}, "THE MIND IS TRAPPED.", 9.00f},
+        {{"    _----_    ", "   (%%%%%%)   ", "   (%%%%%%)   ", "    \\----/    ", "              "}, "THE MIND IS TRAPPED.", 9.60f},
+        {{"   _------_   ", "  (%%%%%%%%)  ", "  (%%%%%%%%)  ", "   \\------/   ", "              "}, "THE MIND IS TRAPPED.", 10.20f},
+        {{"  _--------_  ", " (%%%%%%%%%%) ", " (%%%%%%%%%%) ", "  \\--------/  ", "              "}, "THE MIND IS TRAPPED.", 10.80f},
+        {{" _----------_ ", "(%%%%%%%%%%%%)", "(%%%%%%%%%%%%)", " \\----------/ ", "              "}, "THE MIND IS TRAPPED.", 11.40f},
+        // "THEY ARE STILL CONSCIOUS." (Pair of awake eyes)
+        {{"              ", "   /------\\   ", "   | O  O |   ", "   \\------/   ", "              "}, "THEY ARE STILL CONSCIOUS.", 12.00f},
+        {{"              ", "   /------\\   ", "   | O  O |   ", "   \\------/   ", "              "}, "THEY ARE STILL CONSCIOUS.", 12.60f},
+        {{"              ", "  /--------\\  ", "  | (O)(O) |  ", "  \\--------/  ", "              "}, "THEY ARE STILL CONSCIOUS.", 13.20f},
+        {{"              ", " /----------\\ ", " |  (O)(O)  | ", " \\----------/ ", "              "}, "THEY ARE STILL CONSCIOUS.", 13.80f},
+        {{"  /--------\\  ", " /----------\\ ", " | >(O)(O)< | ", " \\----------/ ", "  \\--------/  "}, "THEY ARE STILL CONSCIOUS.", 14.40f}
+    };
+
+    // 
+    // PHASE 2: THE ETERNITY CLAUSE
+    // 
+    g_mindTrapMovies[2].resize(3);
+
+    // 
+    // Choice 0: "PLEASE NO, I WILL GO MAD"
+    // Theme: Clock -> Melting Clock -> Skull -> Melting Skull -> Static Vortex
+    // 
+    g_mindTrapMovies[2][0] = {
+        // "THE YEARS WILL PASS." (Ticking Clock)
+        {{"    _----_    ", "   /  ||  \\   ", "  |   o--  |  ", "   \\      /   ", "    -____-    "}, "THE YEARS WILL PASS.", 0.00f},
+        {{"    _----_    ", "   /  |   \\   ", "  |   o-   |  ", "   \\      /   ", "    -____-    "}, "THE YEARS WILL PASS.", 0.60f},
+        {{"    _----_    ", "   /      \\   ", "  |   o    |  ", "   \\  |   /   ", "    -____-    "}, "THE YEARS WILL PASS.", 1.20f},
+        {{"    _----_    ", "   /      \\   ", "  |   o    |  ", "   \\ /    /   ", "    -____-    "}, "THE YEARS WILL PASS.", 1.80f},
+        {{"    _----_    ", "   /      \\   ", "  | --o    |  ", "   \\      /   ", "    -____-    "}, "THE YEARS WILL PASS.", 2.40f},
+        // "THE SILENCE WILL DEAFEN." (Clock melts into bleeding ear)
+        {{"   _------_   ", "  /      | \\  ", " |     )   |  ", "  \\       /   ", "   --____--   "}, "THE SILENCE WILL DEAFEN.", 3.00f},
+        {{"   _------_   ", "  /    |   \\  ", " |     )    | ", "  \\   __/  /  ", "   --____--   "}, "THE SILENCE WILL DEAFEN.", 3.60f},
+        {{"   _------_   ", "  /    |   \\  ", " |    ))    | ", "  \\  ___/  /  ", "   --____--   "}, "THE SILENCE WILL DEAFEN.", 4.20f},
+        {{"    ------    ", "  /    |   \\  ", " |   )))    | ", "  \\  ___/  /  ", "    ||  ||    "}, "THE SILENCE WILL DEAFEN.", 4.80f},
+        {{"    ------    ", "  /   ||   \\  ", " |  ))))    | ", "  \\  ___/  /  ", "    ||  ||    "}, "THE SILENCE WILL DEAFEN.", 5.40f},
+        // "THE MIND WILL FRACTURE." (Skull Cracking)
+        {{"    .----.    ", "   /      \\   ", "  |        |  ", "   \\      /   ", "    '-||-'    "}, "THE MIND WILL FRACTURE.", 6.00f},
+        {{"    .----.    ", "   / x  x \\   ", "  |   /\\   |  ", "   \\ '==' /   ", "    '-||-'    "}, "THE MIND WILL FRACTURE.", 6.60f},
+        {{"    .----.    ", "   / X  X \\   ", "  |   /\\   |  ", "   \\ '==' /   ", "    '-||-'    "}, "THE MIND WILL FRACTURE.", 7.20f},
+        {{"    ._--_.    ", "   / X  X \\   ", "  |   /\\   |  ", "  >\\ '==' /<  ", "  >_--||--_<  "}, "THE MIND WILL FRACTURE.", 7.80f},
+        {{"    ._--_.    ", "  </ X  X \\>  ", " <|   /\\   |> ", "  >\\ '==' /<  ", "  >_--||--_<  "}, "THE MIND WILL FRACTURE.", 8.40f},
+        // "SANITY WILL SLIP." (Static Bursting from skull)
+        {{"  %#_----_%#  ", " %#/ %&% \\#%  ", " &(# %XX# )&  ", "  %\\ &%#$ /%  ", "  #%\\____/#%  "}, "SANITY WILL SLIP.", 9.00f},
+        {{"  #%_----_#%  ", " #%\\ %&% /%#  ", " %(& #XX% &)  ", "  /% $#%& \\%  ", "  %#\\____/%#  "}, "SANITY WILL SLIP.", 9.60f},
+        {{"  %#_----_%#  ", " %#/ %&% \\#%  ", " &(# %XX# )&  ", "  %\\ &%#$ /%  ", "  #%\\____/#%  "}, "SANITY WILL SLIP.", 10.20f},
+        {{"  #%_----_#%  ", " #%\\ %&% /%#  ", " %(& #XX% &)  ", "  /% $#%& \\%  ", "  %#\\____/%#  "}, "SANITY WILL SLIP.", 10.80f},
+        {{"  %#_----_%#  ", " %#/ %&% \\#%  ", " &(# %XX# )&  ", "  %\\ &%#$ /%  ", "  #%\\____/#%  "}, "SANITY WILL SLIP.", 11.40f},
+        // "ONLY MADNESS REMAINS." (Vortex)
+        {{"   %&%#$#&%   ", "  #%$%&%#$#%  ", " %&#$#%&%#$&  ", "  %#$&%#$#&%  ", "   $#%&%#$#   "}, "ONLY MADNESS REMAINS.", 12.00f},
+        {{"   #$#%&%#$   ", "  %#$&%#$#&%  ", " &%#$#%&%#$&  ", "  #%$%&%#$#%  ", "   %&%#$#&%   "}, "ONLY MADNESS REMAINS.", 12.60f},
+        {{"   %&%#$#&%   ", "  #%$%&%#$#%  ", " %&#$#%&%#$&  ", "  %#$&%#$#&%  ", "   $#%&%#$#   "}, "ONLY MADNESS REMAINS.", 13.20f},
+        {{"   #$#%&%#$   ", "  %#$&%#$#&%  ", " &%#$#%&%#$&  ", "  #%$%&%#$#%  ", "   %&%#$#&%   "}, "ONLY MADNESS REMAINS.", 13.80f},
+        {{"   %&%#$#&%   ", "  #%$%&%#$#%  ", " %&#$#%&%#$&  ", "  %#$&%#$#&%  ", "   $#%&%#$#   "}, "ONLY MADNESS REMAINS.", 14.40f}
+    };
+
+    // 
+    // Choice 1: "PLEASE LET ME DIE"
+    // Theme: Tombstone -> Chains -> Flesh poking through -> Fusing to Metal -> Mechanical Eye
+    // 
+    g_mindTrapMovies[2][1] = {
+        // "DEATH IS A MERCY." (Tombstone)
+        {{"    .----.    ", "   /  RIP \\   ", "   |      |   ", "   |      |   ", "  _|_----_|_  "}, "DEATH IS A MERCY.", 0.00f},
+        {{"    .----.    ", "   /  RIP \\   ", "   |      |   ", "   |      |   ", "  _|_----_|_  "}, "DEATH IS A MERCY.", 0.60f},
+        {{"    .----.    ", "   /  RIP \\   ", "   |      |   ", "   |      |   ", "  _|_----_|_  "}, "DEATH IS A MERCY.", 1.20f},
+        {{"    .----.    ", "   /  RIP \\   ", "   |      |   ", "   |      |   ", "  _|_----_|_  "}, "DEATH IS A MERCY.", 1.80f},
+        {{"    .----.    ", "   /  RIP \\   ", "   |      |   ", "   |      |   ", "  _|_----_|_  "}, "DEATH IS A MERCY.", 2.40f},
+        // "A MERCY DENIED TO YOU." (Chains wrapping)
+        {{"    .----.    ", "  x/  RIP \\x  ", "  |      |   ", "   |      |   ", "  _|_----_|_  "}, "A MERCY DENIED TO YOU.", 3.00f},
+        {{"    .----.    ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "   |      |   ", "  _|_----_|_  "}, "A MERCY DENIED TO YOU.", 3.60f},
+        {{"    .----.    ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", "  _|_----_|_  "}, "A MERCY DENIED TO YOU.", 4.20f},
+        {{"    .----.    ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "A MERCY DENIED TO YOU.", 4.80f},
+        {{"   x.----.x   ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "A MERCY DENIED TO YOU.", 5.40f},
+        // "THE FLESH CANNOT DECAY." (Screaming Face pushing thru)
+        {{"   x.----.x   ", "  x/ (  ) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 6.00f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 6.60f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 7.20f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| == |x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 7.80f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| ==== |x  ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 8.40f},
+        // "YOU WILL NEVER ROT." (Fusing with Metal)
+        {{"   /-.--.-\\   ", "  |/ (OO) \\|  ", "  |x  ||  x|  ", "  x| ==== |x  ", " x_|_----_|_x "}, "YOU WILL NEVER ROT.", 9.00f},
+        {{"   /-\\--/-\\   ", "  |  (OO)  |  ", "  |   ||   |  ", "   | ==== |   ", "  _|_----_|_  "}, "YOU WILL NEVER ROT.", 9.60f},
+        {{"   /-\\--/-\\   ", "  |  (OO)  |  ", "  | #[__]# |  ", "   | ==== |   ", "  _|_----_|_  "}, "YOU WILL NEVER ROT.", 10.20f},
+        {{"   /-\\--/-\\   ", "  |  (OO)  |  ", "  | #[__]# |  ", "   \\--\\/--/   ", "   [######]   "}, "YOU WILL NEVER ROT.", 10.80f},
+        {{"  [========]  ", "  |  (OO)  |  ", "  | #[__]# |  ", "   \\--\\/--/   ", "   [######]   "}, "YOU WILL NEVER ROT.", 11.40f},
+        // "YOU WILL SUFFER FOREVER." (Mechanical Eye)
+        {{"  [========]  ", "  [  /--\\  ]  ", "  [ <(  )> ]  ", "  [  \\--/  ]  ", "  [========]  "}, "YOU WILL SUFFER FOREVER.", 12.00f},
+        {{"  [========]  ", "  [  /--\\  ]  ", "  [ <(())> ]  ", "  [  \\--/  ]  ", "  [========]  "}, "YOU WILL SUFFER FOREVER.", 12.60f},
+        {{"  [========]  ", "  [  ----  ]  ", "  [ ------ ]  ", "  [  ----  ]  ", "  [========]  "}, "YOU WILL SUFFER FOREVER.", 13.20f},
+        {{"  [========]  ", "  [  /--\\  ]  ", "  [ <(())> ]  ", "  [  \\--/  ]  ", "  [========]  "}, "YOU WILL SUFFER FOREVER.", 13.80f},
+        {{"  [========]  ", "  [  /--\\  ]  ", "  [ <(())> ]  ", "  [  \\--/  ]  ", "  [========]  "}, "YOU WILL SUFFER FOREVER.", 14.40f}
+    };
+
+    // 
+    // Choice 2: "ME? I WON'T BE ALIVE IN CENTURIES"
+    // Theme: Body -> Ash -> Brain/Spine -> Pedestal -> Monolith Face
+    // 
+    g_mindTrapMovies[2][2] = {
+        // "YOUR BODY WILL END." (Body)
+        {{"      ()      ", "     /||\\     ", "      ||      ", "     /  \\     ", "    /    \\    "}, "YOUR BODY WILL END.", 0.00f},
+        {{"      ()      ", "     /||\\     ", "      ||      ", "     /  \\     ", "    /    \\    "}, "YOUR BODY WILL END.", 0.60f},
+        {{"      ()      ", "     /||\\     ", "      ||      ", "     /  \\     ", "    /    \\    "}, "YOUR BODY WILL END.", 1.20f},
+        {{"      ()      ", "     /||\\     ", "      ||      ", "     /  \\     ", "    /    \\    "}, "YOUR BODY WILL END.", 1.80f},
+        {{"      ()      ", "     /||\\     ", "      ||      ", "     /  \\     ", "              "}, "YOUR BODY WILL END.", 2.40f},
+        // "BUT THE STONE ENDURES." (Ash)
+        {{"      ()      ", "     /||\\     ", "      ||      ", "              ", "              "}, "BUT THE STONE ENDURES.", 3.00f},
+        {{"      ()      ", "      ||      ", "              ", "              ", "              "}, "BUT THE STONE ENDURES.", 3.60f},
+        {{"      .       ", "     . ..     ", "      ..      ", "     .  .     ", "              "}, "BUT THE STONE ENDURES.", 4.20f},
+        {{"      ..      ", "     .  .     ", "    .    .    ", "   .      .   ", "  .        .  "}, "BUT THE STONE ENDURES.", 4.80f},
+        {{"              ", "      ..      ", "     .  .     ", "    .    .    ", "   .      .   "}, "BUT THE STONE ENDURES.", 5.40f},
+        // "IT PRESERVES THE NERVES." (Glowing Nerves)
+        {{"    (%%%%)    ", "              ", "              ", "              ", "              "}, "IT PRESERVES THE NERVES.", 6.00f},
+        {{"    (%%%%)    ", "      ||      ", "              ", "              ", "              "}, "IT PRESERVES THE NERVES.", 6.60f},
+        {{"    (%%%%)    ", "      ||      ", "     =||=     ", "              ", "              "}, "IT PRESERVES THE NERVES.", 7.20f},
+        {{"    (%%%%)    ", "      ||      ", "     =||=     ", "      ||      ", "              "}, "IT PRESERVES THE NERVES.", 7.80f},
+        {{"    (%%%%)    ", "      ||      ", "     =||=     ", "      ||      ", "     /  \\     "}, "IT PRESERVES THE NERVES.", 8.40f},
+        // "IT HOLDS THE SOUL." (Pedestal)
+        {{"    (%%%%)    ", "      ||      ", "     =||=     ", "      ||      ", "   [======]   "}, "IT HOLDS THE SOUL.", 9.00f},
+        {{"    (%%%%)    ", "      ||      ", "     =||=     ", "   [======]   ", "   [======]   "}, "IT HOLDS THE SOUL.", 9.60f},
+        {{"    (%%%%)    ", "      ||      ", "   [======]   ", "   [======]   ", "   [======]   "}, "IT HOLDS THE SOUL.", 10.20f},
+        {{"    (%%%%)    ", "   [======]   ", "   [======]   ", "   [======]   ", "   [======]   "}, "IT HOLDS THE SOUL.", 10.80f},
+        {{"   [======]   ", "   [======]   ", "   [======]   ", "   [======]   ", "   [======]   "}, "IT HOLDS THE SOUL.", 11.40f},
+        // "ETERNITY IS MANDATORY." (Monolith Face)
+        {{"   [======]   ", "   [ O  O ]   ", "   [======]   ", "   [======]   ", "   [======]   "}, "ETERNITY IS MANDATORY.", 12.00f},
+        {{"   [======]   ", "   [ O  O ]   ", "   [  /\\  ]   ", "   [======]   ", "   [======]   "}, "ETERNITY IS MANDATORY.", 12.60f},
+        {{"   [======]   ", "   [ O  O ]   ", "   [  /\\  ]   ", "   [ ==== ]   ", "   [======]   "}, "ETERNITY IS MANDATORY.", 13.20f},
+        {{"   [======]   ", "   [ O  O ]   ", "   [  /\\  ]   ", "   [ ==== ]   ", "   [======]   "}, "ETERNITY IS MANDATORY.", 13.80f},
+        {{"   [======]   ", "   [ O  O ]   ", "   [  /\\  ]   ", "   [ ==== ]   ", "   [======]   "}, "ETERNITY IS MANDATORY.", 14.40f}
+    };
+
+
+    // 
+    // PHASE 3: REVEAL 1 - THE ARCHITECT
+    // 
+    g_mindTrapMovies[3].resize(3);
+
+    // 
+    // Choice 0: "WHO DID THIS TO ME?!"
+    // Theme: Papers -> Finger pointing -> Bloody Handprint -> Palm Lines -> Player Face
+    // 
+    g_mindTrapMovies[3][0] = {
+        // "HE GAVE THE ORDERS." (Papers)
+        {{"  +--------+  ", "  | ORDERS |  ", "  |        |  ", "  |        |  ", "  +--------+  "}, "HE GAVE THE ORDERS.", 0.00f},
+        {{"  +--------+  ", "  | ORDERS |  ", "  |      X |  ", "  |        |  ", "  +--------+  "}, "HE GAVE THE ORDERS.", 0.60f},
+        {{"  +--------+  ", "  | ORDERS |  ", "  | SIGNED |  ", "  |      X |  ", "  +--------+  "}, "HE GAVE THE ORDERS.", 1.20f},
+        {{"  +--------+  ", "  | ORDERS |  ", "  | SIGNED |  ", "  |      X |  ", "  +--------+  "}, "HE GAVE THE ORDERS.", 1.80f},
+        {{"  +--------+  ", "  | ORDERS |  ", "  | SIGNED |  ", "  |      X |  ", "  +--------+  "}, "HE GAVE THE ORDERS.", 2.40f},
+        // "HE DESIGNED THE VATS." (Finger Pointing)
+        {{"              ", "              ", "  ===)   )>>  ", "              ", "              "}, "HE DESIGNED THE VATS.", 3.00f},
+        {{"              ", "              ", "  ===)   )>>  ", "              ", "              "}, "HE DESIGNED THE VATS.", 3.60f},
+        {{"              ", "              ", "  ===)   )>>  ", "              ", "              "}, "HE DESIGNED THE VATS.", 4.20f},
+        {{"              ", "              ", "  ===)   )>>  ", "              ", "              "}, "HE DESIGNED THE VATS.", 4.80f},
+        {{"              ", "              ", "  ===)   )>>  ", "              ", "              "}, "HE DESIGNED THE VATS.", 5.40f},
+        // "HE SIGNED THE PAPERS." (Bloody Handprint)
+        {{"    \\| |/     ", "   -- | --    ", "   -- | --    ", "    / | \\     ", "     \\|/      "}, "HE SIGNED THE PAPERS.", 6.00f},
+        {{"    \\| |/     ", "   -- | --    ", "   -- | --    ", "    / | \\     ", "     \\|/      "}, "HE SIGNED THE PAPERS.", 6.60f},
+        {{"    \\| |/     ", "   -- | --    ", "   -- | --    ", "    / | \\     ", "     \\|/      "}, "HE SIGNED THE PAPERS.", 7.20f},
+        {{"    \\| |/     ", "   -- | --    ", "   -- | --    ", "    / | \\     ", "     \\|/      "}, "HE SIGNED THE PAPERS.", 7.80f},
+        {{"    \\| |/     ", "   -- | --    ", "   -- | --    ", "    / | \\     ", "     \\|/      "}, "HE SIGNED THE PAPERS.", 8.40f},
+        // "LOOK CLOSER." (Palm Lines)
+        {{"   \\ \\ | / /  ", "  ---\\ | /--- ", "  ---- | ---- ", "  ---/ | \\--- ", "   / / | \\ \\  "}, "LOOK CLOSER.", 9.00f},
+        {{"   \\ \\ | / /  ", "  ---\\ | /--- ", "  ---- | ---- ", "  ---/ | \\--- ", "   / / | \\ \\  "}, "LOOK CLOSER.", 9.60f},
+        {{"   \\ \\ | / /  ", "  ---\\ | /--- ", "  ---- | ---- ", "  ---/ | \\--- ", "   / / | \\ \\  "}, "LOOK CLOSER.", 10.20f},
+        {{"   \\ \\ | / /  ", "  ---\\ | /--- ", "  ---- | ---- ", "  ---/ | \\--- ", "   / / | \\ \\  "}, "LOOK CLOSER.", 10.80f},
+        {{"   \\ \\ | / /  ", "  ---\\ | /--- ", "  ---- | ---- ", "  ---/ | \\--- ", "   / / | \\ \\  "}, "LOOK CLOSER.", 11.40f},
+        // "IT WAS YOUR HAND." (Player Face)
+        {{"    .----.    ", "   / o  o \\   ", "   |  /\\  |   ", "   | ==== |   ", "    \\----/    "}, "IT WAS YOUR HAND.", 12.00f},
+        {{"    .----.    ", "   / o  o \\   ", "   |  /\\  |   ", "   | ==== |   ", "    \\----/    "}, "IT WAS YOUR HAND.", 12.60f},
+        {{"    .----.    ", "   / o  o \\   ", "   |  /\\  |   ", "   | ==== |   ", "    \\----/    "}, "IT WAS YOUR HAND.", 13.20f},
+        {{"    .----.    ", "   / o  o \\   ", "   |  /\\  |   ", "   | ==== |   ", "    \\----/    "}, "IT WAS YOUR HAND.", 13.80f},
+        {{"    .----.    ", "   / o  o \\   ", "   |  /\\  |   ", "   | ==== |   ", "    \\----/    "}, "IT WAS YOUR HAND.", 14.40f}
+    };
+
+    // 
+    // Choice 1: "I DEMAND TO SEE THE PERSON IN CHARGE"
+    // Theme: Jaws -> Crown -> Melting Crown -> Puddle -> Player Reflection
+    // 
+    g_mindTrapMovies[3][1] = {
+        // "A MONSTER PROWLS." (Jaws)
+        {{"   /\\/\\/\\/\\   ", "   \\      /   ", "   /      \\   ", "   \\/\\/\\/\\/   ", "              "}, "A MONSTER PROWLS.", 0.00f},
+        {{"   /\\/\\/\\/\\   ", "   \\      /   ", "   /      \\   ", "   \\/\\/\\/\\/   ", "              "}, "A MONSTER PROWLS.", 0.60f},
+        {{"   /\\/\\/\\/\\   ", "   \\      /   ", "   /      \\   ", "   \\/\\/\\/\\/   ", "              "}, "A MONSTER PROWLS.", 1.20f},
+        {{"   /\\/\\/\\/\\   ", "   \\      /   ", "   /      \\   ", "   \\/\\/\\/\\/   ", "              "}, "A MONSTER PROWLS.", 1.80f},
+        {{"   /\\/\\/\\/\\   ", "   \\      /   ", "   /      \\   ", "   \\/\\/\\/\\/   ", "              "}, "A MONSTER PROWLS.", 2.40f},
+        // "A BEAST OF NO EMPATHY." (Crown)
+        {{"  |\\|/||\\|/|  ", "  |        |  ", "   \\      /   ", "    ------    ", "              "}, "A BEAST OF NO EMPATHY.", 3.00f},
+        {{"  |\\|/||\\|/|  ", "  |        |  ", "   \\      /   ", "    ------    ", "              "}, "A BEAST OF NO EMPATHY.", 3.60f},
+        {{"  |\\|/||\\|/|  ", "  |        |  ", "   \\      /   ", "    ------    ", "              "}, "A BEAST OF NO EMPATHY.", 4.20f},
+        {{"  |\\|/||\\|/|  ", "  |        |  ", "   \\      /   ", "    ------    ", "              "}, "A BEAST OF NO EMPATHY.", 4.80f},
+        {{"  |\\|/||\\|/|  ", "  |        |  ", "   \\      /   ", "    ------    ", "              "}, "A BEAST OF NO EMPATHY.", 5.40f},
+        // "A CREATURE OF PURE EGO." (Crown Melting)
+        {{"  |\\ /  \\ /|  ", "  |   \\/   |  ", "   \\      /   ", "    ~~~~~~    ", "  ~~~~~~~~~~  "}, "A CREATURE OF PURE EGO.", 6.00f},
+        {{"  |\\ /  \\ /|  ", "  |   \\/   |  ", "   \\      /   ", "    ~~~~~~    ", "  ~~~~~~~~~~  "}, "A CREATURE OF PURE EGO.", 6.60f},
+        {{"  |\\ /  \\ /|  ", "  |   \\/   |  ", "   \\      /   ", "    ~~~~~~    ", "  ~~~~~~~~~~  "}, "A CREATURE OF PURE EGO.", 7.20f},
+        {{"  |\\ /  \\ /|  ", "  |   \\/   |  ", "   \\      /   ", "    ~~~~~~    ", "  ~~~~~~~~~~  "}, "A CREATURE OF PURE EGO.", 7.80f},
+        {{"  |\\ /  \\ /|  ", "  |   \\/   |  ", "   \\      /   ", "    ~~~~~~    ", "  ~~~~~~~~~~  "}, "A CREATURE OF PURE EGO.", 8.40f},
+        // "LOOK IN THE REFLECTION." (Puddle)
+        {{"              ", "  ~~~~~~~~~~  ", " ~~~~~~~~~~~~ ", "  ~~~~~~~~~~  ", "              "}, "LOOK IN THE REFLECTION.", 9.00f},
+        {{"              ", "  ~~~~~~~~~~  ", " ~~~~~~~~~~~~ ", "  ~~~~~~~~~~  ", "              "}, "LOOK IN THE REFLECTION.", 9.60f},
+        {{"              ", "  ~~~~~~~~~~  ", " ~~~~~~~~~~~~ ", "  ~~~~~~~~~~  ", "              "}, "LOOK IN THE REFLECTION.", 10.20f},
+        {{"              ", "  ~~~~~~~~~~  ", " ~~~~~~~~~~~~ ", "  ~~~~~~~~~~  ", "              "}, "LOOK IN THE REFLECTION.", 10.80f},
+        {{"              ", "  ~~~~~~~~~~  ", " ~~~~~~~~~~~~ ", "  ~~~~~~~~~~  ", "              "}, "LOOK IN THE REFLECTION.", 11.40f},
+        // "YOU ARE THE MONSTER." (Perfect Mirror Face)
+        {{"    .----.    ", "   / O  O \\   ", "   |  /\\  |   ", "   | .||. |   ", "    \\----/    "}, "YOU ARE THE MONSTER.", 12.00f},
+        {{"    .----.    ", "   / O  O \\   ", "   |  /\\  |   ", "   | .||. |   ", "    \\----/    "}, "YOU ARE THE MONSTER.", 12.60f},
+        {{"    .----.    ", "   / O  O \\   ", "   |  /\\  |   ", "   | .||. |   ", "    \\----/    "}, "YOU ARE THE MONSTER.", 13.20f},
+        {{"    .----.    ", "   / O  O \\   ", "   |  /\\  |   ", "   | .||. |   ", "    \\----/    "}, "YOU ARE THE MONSTER.", 13.80f},
+        {{"    .----.    ", "   / O  O \\   ", "   |  /\\  |   ", "   | .||. |   ", "    \\----/    "}, "YOU ARE THE MONSTER.", 14.40f}
+    };
+
+    // 
+    // Choice 2: "THIS MUST BE A MISTAKE"
+    // Theme: Flask -> Gears -> Swallowing Throat -> Body Calcifying -> Museum Display
+    // 
+    g_mindTrapMovies[3][2] = {
+        // "YOU POURED THE SOLVENT." (Flask)
+        {{"     |  |     ", "    /____\\    ", "   /      \\   ", "  |========|  ", "   \\______/   "}, "YOU POURED THE SOLVENT.", 0.00f},
+        {{"     |  |     ", "    /____\\    ", "   /      \\   ", "  |========|  ", "   \\______/   "}, "YOU POURED THE SOLVENT.", 0.60f},
+        {{"     |  |     ", "    /____\\    ", "   /      \\   ", "  |========|  ", "   \\______/   "}, "YOU POURED THE SOLVENT.", 1.20f},
+        {{"     |  |     ", "    /____\\    ", "   /      \\   ", "  |========|  ", "   \\______/   "}, "YOU POURED THE SOLVENT.", 1.80f},
+        {{"     |  |     ", "    /____\\    ", "   /      \\   ", "  |========|  ", "   \\______/   "}, "YOU POURED THE SOLVENT.", 2.40f},
+        // "YOU SEALED THEIR FATES." (Gears)
+        {{"    _-\\/-_    ", "   /      \\   ", "   | (()) |   ", "   \\      /   ", "    ^-/\\-^    "}, "YOU SEALED THEIR FATES.", 3.00f},
+        {{"    _-\\/-_    ", "   /      \\   ", "   | (()) |   ", "   \\      /   ", "    ^-/\\-^    "}, "YOU SEALED THEIR FATES.", 3.60f},
+        {{"    _-\\/-_    ", "   /      \\   ", "   | (()) |   ", "   \\      /   ", "    ^-/\\-^    "}, "YOU SEALED THEIR FATES.", 4.20f},
+        {{"    _-\\/-_    ", "   /      \\   ", "   | (()) |   ", "   \\      /   ", "    ^-/\\-^    "}, "YOU SEALED THEIR FATES.", 4.80f},
+        {{"    _-\\/-_    ", "   /      \\   ", "   | (()) |   ", "   \\      /   ", "    ^-/\\-^    "}, "YOU SEALED THEIR FATES.", 5.40f},
+        // "NOW YOU TASTE YOUR WORK." (Swallowing Throat)
+        {{"    \\ || /    ", "     \\||/     ", "     |##|     ", "    / || \\    ", "   /  ||  \\   "}, "NOW YOU TASTE YOUR WORK.", 6.00f},
+        {{"    \\ || /    ", "     \\||/     ", "     |##|     ", "    / || \\    ", "   /  ||  \\   "}, "NOW YOU TASTE YOUR WORK.", 6.60f},
+        {{"    \\ || /    ", "     \\||/     ", "     |##|     ", "    / || \\    ", "   /  ||  \\   "}, "NOW YOU TASTE YOUR WORK.", 7.20f},
+        {{"    \\ || /    ", "     \\||/     ", "     |##|     ", "    / || \\    ", "   /  ||  \\   "}, "NOW YOU TASTE YOUR WORK.", 7.80f},
+        {{"    \\ || /    ", "     \\||/     ", "     |##|     ", "    / || \\    ", "   /  ||  \\   "}, "NOW YOU TASTE YOUR WORK.", 8.40f},
+        // "THE CREATOR BECOMES..." (Body Calcifying)
+        {{"      ()      ", "    /[##]\\    ", "    [####]    ", "    /[##]\\    ", "   / [##] \\   "}, "THE CREATOR BECOMES...", 9.00f},
+        {{"      ()      ", "    /[##]\\    ", "    [####]    ", "    /[##]\\    ", "   / [##] \\   "}, "THE CREATOR BECOMES...", 9.60f},
+        {{"      ()      ", "    /[##]\\    ", "    [####]    ", "    /[##]\\    ", "   / [##] \\   "}, "THE CREATOR BECOMES...", 10.20f},
+        {{"      ()      ", "    /[##]\\    ", "    [####]    ", "    /[##]\\    ", "   / [##] \\   "}, "THE CREATOR BECOMES...", 10.80f},
+        {{"      ()      ", "    /[##]\\    ", "    [####]    ", "    /[##]\\    ", "   / [##] \\   "}, "THE CREATOR BECOMES...", 11.40f},
+        // "THE FINAL EXHIBIT." (Museum Display)
+        {{"  [========]  ", "  | [####] |  ", "  | [####] |  ", "  | [####] |  ", "  [========]  "}, "THE FINAL EXHIBIT.", 12.00f},
+        {{"  [========]  ", "  | [####] |  ", "  | [####] |  ", "  | [####] |  ", "  [========]  "}, "THE FINAL EXHIBIT.", 12.60f},
+        {{"  [========]  ", "  | [####] |  ", "  | [####] |  ", "  | [####] |  ", "  [========]  "}, "THE FINAL EXHIBIT.", 13.20f},
+        {{"  [========]  ", "  | [####] |  ", "  | [####] |  ", "  | [####] |  ", "  [========]  "}, "THE FINAL EXHIBIT.", 13.80f},
+        {{"  [========]  ", "  | [####] |  ", "  | [####] |  ", "  | [####] |  ", "  [========]  "}, "THE FINAL EXHIBIT.", 14.40f}
+    };
+
+
+    // 
+    // PHASE 4: REVEAL 2 - THE MASTERPIECE
+    // 
+    g_mindTrapMovies[4].resize(3);
+
+    // 
+    // Choice 0: "NO! I REFUSE!"
+    // Theme: Fist -> Stuck in flesh wall -> Veins -> Swallowed -> Wall of trapped souls
+    // 
+    g_mindTrapMovies[4][0] = {
+        // "DENIAL IS NATURAL." (Fist)
+        {{"    _..._     ", "   (_____)    ", "   (_____)    ", "   (_____)    ", "    |||||     "}, "DENIAL IS NATURAL.", 0.00f},
+        {{"    _..._     ", "   (_____)    ", "   (_____)    ", "   (_____)    ", "    |||||     "}, "DENIAL IS NATURAL.", 0.60f},
+        {{"    _..._     ", "   (_____)    ", "   (_____)    ", "   (_____)    ", "    |||||     "}, "DENIAL IS NATURAL.", 1.20f},
+        {{"    _..._     ", "   (_____)    ", "   (_____)    ", "   (_____)    ", "    |||||     "}, "DENIAL IS NATURAL.", 1.80f},
+        {{"    _..._     ", "   (_____)    ", "   (_____)    ", "   (_____)    ", "    |||||     "}, "DENIAL IS NATURAL.", 2.40f},
+        // "FIGHTING IS POINTLESS." (Stuck in flesh wall)
+        {{"  ~~_..._~~~  ", " ~~(_____)~~  ", " ~~(_____)~~  ", "  ~~|||||~~~  ", "  ~~~~~~~~~~  "}, "FIGHTING IS POINTLESS.", 3.00f},
+        {{"  ~~_..._~~~  ", " ~~(_____)~~  ", " ~~(_____)~~  ", "  ~~|||||~~~  ", "  ~~~~~~~~~~  "}, "FIGHTING IS POINTLESS.", 3.60f},
+        {{"  ~~_..._~~~  ", " ~~(_____)~~  ", " ~~(_____)~~  ", "  ~~|||||~~~  ", "  ~~~~~~~~~~  "}, "FIGHTING IS POINTLESS.", 4.20f},
+        {{"  ~~_..._~~~  ", " ~~(_____)~~  ", " ~~(_____)~~  ", "  ~~|||||~~~  ", "  ~~~~~~~~~~  "}, "FIGHTING IS POINTLESS.", 4.80f},
+        {{"  ~~_..._~~~  ", " ~~(_____)~~  ", " ~~(_____)~~  ", "  ~~|||||~~~  ", "  ~~~~~~~~~~  "}, "FIGHTING IS POINTLESS.", 5.40f},
+        // "THE MARBLE DOES NOT CARE." (Veins creeping)
+        {{"  ##_..._###  ", " ##(#####)##  ", " ##(#|#|#)##  ", "  ##|||||###  ", "  ##########  "}, "THE MARBLE DOES NOT CARE.", 6.00f},
+        {{"  ##_..._###  ", " ##(#####)##  ", " ##(#|#|#)##  ", "  ##|||||###  ", "  ##########  "}, "THE MARBLE DOES NOT CARE.", 6.60f},
+        {{"  ##_..._###  ", " ##(#####)##  ", " ##(#|#|#)##  ", "  ##|||||###  ", "  ##########  "}, "THE MARBLE DOES NOT CARE.", 7.20f},
+        {{"  ##_..._###  ", " ##(#####)##  ", " ##(#|#|#)##  ", "  ##|||||###  ", "  ##########  "}, "THE MARBLE DOES NOT CARE.", 7.80f},
+        {{"  ##_..._###  ", " ##(#####)##  ", " ##(#|#|#)##  ", "  ##|||||###  ", "  ##########  "}, "THE MARBLE DOES NOT CARE.", 8.40f},
+        // "IT EMBRACES YOU." (Swallowed completely)
+        {{"  ##########  ", " ############ ", " ############ ", "  ##########  ", "  ##########  "}, "IT EMBRACES YOU.", 9.00f},
+        {{"  ##########  ", " ############ ", " ############ ", "  ##########  ", "  ##########  "}, "IT EMBRACES YOU.", 9.60f},
+        {{"  ##########  ", " ############ ", " ############ ", "  ##########  ", "  ##########  "}, "IT EMBRACES YOU.", 10.20f},
+        {{"  ##########  ", " ############ ", " ############ ", "  ##########  ", "  ##########  "}, "IT EMBRACES YOU.", 10.80f},
+        {{"  ##########  ", " ############ ", " ############ ", "  ##########  ", "  ##########  "}, "IT EMBRACES YOU.", 11.40f},
+        // "SUBMIT." (Wall of trapped souls)
+        {{"  ##########  ", " ##(OO)##()## ", " #()######()# ", " ##(OO)###### ", "  ##########  "}, "SUBMIT.", 12.00f},
+        {{"  ##########  ", " ##(OO)##()## ", " #()######()# ", " ##(OO)###### ", "  ##########  "}, "SUBMIT.", 12.60f},
+        {{"  ##########  ", " ##(OO)##()## ", " #()######()# ", " ##(OO)###### ", "  ##########  "}, "SUBMIT.", 13.20f},
+        {{"  ##########  ", " ##(OO)##()## ", " #()######()# ", " ##(OO)###### ", "  ##########  "}, "SUBMIT.", 13.80f},
+        {{"  ##########  ", " ##(OO)##()## ", " #()######()# ", " ##(OO)###### ", "  ##########  "}, "SUBMIT.", 14.40f}
+    };
+
+    // 
+    // Choice 1: "I'M WAKING UP NOW"
+    // Theme: Closed Eye -> Opening -> Black hole pupil -> Pulling faces -> Vault Door
+    // 
+    g_mindTrapMovies[4][1] = {
+        // "THIS IS NO DREAM." (Closed Eye)
+        {{"              ", "  __________  ", " (__________) ", "              ", "              "}, "THIS IS NO DREAM.", 0.00f},
+        {{"              ", "  __________  ", " (__________) ", "              ", "              "}, "THIS IS NO DREAM.", 0.60f},
+        {{"              ", "  __________  ", " (__________) ", "              ", "              "}, "THIS IS NO DREAM.", 1.20f},
+        {{"              ", "  __________  ", " (__________) ", "              ", "              "}, "THIS IS NO DREAM.", 1.80f},
+        {{"              ", "  __________  ", " (__________) ", "              ", "              "}, "THIS IS NO DREAM.", 2.40f},
+        // "WAKE UP TO REALITY." (Eye Opening)
+        {{"              ", "  .--------.  ", " (   (  )   ) ", "  '--------'  ", "              "}, "WAKE UP TO REALITY.", 3.00f},
+        {{"              ", "  .--------.  ", " (   (  )   ) ", "  '--------'  ", "              "}, "WAKE UP TO REALITY.", 3.60f},
+        {{"              ", "  .--------.  ", " (   (  )   ) ", "  '--------'  ", "              "}, "WAKE UP TO REALITY.", 4.20f},
+        {{"              ", "  .--------.  ", " (   (  )   ) ", "  '--------'  ", "              "}, "WAKE UP TO REALITY.", 4.80f},
+        {{"              ", "  .--------.  ", " (   (  )   ) ", "  '--------'  ", "              "}, "WAKE UP TO REALITY.", 5.40f},
+        // "SEE WHAT YOU HAVE DONE." (Black Hole Pupil)
+        {{"  .--------.  ", " (  (====)  ) ", " (  (====)  ) ", "  '--------'  ", "              "}, "SEE WHAT YOU HAVE DONE.", 6.00f},
+        {{"  .--------.  ", " (  (====)  ) ", " (  (====)  ) ", "  '--------'  ", "              "}, "SEE WHAT YOU HAVE DONE.", 6.60f},
+        {{"  .--------.  ", " (  (====)  ) ", " (  (====)  ) ", "  '--------'  ", "              "}, "SEE WHAT YOU HAVE DONE.", 7.20f},
+        {{"  .--------.  ", " (  (====)  ) ", " (  (====)  ) ", "  '--------'  ", "              "}, "SEE WHAT YOU HAVE DONE.", 7.80f},
+        {{"  .--------.  ", " (  (====)  ) ", " (  (====)  ) ", "  '--------'  ", "              "}, "SEE WHAT YOU HAVE DONE.", 8.40f},
+        // "FEEL THE COLD SET IN." (Pulling Faces)
+        {{"  .--------.  ", " ( (=(OO)=) ) ", " ( (=(OO)=) ) ", "  '--------'  ", "              "}, "FEEL THE COLD SET IN.", 9.00f},
+        {{"  .--------.  ", " ( (=(OO)=) ) ", " ( (=(OO)=) ) ", "  '--------'  ", "              "}, "FEEL THE COLD SET IN.", 9.60f},
+        {{"  .--------.  ", " ( (=(OO)=) ) ", " ( (=(OO)=) ) ", "  '--------'  ", "              "}, "FEEL THE COLD SET IN.", 10.20f},
+        {{"  .--------.  ", " ( (=(OO)=) ) ", " ( (=(OO)=) ) ", "  '--------'  ", "              "}, "FEEL THE COLD SET IN.", 10.80f},
+        {{"  .--------.  ", " ( (=(OO)=) ) ", " ( (=(OO)=) ) ", "  '--------'  ", "              "}, "FEEL THE COLD SET IN.", 11.40f},
+        // "THERE IS NO ESCAPE." (Vault Door)
+        {{"  [========]  ", "  [| o  o |]  ", "  [|  --  |]  ", "  [| ==== |]  ", "  [========]  "}, "THERE IS NO ESCAPE.", 12.00f},
+        {{"  [========]  ", "  [| o  o |]  ", "  [|  --  |]  ", "  [| ==== |]  ", "  [========]  "}, "THERE IS NO ESCAPE.", 12.60f},
+        {{"  [========]  ", "  [| o  o |]  ", "  [|  --  |]  ", "  [| ==== |]  ", "  [========]  "}, "THERE IS NO ESCAPE.", 13.20f},
+        {{"  [========]  ", "  [| o  o |]  ", "  [|  --  |]  ", "  [| ==== |]  ", "  [========]  "}, "THERE IS NO ESCAPE.", 13.80f},
+        {{"  [========]  ", "  [| o  o |]  ", "  [|  --  |]  ", "  [| ==== |]  ", "  [========]  "}, "THERE IS NO ESCAPE.", 14.40f}
+    };
+
+    // 
+    // Choice 2: "I AM THE CREATOR!"
+    // Theme: King on Throne -> Steps into vat -> Fluid Rises -> Submerged -> Exhaling Face (Loop back to start)
+    // 
+    g_mindTrapMovies[4][2] = {
+        // "THE DIRECTOR STEPS DOWN." (King on Throne)
+        {{"    \\ || /    ", "   -- () --   ", "   --/||\\--   ", "    / || \\    ", "   [======]   "}, "THE DIRECTOR STEPS DOWN.", 0.00f},
+        {{"    \\ || /    ", "   -- () --   ", "   --/||\\--   ", "    / || \\    ", "   [======]   "}, "THE DIRECTOR STEPS DOWN.", 0.60f},
+        {{"    \\ || /    ", "   -- () --   ", "   --/||\\--   ", "    / || \\    ", "   [======]   "}, "THE DIRECTOR STEPS DOWN.", 1.20f},
+        {{"    \\ || /    ", "   -- () --   ", "   --/||\\--   ", "    / || \\    ", "   [======]   "}, "THE DIRECTOR STEPS DOWN.", 1.80f},
+        {{"    \\ || /    ", "   -- () --   ", "   --/||\\--   ", "    / || \\    ", "   [======]   "}, "THE DIRECTOR STEPS DOWN.", 2.40f},
+        // "HE TAKES HIS PLACE." (Steps into vat)
+        {{"              ", "      ()      ", "     /||\\     ", "    |-||-|    ", "   [======]   "}, "HE TAKES HIS PLACE.", 3.00f},
+        {{"              ", "      ()      ", "     /||\\     ", "    |-||-|    ", "   [======]   "}, "HE TAKES HIS PLACE.", 3.60f},
+        {{"              ", "      ()      ", "     /||\\     ", "    |-||-|    ", "   [======]   "}, "HE TAKES HIS PLACE.", 4.20f},
+        {{"              ", "      ()      ", "     /||\\     ", "    |-||-|    ", "   [======]   "}, "HE TAKES HIS PLACE.", 4.80f},
+        {{"              ", "      ()      ", "     /||\\     ", "    |-||-|    ", "   [======]   "}, "HE TAKES HIS PLACE.", 5.40f},
+        // "THE MASTERPIECE IS COMPLETE." (Fluid Rises)
+        {{"              ", "    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   [======]   "}, "THE MASTERPIECE IS COMPLETE.", 6.00f},
+        {{"              ", "    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   [======]   "}, "THE MASTERPIECE IS COMPLETE.", 6.60f},
+        {{"              ", "    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   [======]   "}, "THE MASTERPIECE IS COMPLETE.", 7.20f},
+        {{"              ", "    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   [======]   "}, "THE MASTERPIECE IS COMPLETE.", 7.80f},
+        {{"              ", "    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   [======]   "}, "THE MASTERPIECE IS COMPLETE.", 8.40f},
+        // "PERFECT PRESERVATION." (Submerged)
+        {{"    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   |  ||  |   ", "   [======]   "}, "PERFECT PRESERVATION.", 9.00f},
+        {{"    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   |  ||  |   ", "   [======]   "}, "PERFECT PRESERVATION.", 9.60f},
+        {{"    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   |  ||  |   ", "   [======]   "}, "PERFECT PRESERVATION.", 10.20f},
+        {{"    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   |  ||  |   ", "   [======]   "}, "PERFECT PRESERVATION.", 10.80f},
+        {{"    ~~~~~~    ", "   |  ()  |   ", "   | /||\\ |   ", "   |  ||  |   ", "   [======]   "}, "PERFECT PRESERVATION.", 11.40f},
+        // "ONE BREATH HELD FOREVER." (Exhaling Face - Loops to Phase 0)
+        {{"    .----.    ", "   / o  o \\   ", "  |   /\\   |  ", "  |  .||.  |  ", "   \\ ---- /   "}, "ONE BREATH HELD FOREVER.", 12.00f},
+        {{"    .----.    ", "   / o  o \\   ", "  |   /\\   |  ", "  |  .||.  |  ", "   \\ ---- /   "}, "ONE BREATH HELD FOREVER.", 12.60f},
+        {{"    .----.    ", "   / o  o \\   ", "  |   /\\   |  ", "  |  .||.  |  ", "   \\ ---- /   "}, "ONE BREATH HELD FOREVER.", 13.20f},
+        {{"    .----.    ", "   / o  o \\   ", "  |   /\\   |  ", "  |  .||.  |  ", "   \\ ---- /   "}, "ONE BREATH HELD FOREVER.", 13.80f},
+        {{"    .----.    ", "   / o  o \\   ", "  |   /\\   |  ", "  |  .||.  |  ", "   \\ ---- /   "}, "ONE BREATH HELD FOREVER.", 14.40f}
+    };
+
+
+}
+
 
 static void renderCaveQuiz( Engine &engineContext ) {
     if (!g_caveQuizActive || g_caveQuiz.empty()) return;
@@ -35,6 +632,9 @@ static void renderMindTrapInterface(Engine& engineContext) {
     if (!g_mindTrapActive) return;
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
 
+    // Ensure movies are populated
+    initMindTrapMovies();
+
     drawTextBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(0, 0, 0), rgb(0, 0, 0));
     drawTranslucentBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(4, 4, 6), 0.60f);
 
@@ -66,7 +666,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
     std::string botBorder = topBorder;
     if (fractured && cols > 20)
     {
-        topBorder.replace( cols / 2 - 4, 8, "/V\\/\\/" );
+        topBorder.replace(cols / 2 - 4, 8, "/V\\/\\/");
     }
 
     drawStringTinyScaled(engineContext, tx, ty, topBorder, ink, 1, 1, 1, false);
@@ -77,12 +677,15 @@ static void renderMindTrapInterface(Engine& engineContext) {
     }
     drawStringTinyScaled(engineContext, tx, ty + (rows - 1) * rowStep, botBorder, ink, 1, 1, 1, false);
 
-    drawStringTinyScaled(engineContext, tx + 12, ty + 14, "[ARCHIVE_TERMINAL::MUSEUM_INTERNAL]", ink, 1, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 12, ty + 26, "[OBJECT_ID: THE_DIRECTOR]  [CURATORIAL_STATUS: OBSERVED]", ink, 1, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 12, ty + 38, "ARCHIVE", archiveInk, 1, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 58, ty + 38, "MIND", mindInk, 1, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 86, ty + 38, "SUBJECT", subjectInk, 1, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 134, ty + 38, "NOTE", noteInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 12, ty + 14, "[SYSTEM_DIAGNOSTIC::NEURAL_LINK]", ink, 1, 1, 1, false);
+
+    Uint32 dirInk = (int(g_mindTrapFlickerTimer * 4.0f) % 2 == 0) ? dangerInk : ink;
+    drawStringTinyScaled(engineContext, tx + 12, ty + 26, "[USER_ID: THE_DIRECTOR]  [STATUS: CORRUPTING]", dirInk, 1, 1, 1, false);
+
+    drawStringTinyScaled(engineContext, tx + 12, ty + 38, "MEMORY", archiveInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 62, ty + 38, "PSYCHE", mindInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 112, ty + 38, "GUILT", subjectInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 162, ty + 38, "NOTE", noteInk, 1, 1, 1, false);
 
     if (((int)(g_mindTrapFlickerTimer * 2.0f) % 5) == 1)
     {
@@ -95,16 +698,8 @@ static void renderMindTrapInterface(Engine& engineContext) {
         else if (out.rfind("MIND> ", 0) == 0) out = "MIND> " + out.substr(6);
         else if (out.rfind("THOUGHT> ", 0) == 0) out = "NOTE> " + out.substr(9);
         else if (out.rfind("YOU> ", 0) == 0) out = "SUBJECT> " + out.substr(5);
-        return normalizeMindTrapTerminalText( out );
-    };
-
-    auto isHeavyLine = [](const std::string& s) {
-        return s.find("MARBLE") != std::string::npos ||
-            s.find("PRESERV") != std::string::npos ||
-            s.find("MASTERPIECE") != std::string::npos ||
-            s.find("CONSCIOUS") != std::string::npos ||
-            s.find("804") != std::string::npos;
-    };
+        return normalizeMindTrapTerminalText(out);
+        };
 
     const int logX = tx + 12;
     const int logY = ty + 48;
@@ -113,15 +708,12 @@ static void renderMindTrapInterface(Engine& engineContext) {
     const int visibleLines = std::max(1, logRows);
 
     int start = 0;
-    if ((int)g_mindTrapTerminalLog.size() > visibleLines)
-    {
-        start = (int)g_mindTrapTerminalLog.size() - visibleLines;
-    }
+    if ((int)g_mindTrapTerminalLog.size() > visibleLines) start = (int)g_mindTrapTerminalLog.size() - visibleLines;
 
     int ly = logY;
     for (int i = start; i < (int)g_mindTrapTerminalLog.size(); ++i)
     {
-        std::string line = cleanLine( g_mindTrapTerminalLog[i] );
+        std::string line = cleanLine(g_mindTrapTerminalLog[i]);
         if ((int)line.size() > logWChars) line = line.substr(0, logWChars - 3) + "...";
         Uint32 col = ink;
         Uint32 marker = dimInk;
@@ -131,13 +723,8 @@ static void renderMindTrapInterface(Engine& engineContext) {
         else if (line.rfind("NOTE>", 0) == 0) { col = noteInk; marker = noteInk; }
         if (line.find("CRITICAL_LOGIC_FAIL") != std::string::npos) col = dangerInk;
 
-        const bool heavy = isHeavyLine( line );
         drawTranslucentBox(engineContext, logX - 8, ly - 1, 4, rowStep - 2, marker, 0.95f);
         drawTranslucentBox(engineContext, logX - 2, ly - 1, (logWChars * charAdv) + 4, rowStep - 2, rgb(0, 0, 0), 0.35f);
-        if (heavy)
-        {
-            drawStringTinyScaled(engineContext, logX + 1, ly, line, col, 1, 1, 1, false);
-        }
         drawStringTinyScaled(engineContext, logX, ly, line, col, 1, 1, 1, false);
 
         ly += rowStep;
@@ -146,7 +733,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
 
     if (!g_mindTrapTypingLine.empty() && ly <= logY + (logRows - 1) * rowStep)
     {
-        std::string typed = cleanLine( g_mindTrapTypingLine.substr(0, std::min(g_mindTrapTypingChars, g_mindTrapTypingLine.size())) );
+        std::string typed = cleanLine(g_mindTrapTypingLine.substr(0, std::min(g_mindTrapTypingChars, g_mindTrapTypingLine.size())));
         if ((int)typed.size() > logWChars) typed = typed.substr(0, logWChars - 3) + "...";
         Uint32 typeCol = ink;
         if (typed.rfind("ARCHIVE>", 0) == 0) typeCol = archiveInk;
@@ -167,22 +754,16 @@ static void renderMindTrapInterface(Engine& engineContext) {
         {
             const bool selected = (i == g_mindTrapSelectedOption);
             float sabotage = 0.0f;
-            if (selected && isMindTrapDenialOption( phase.options[i] ))
+            if (selected && isMindTrapDenialOption(phase.options[i]))
             {
                 sabotage = std::clamp((g_mindTrapHoverTimer - 0.75f) / 1.65f, 0.0f, 1.0f);
             }
 
             std::string opt = phase.options[i];
-            if (selected && sabotage > 0.01f)
-            {
-                opt = mindTrapCorruptOptionText( opt, sabotage );
-            }
+            if (selected && sabotage > 0.01f) opt = mindTrapCorruptOptionText(opt, sabotage);
 
             int jitter = 0;
-            if (selected && sabotage > 0.01f)
-            {
-                jitter = int(std::round(std::sin(g_mindTrapChoiceJitterTimer * (18.0f + sabotage * 8.0f) + i * 0.7f) * std::min(1.0f, 0.35f + sabotage * 0.9f)));
-            }
+            if (selected && sabotage > 0.01f) jitter = int(std::round(std::sin(g_mindTrapChoiceJitterTimer * (18.0f + sabotage * 8.0f) + i * 0.7f) * std::min(1.0f, 0.35f + sabotage * 0.9f)));
 
             std::string line = std::to_string(i + 1) + ") " + opt;
             if ((int)line.size() > (cols - 18)) line = line.substr(0, cols - 21) + "...";
@@ -197,23 +778,72 @@ static void renderMindTrapInterface(Engine& engineContext) {
         drawStringTinyScaled(engineContext, tx + 12, galleryY + 3 * rowStep + 2, "CRITICAL_LOGIC_FAIL: SUBJECT_MEMORY_CORRUPTED", dangerInk, 1, 1, 1, false);
     }
 
-    const std::vector<std::vector<std::string>> morphFrames = {
-        {"   ./\\.", "  /    \\", " | /\\  |", " | \/\/ |", "  \\__/ /", "   |  |"},
-        {"   ./\\.", "  / /\\ \\", " | |  | |", " | |\/| |", "  \\_  _/", "   /  \\", "  /_||_\\"},
-        {"   .----.", "  / /\\\\ \\", " | |--| |", " | |  | |", "  \\_==_/", "   /  \\", "  /_/\\_\\"},
-        {"   .----.", "  / /..\\ \\", " | | []| |", " | |__| |", "  /|==|\\", " /_||  ||_\\"},
-        {"   .------.", "  /  /\\   \\", " |  |  |  |", " |  |__|  |", " |  .--.  |", " |  |  |  |", "  \\_|__|_/"}
-    };
-
-    float morphP = std::clamp(((float)g_mindTrapPhaseIndex - 6.0f) / 3.5f, 0.0f, 1.0f);
-    if (g_mindTrapTearActive) morphP = 1.0f;
-    const int frameIdx = std::clamp((int)(morphP * (float)(morphFrames.size() - 1) + 0.01f), 0, (int)morphFrames.size() - 1);
-    const auto &frame = morphFrames[ frameIdx ];
-    int artX = tx + (cols - 24) * charAdv;
-    int artY = ty + 54;
-    for (int i = 0; i < (int)frame.size(); ++i)
+    if (!g_mindTrapShowingResult)
     {
-        drawStringTinyScaled(engineContext, artX, artY + i * rowStep, frame[i], ink, 1, 1, 1, false);
+        const std::vector<std::string> idleFace = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  |  _  _  |  ",
+            "  | | || | |  ",
+            "  |  __    |  ",
+            "   \\    /   ",
+            "   /____\\   "
+        };
+        int artX = tx + (cols - 28) * charAdv;
+        int artY = ty + 54;
+        for (int i = 0; i < (int)idleFace.size(); ++i) {
+            drawStringTinyScaled(engineContext, artX, artY + i * rowStep, idleFace[i], dimInk, 1, 1, 1, false);
+        }
+    }
+
+    if (g_mindTrapShowingResult)
+    {
+        float elapsedMovieTime = 15.0f - g_mindTrapResultTimer;
+
+        const int safePhase = std::clamp(g_mindTrapPhaseIndex, 0, 4);
+        const int safeChoice = std::clamp(g_mindTrapSelectedOption, 0, 2);
+
+        if (g_mindTrapMovies.size() > safePhase && g_mindTrapMovies[safePhase].size() > safeChoice && !g_mindTrapMovies[safePhase][safeChoice].empty())
+        {
+            const auto& movieFrames = g_mindTrapMovies[safePhase][safeChoice];
+
+            const MindTrapMovieFrame* currentFrame = &movieFrames[0];
+            for (const auto& frame : movieFrames) {
+                if (elapsedMovieTime >= frame.timestamp) {
+                    currentFrame = &frame;
+                }
+            }
+
+            int mw = 420;
+            int mh = 260;
+            int mx = panelX + (panelW - mw) / 2;
+            int my = panelY + (panelH - mh) / 2;
+
+            drawTranslucentBox(engineContext, mx, my, mw, mh, rgb(8, 8, 12), 0.95f);
+
+            Uint32 borderCol = rgb(150, 40, 40);
+            for (int x = mx; x < mx + mw; ++x) { putPix(engineContext, x, my, borderCol); putPix(engineContext, x, my + mh - 1, borderCol); }
+            for (int y = my; y < my + mh; ++y) { putPix(engineContext, mx, y, borderCol); putPix(engineContext, mx + mw - 1, y, borderCol); }
+
+            drawStringTinyScaled(engineContext, mx + 10, my + 10, "[ VISUAL_RESPONSE_PLAYBACK ]", borderCol, 1, 1, 1, false);
+
+            int artScale = 2;
+            int artCharW = 6 * artScale;
+            int artLineH = 12 * artScale;
+            int asciiW = (int)currentFrame->lines[0].size() * artCharW;
+            int asciiH = (int)currentFrame->lines.size() * artLineH;
+            int asciiX = mx + (mw - asciiW) / 2;
+            int asciiY = my + (mh - asciiH) / 2 - 20;
+
+            for (int i = 0; i < (int)currentFrame->lines.size(); ++i) {
+                drawStringTinyScaled(engineContext, asciiX, asciiY + (i * artLineH), currentFrame->lines[i], ink, artScale, 1, 1, false);
+            }
+
+            int subW = (int)currentFrame->subtitle.size() * charAdv;
+            int subX = mx + (mw - subW) / 2;
+            int subY = my + mh - 35;
+            drawStringTinyScaled(engineContext, subX, subY, currentFrame->subtitle, mindInk, 1, 1, 1, false);
+        }
     }
 
     if (g_mindTrapTearActive)
@@ -224,11 +854,11 @@ static void renderMindTrapInterface(Engine& engineContext) {
         for (int y = 0; y < tearRows; y += 12)
         {
             std::string row;
-            row.reserve( cols );
+            row.reserve(cols);
             for (int c = 0; c < cols; ++c)
             {
                 int pick = int(std::fabs(std::sin((float)c * 0.67f + (float)y * 0.11f + g_mindTrapTearTimer * 12.0f)) * (glyphs.size() - 1));
-                row.push_back( glyphs[ std::clamp(pick, 0, (int)glyphs.size() - 1) ] );
+                row.push_back(glyphs[std::clamp(pick, 0, (int)glyphs.size() - 1)]);
             }
             drawStringTinyScaled(engineContext, tx, y, row, rgb(190, 190, 190), 1, 1, 1, false);
         }
@@ -236,7 +866,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
         if (tearP > 0.58f)
         {
             drawTextBox(engineContext, 0, (RENDER_H / 2) - 22, RENDER_W, 44, rgb(0, 0, 0), rgb(0, 0, 0));
-            drawString16x16(engineContext, (RENDER_W / 2) - 170, (RENDER_H / 2) - 4, "THE MASTERPIECE IS YOU.", rgb(245, 245, 245), 360, 1, 1, false);
+            drawString16x16(engineContext, (RENDER_W / 2) - 180, (RENDER_H / 2) - 4, "YOU ARE THE DIRECTOR.", rgb(245, 245, 245), 360, 1, 1, false);
         }
     }
 
@@ -1019,7 +1649,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         // NE Vault lore note so the room is still meaningful after progression rebalance
         g_clueNotes.push_back(makeClueNote(engineContext,
             "Janitor Note",
-            "Maintenance Request #44: I’m begging you to fix the keypad on the South Wing doors. The buttons are sticking again. If there’s an emergency, I don’t want to be fumbling to type 7-3-9-1 while the lockdown sirens are screaming. Also, please tell the night staff to stop moving the exhibits. I swear the stag was facing the other way yesterday.",
+            "Maintenance Request #44: Iâ€™m begging you to fix the keypad on the South Wing doors. The buttons are sticking again. If thereâ€™s an emergency, I donâ€™t want to be fumbling to type 7-3-9-1 while the lockdown sirens are screaming. Also, please tell the night staff to stop moving the exhibits. I swear the stag was facing the other way yesterday.",
             17.5f, 2.5f));
         // Restoration Wing lore notes
         g_clueNotes.push_back(makeClueNote(engineContext,
@@ -2015,184 +2645,80 @@ static void updateMindTrapTypewriter( float dt ) {
         g_mindTrapPostLinePause = shortStatusLine ? 0.075f : 0.11f;
     }
 }
-
-
 static void initMindTrapPhases() {
     if (!g_mindTrapPhases.empty()) return;
 
     g_mindTrapPhases = {
-        // Phase 0: Physical Onset
+        // Phase 0: The Hook
         {
-            "THE SOLVENT IN YOUR VEINS IS THICKENING. HOW HEAVY ARE YOUR LEGS?",
-            { "ACTION.RUN", "ACTION.STAND", "ACTION.FEEL" },
+            "HOW ARE YOU FEELING? DOES THE MARBLE BREATHE? ",
+            { "I CAN SEE MY OWN BREATH", "IT'S SO COLD I CAN'T MOVE", "WHO ARE YOU?" },
             {
-                "[ TRY TO RUN ]",
-                "[ TRY TO STAND ]",
-                "[ I CAN'T FEEL THEM ]"
+                "[ I AM SO COLD ]",
+                "[ I CANNOT MOVE ]",
+                "[ WHAT IS HAPPENING ]"
             },
-            {
-                "YOUR FEET ARE ROOTED TO THE TABLE.",
-                "THE MARBLE CREEPS UP YOUR CALVES. YOU CANNOT BALANCE.",
-                "GOOD. NUMBNESS IS THE FIRST BLESSING OF PRESERVATION."
-            },
+            { "...", "...", "..." },
             -1
         },
 
-        // Phase 1: The Captor's Voice
-        {
-            "DO YOU HEAR THE CHISEL??",
-            { "QUERY.WHO", "ACTION.HELP", "QUERY.WHERE" },
-            {
-                "[ WHO IS DOING THIS? ]",
-                "[ HELP ME ]",
-                "[ WHERE IS THE DIRECTOR? ]"
-            },
-            {
-                "HE IS ADMIRING HIS NEWEST CANVAS.",
-                "THERE IS NO RESCUE IN A LOCKED WING.",
-                "HE IS WATCHING YOU."
-            },
-            -1
-        },
-
-        // Phase 2: The Horrific Reveal
+        // Phase 1: The Horrific Realization
         {
             "THINK OF THE HORSE, THE STAG, THE WOLF. DID THEY LOOK SCARED TO YOU? DID THEY LOOK REAL?",
-            { "LOGIC.STATUE", "LOGIC.LOOK", "LOGIC.REAL" },
+            { "THEY'RE JUST SOME STATUES", "IT WAS CREEPY, THEY WERE JUST LOOKING AT ME", "I THINK THEY LOOKED VERY REAL" },
             {
-                "[ JUST SOME STATUE ]",
-                "[ THEY WERE LOOKING AT ME ]",
-                "[ THEY ARE ALL REAL... ]"
+                "[ JUST STATUES ]",
+                "[ THEY STARED AT ME ]",
+                "[ THEY ARE REAL ]"
             },
-            {
-                "THEY'VE BEEN SILENT FOR DECADES.",
-                "THEY WERE BEGGING YOU TO RUN.",
-                "YOU FINALLY SEE THE GALLERY FOR WHAT IT TRULY IS."
-            },
+            { "...", "...", "..." },
             -1
         },
 
-        // Phase 3: The Director's Philosophy
-        {
-            "WHY DO WE PRESERVE THE DEAD, WHEN THE LIVING HOLD SO MUCH MORE?",
-            { "EMOTION.INSANE", "EMOTION.TORTURE", "QUERY.WANT" },
-            {
-                "[ YOU ARE INSANE ]",
-                "[ IS THIS TORTURE ]",
-                "[ WHAT DO YOU WANT FROM ME? ]"
-            },
-            {
-                "INSANITY IS NOT CAPTURING THE MOMENT.",
-                "TORTURE IS FLEETING. ART IS ETERNAL.",
-                "YOUR EXPRESSION, FROZEN FOREVER."
-            },
-            -1
-        },
-
-        // Phase 4: Sensory Deprivation
-        {
-            "YOUR LUNGS ARE SLOWING. THE AIR TASTES LIKE DUST.",
-            { "ACTION.BREATHE", "ACTION.HOLD", "ACTION.COUGH" },
-            {
-                "[ TAKE A DEEP BREATH ]",
-                "[ HOLD YOUR BREATH ]",
-                "[ COUGH ]"
-            },
-            {
-                "DO NOT RESIST.",
-                "....",
-                "COUGHING IS FUTILE."
-            },
-            -1
-        },
-
-        // Phase 5: Identity Erasure
-        {
-            "THE BRAIN REMEMBERS PAIN. WHAT DOES THE STONE REMEMBER?",
-            { "MEMORY.FAMILY", "MEMORY.NAME", "MEMORY.NOTHING" },
-            {
-                "[ MY FAMILY ]",
-                "[ MY NAME ]",
-                "[ NOTHING ]"
-            },
-            {
-                "THEY WILL ADMIRE YOUR CRAFTSMANSHIP, NOT YOUR SOUL.",
-                "YOUR NAME IS NOW 'ACQUISITION 804'.",
-                "NOTHING BUT THE CONSTANT GAZE OF THE PATRONS."
-            },
-            -1
-        },
-
-        // Phase 6: The Eternity of Consciousness
+        // Phase 2: The Eternity Clause
         {
             "CENTURIES WILL PASS. THE MUSEUM WILL CRUMBLE. BUT YOU WILL REMAIN CONSCIOUS.",
-            { "EMOTION.MAD", "ACTION.DIE", "ACTION.EYES" },
+            { "PLEASE NO, I WILL GO MAD", "PLEASE LET ME DIE", "ME? I WON'T BE ALIVE IN CENTURIES" },
             {
                 "[ I WILL GO MAD ]",
                 "[ LET ME DIE ]",
-                "[ CLOSE MY EYES ]"
+                "[ I AM NOT A STATUE ]"
             },
-            {
-                "MADNESS IS A COMFORT. YOU'LL BE THANKFUL.",
-                "YOU CANNOT DIE IF YOU ARE PRESERVED AS A MASTERPIECE.",
-                "YOU WILL HAVE NO CHOICE BUT TO WATCH."
-            },
+            { "...", "...", "..." },
             -1
         },
 
-        // Phase 7: The Final Panic
+        // Phase 3: Reveal 1 - The Architect
         {
-            "THE SOLVENT REACHES YOUR HEART. IT BEATS ONE FINAL TIME.",
-            { "STRUGGLE.BREAK", "STRUGGLE.YELL", "STRUGGLE.FIGHT" },
+            "WHO FILLED THE VATS? WHO POURED THE SOLVENT? LOOK AT YOUR HANDS.",
+            { "THE DIRECTOR DID, THE DOCTORS DID, THOSE MONSTERS DID", "THE MONSTER", "I DID" },
             {
-                "[ BREAK THE MOLD ]",
-                "[ SCREAM FOR THE JANITOR ]",
-                "[ FIGHT THE PARALYSIS ]"
+                "[ THE DIRECTOR DID ]",
+                "[ A MONSTER ]",
+                "[ ...I DID ]"
             },
-            {
-                "NOT GOING TO HAPPEN.",
-                "THE JANITOR ONLY COMES TO POLISH YOUR PLINTH.",
-                "FUTILE."
-            },
+            { "...", "...", "..." },
             -1
         },
 
-        // Phase 8: The Audience Arrives
+        // Phase 4: Reveal 2 - The Masterpiece
         {
-            "THE DOORS ARE UNLOCKING. THE MORNING TOUR IS ARRIVING. THEY ARE LOOKING AT YOU.",
-            { "ACTION.CRYOUT", "ACTION.BLINK", "ACTION.STILL" },
-            {
-                "[ CRY OUT TO THEM ]",
-                "[ BLINK ]",
-                "[ STAND PERFECTLY STILL ]"
-            },
-            {
-                "THEY ADMIRE THE TRAGIC REALISM OF YOUR OPEN MOUTH.",
-                "YOUR EYES DRIED OUT LONG AGO.",
-                "YOU HAVE NO CHOICE BUT TO BE PERFECT."
-            },
-            -1
-        },
-
-        // Phase 9: The Final Submission
-        {
-            "ONE BREATH HELD FOREVER. WELCOME TO THE EXHIBIT.",
-            { "FINAL.NO", "FINAL.HERE", "FINAL.SUBMIT" },
+            "THE FINAL PEDESTAL IS EMPTY. IT WAS ALWAYS SAVED FOR YOU, DIRECTOR.",
+            { "FINAL.NO", "FINAL.WAKE", "FINAL.SUBMIT" },
             {
                 "[ NO... ]",
-                "[ I AM STILL HERE ]",
-                "[ LET THE STONE TAKE ME ]"
+                "[ I NEED TO WAKE UP ]",
+                "[ SUBMIT TO THE STONE ]"
             },
             {
-                "DENIAL FADES INTO MARBLE.",
-                "ONLY AS A MASTERPIECE DEVOID OF AGENCY.",
+                "PERFECT STILLNESS.",
+                "PERFECT STILLNESS.",
                 "PERFECT STILLNESS."
             },
-            2 // Surrender option (Index 2) triggers the final advance/fade to white
+            2 // Surrender option triggers the finale
         }
     };
 }
-
 
 
 
@@ -2460,6 +2986,7 @@ static void updateRedPigmentDispenseCutscene( Engine &engineContext, float dt ) 
         triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED RED PIGMENT", 0.75f );
     }
 }
+
 static void startMindTrapSequence(Engine& engineContext) {
     initMindTrapPhases();
 
@@ -2498,12 +3025,12 @@ static void startMindTrapSequence(Engine& engineContext) {
     queueMindTrapPhasePrompt();
 }
 
-static void commitMindTrapChoice( int choiceIndex ) {
+static void commitMindTrapChoice(int choiceIndex) {
     if (!g_mindTrapActive || g_mindTrapShowingResult || g_mindTrapReadyToExit || !g_mindTrapAwaitingChoice) return;
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
     if (choiceIndex < 0 || choiceIndex >= 3) return;
 
-    const MindTrapPhase &phase = g_mindTrapPhases[ g_mindTrapPhaseIndex ];
+    const MindTrapPhase& phase = g_mindTrapPhases[g_mindTrapPhaseIndex];
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = choiceIndex;
     g_mindTrapLastHoveredOption = -1;
@@ -2512,11 +3039,13 @@ static void commitMindTrapChoice( int choiceIndex ) {
     g_mindTrapForcedCorrectionTimer = 0.0f;
     g_mindTrapForcedOption = -1;
 
-    pushMindTrapTerminalLine( normalizeMindTrapTerminalText( "YOU> " + phase.options[ choiceIndex ] ) );
+    pushMindTrapTerminalLine(normalizeMindTrapTerminalText("YOU> " + phase.options[choiceIndex]));
 
-    g_mindTrapLastResult = phase.results[ choiceIndex ];
-    queueMindTrapTerminalLine( "MIND> " + g_mindTrapLastResult );
-    g_mindTrapResultTimer = 1.25f;
+    g_mindTrapLastResult = phase.results[choiceIndex];
+    queueMindTrapTerminalLine("MIND> " + g_mindTrapLastResult);
+
+    g_mindTrapResultTimer = 15.0f;
+
     g_mindTrapShowingResult = true;
     g_mindTrapAdvanceAfterResult = false;
     g_mindTrapFinalizeAfterResult = false;
@@ -2526,12 +3055,7 @@ static void commitMindTrapChoice( int choiceIndex ) {
     {
         if (choiceIndex == phase.surrenderOption)
         {
-            queueMindTrapTerminalLine( "MIND> GOOD CHOICE" );
             g_mindTrapFinalizeAfterResult = true;
-        }
-        else
-        {
-            queueMindTrapTerminalLine( "MIND> NOT YET. SPEAK THE RESPONSE THAT LETS GO." );
         }
     }
     else

@@ -1732,6 +1732,11 @@ int main( int argc, char **argv ) {
                     {
                         handleLevelChange( engineContext, levels, static_cast<Levels>((static_cast<int>(engineContext.currentLevel) + 1) % static_cast<int>(Levels::COUNT)));
                     }
+                    else if (ev.key.scancode == SDL_SCANCODE_L)
+                    {
+                        startMindTrapSequence(engineContext);
+                        currentState = STATE_MIND_TRAP;
+                    }
                 }
             }
             else if (currentState == STATE_ENDING)
