@@ -5243,14 +5243,14 @@ static void renderGameplayUiPass( Engine &engineContext ) {
     }
 
     renderCaveHUD( engineContext );
-    renderHeldRevolver( engineContext );
+    if (g_endGameStateAllowRevolver) renderHeldRevolver( engineContext );
 
     renderLevelEditorOverlay( engineContext );
 
     if (!overlayBusy) renderAccessPopup( engineContext );
     if (!cutsceneHudSuppressed)
     {
-        renderCombatHUD( engineContext );
+        if (g_endGameStateAllowRevolver) renderCombatHUD( engineContext );
     }
     renderNotesScreen( engineContext );
     renderCodeEntry( engineContext );
@@ -5466,7 +5466,7 @@ static void renderModernCrosshairOverlay( Engine &engineContext ) {
 }
 
 static void renderModernRevolverHudOverlay( Engine &engineContext ) {
-    if (!engineContext.renderer || !g_combatState.active || !g_combatState.hasRevolver) return;
+    if (!engineContext.renderer || !g_combatState.active || !g_combatState.hasRevolver || !g_endGameStateAllowRevolver) return;
 
     SDL_SetRenderDrawBlendMode( engineContext.renderer, SDL_BLENDMODE_BLEND );
 

@@ -684,6 +684,7 @@ static bool isRevolverNearby( Engine const &engineContext, float radius = 1.0f )
 
 static void updateHeldRevolverModel( Engine &engineContext ) {
     const bool shouldShow =
+		g_endGameStateAllowRevolver &&
         g_combatState.active &&
         g_combatState.hasRevolver &&
         g_showHeldWeapon &&

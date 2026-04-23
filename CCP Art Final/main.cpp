@@ -166,11 +166,12 @@ static int addWorldModelInstance(
 #include "CutsceneController.h"
 
 static WeaponPickup g_revolverPickup;
+static bool g_endGameStateAllowRevolver = false;
 static CombatState g_combatState;
 static bool g_directorDeskUnlocked = false;
 static DialogueSystem g_dialogue;
 static CutsceneController g_cutsceneController;
-static bool g_showHeldWeapon = true;
+static bool g_showHeldWeapon = false;
 static int g_heldRevolverModelIndex = -1;
 static bool g_revolverAiming = false;
 static float g_revolverShotCooldown = 0.0f;
@@ -905,7 +906,7 @@ int main( int argc, char **argv ) {
                     continue;
                 }
 
-                if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN && g_endGameStateAllowRevolver)
                 {
                     const bool inputBlocked = g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive;
 
@@ -918,7 +919,7 @@ int main( int argc, char **argv ) {
                         continue;
                     }
 
-                    if (ev.button.button == SDL_BUTTON_LEFT)
+                    if (ev.button.button == SDL_BUTTON_LEFT && g_endGameStateAllowRevolver && g_showHeldWeapon)
                     {
                         if (!inputBlocked && g_combatState.active && g_combatState.hasRevolver)
                         {
@@ -927,7 +928,7 @@ int main( int argc, char **argv ) {
                                 if (g_combatState.loadedAmmo > 0)
                                 {
                                     g_combatState.loadedAmmo--;
-                                    g_revolverShotCooldown = 0.28f;
+                                    g_revolverShotCooldown = 0.32f;
                                     g_revolverRecoilTimer = kRevolverRecoilDuration;
                                     playRevolverShotSequence( levels[ engineContext.currentLevel ].folder );
                                 }
@@ -938,7 +939,7 @@ int main( int argc, char **argv ) {
                     }
                 }
 
-                if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP)
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP && g_endGameStateAllowRevolver)
                 {
                     if (ev.button.button == SDL_BUTTON_RIGHT)
                     {
@@ -1366,7 +1367,7 @@ int main( int argc, char **argv ) {
                             g_notesBodyScroll = 0;
                         }
                     }
-                    else if (ev.key.key == SDLK_H)
+                    else if (ev.key.key == SDLK_H && g_endGameStateAllowRevolver)
                     {
                         if (g_combatState.active && g_combatState.hasRevolver)
                         {
