@@ -4403,11 +4403,20 @@ static void render( Engine &engineContext, float dt ) {
             : (engineContext.positionX + perpWallDist * rayDirX);
         wallX -= std::floor( wallX );
 
+        float wallShade = 1.0f;
+        if (engineContext.caveMode) {
+            wallShade = caveLight(perpWallDist);
+        }
+        else {
+            wallShade = 1.0f / (1.0f + engineContext.indoorShadeLinear * perpWallDist + engineContext.indoorShadeQuadratic * perpWallDist * perpWallDist);
+            wallShade = std::clamp(wallShade, engineContext.indoorShadeMin, 1.0f);
+        }
+        if (side == 1) wallShade *= 0.75f; // Apply side shading for depth
+
         // Texture selection
         const Image &wallTexture = (hitTile == 2) ? engineContext.doorTexture : engineContext.wallTex;
 
-        // Draw wall column (uses fixed-step in RendererHelpers)
-        drawTexturedColumn( engineContext, wallTexture, x, drawStart, drawEnd, perpWallDist, wallX, side );
+        drawTexturedColumn(engineContext, wallTexture, x, drawStart, drawEnd, perpWallDist, wallX, side);
 
         if (hitTile == 1)
         {

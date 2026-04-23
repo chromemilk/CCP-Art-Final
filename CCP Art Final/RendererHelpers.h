@@ -1,4 +1,5 @@
 #include "GameEngine.h"
+#include "LightingSystem.h"
 
 static void putPix( Engine &engineContext, int x, int y, Uint32 c ) {
     if ((unsigned)x < (unsigned)RENDER_W && (unsigned)y < (unsigned)RENDER_H) engineContext.backbuffer[ y * RENDER_W + x ] = c;
@@ -33,46 +34,25 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
         return rgb( r, g, b );
     };
 
-    float shade = 1.0f;
+    // UNIFIED LIGHTING CALCULATION - same formula used for floors/ceilings/3D models
+    float shade = calculateDistanceAttenuation(perpDist, engineContext.caveMode,
+        engineContext.indoorShadeLinear, engineContext.indoorShadeQuadratic, engineContext.indoorShadeMin,
+        engineContext.caveAmbient, engineContext.lightRadius, engineContext.lightFalloff);
 
-    if (engineContext.caveMode)
+    if (!engineContext.caveMode)
     {
-        // Old Cave Logic
-        shade = std::clamp( 1.0f / (0.4f * perpDist), 0.15f, 1.0f );
-        float R = engineContext.lightRadius;
-        float t = std::clamp( 1.0f - std::pow( perpDist / std::max( 0.001f, R ), engineContext.lightFalloff ), 0.0f, 1.0f );
-        float l = std::max( engineContext.caveAmbient, t );
-        shade *= l;
+        // Wall-specific depth shading
+        shade = applyWallSideShading(shade, side);
+        // Wall edge ambient occlusion
+        shade = applyWallEdgeAO(shade, wallX);
     }
-    else
-    {
-		// Use quadratic falloff for museum mode
-        shade = 1.0f / (1.0f + engineContext.indoorShadeLinear * perpDist + engineContext.indoorShadeQuadratic * perpDist * perpDist);
-        shade = std::clamp( shade, engineContext.indoorShadeMin, 1.0f );
-
-        // Makes walls facing one axis darker than the other to show geometry depth
-        if (side == 1) shade *= 0.75f;
-
-        // very subtle edge AO only to avoid visible streaking artifacts
-        float edgeDist = std::min( wallX, 1.0f - wallX );
-        float aoThreshold = 0.03f;
-        if (edgeDist < aoThreshold)
-        {
-            float t = edgeDist / aoThreshold;
-            float ao = t * t * (3.0f - 2.0f * t);
-            shade *= (0.96f + 0.04f * ao);
-        }
-    }
-
 
     for (int y = drawStart; y <= drawEnd; ++y)
     {
-   
         int y_relative = y - wallTopY;
         int textureY = int( (y_relative * (float)textureH) / (float)std::max( 1, lineH ) );
-        textureY = std::clamp( textureY, 0, textureH - 1 ); // Clamp to be safe
+        textureY = std::clamp( textureY, 0, textureH - 1 );
 
-     
         Uint32 color = texture.sample( textureX, textureY );
         float mul = 1.0f;
 
@@ -86,8 +66,6 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
                 int oy = (int)((textureY / float( textureH )) * oh) % oh;
                 if (ox < 0) ox += ow; if (oy < 0) oy += oh;
                 Uint32 oc = engineContext.wallOverlayStains.sample( ox, oy );
-                // Subtle, broad discoloration
-                // strength, min..max, gamma tuned to keep color natural
                 float m = 1.0f - 0.40f * (1.0f - std::pow(
                     std::clamp( (0.299f * ((oc >> 16) & 255) + 0.587f * ((oc >> 8) & 255) + 0.114f * (oc & 255)) / 255.0f, 0.0f, 1.0f ), 1.2f ));
                 mul *= std::clamp( m, 0.85f, 1.03f );
@@ -102,7 +80,6 @@ static void drawTexturedColumn( Engine &engineContext, const Image &texture, int
                 int oy = (int)((textureY / float( textureH )) * oh) % oh;
                 if (ox < 0) ox += ow; if (oy < 0) oy += oh;
                 Uint32 oc = engineContext.wallOverlayCracks.sample( ox, oy );
-                // Stronger dark filaments, no color shift
                 float L = (0.299f * ((oc >> 16) & 255) + 0.587f * ((oc >> 8) & 255) + 0.114f * (oc & 255)) / 255.0f;
                 float m = 1.0f - 0.90f * (1.0f - std::pow( std::clamp( L, 0.0f, 1.0f ), 1.6f ));
                 mul *= std::clamp( m, 0.55f, 1.00f );
@@ -816,7 +793,7 @@ static void drawStringTinyScaled( Engine &engineContext,
             }
             cx = x;
             cy += advY;
-            if (c == '\n') continue;
+            if (c != '\n') continue;
         }
 
         if (dropShadow)

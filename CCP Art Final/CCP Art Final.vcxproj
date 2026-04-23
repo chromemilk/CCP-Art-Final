@@ -144,6 +144,7 @@
     <ClInclude Include="GameplayUiRendering.h" />
     <ClInclude Include="GpuPropSystem.h" />
     <ClInclude Include="Includes.h" />
+    <ClInclude Include="LightingSystem.h" />
     <ClInclude Include="MapHelpers.h" />
     <ClInclude Include="MathHelpers.h" />
     <ClInclude Include="ModelLoadingTools.h" />

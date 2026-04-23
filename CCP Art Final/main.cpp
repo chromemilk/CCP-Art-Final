@@ -366,7 +366,7 @@ int main( int argc, char **argv ) {
                 if (g_caveTimerSeconds <= 0.0f)
                 {
                     g_caveTimerActive = false;
-                    showAccessPopup( "Time's up.Restarting from the museum.", 4000 );
+                    showAccessPopup( "Time's up.", 4000 );
                     startNewMuseumRun( engineContext, levels );
                 }
             }
