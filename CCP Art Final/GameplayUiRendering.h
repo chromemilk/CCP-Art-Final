@@ -842,13 +842,13 @@ static void renderMindTrapInterface(Engine& engineContext) {
             int subW = (int)currentFrame->subtitle.size() * charAdv;
             int subX = mx + (mw - subW) / 2;
             int subY = my + mh - 35;
-            drawStringTinyScaled(engineContext, subX + 10, subY, currentFrame->subtitle, mindInk, 2, 1, 1, false);
+            drawStringTinyScaled(engineContext, subX, subY, currentFrame->subtitle, mindInk, 2, 1, 1, false);
         }
     }
 
     if (g_mindTrapTearActive)
     {
-        const float tearP = std::clamp(g_mindTrapTearTimer / 2.25f, 0.0f, 1.0f);
+        const float tearP = std::clamp(g_mindTrapTearTimer / 1.5f, 0.0f, 1.0f);
         const int tearRows = int(RENDER_H * tearP);
         const std::string glyphs = "#/\\|_-=+*[]{}";
         for (int y = 0; y < tearRows; y += 12)
@@ -863,7 +863,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
             drawStringTinyScaled(engineContext, tx, y, row, rgb(190, 190, 190), 1, 1, 1, false);
         }
 
-        if (tearP > 0.58f)
+        if (tearP > 0.45f)
         {
             drawTextBox(engineContext, 0, (RENDER_H / 2) - 22, RENDER_W, 44, rgb(0, 0, 0), rgb(0, 0, 0));
             drawString16x16(engineContext, (RENDER_W / 2) - 180, (RENDER_H / 2) - 4, "YOU ARE THE DIRECTOR.", rgb(245, 245, 245), 360, 1, 1, false);
@@ -2351,6 +2351,8 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         }
     }
 
+    g_musicVolume = config::calibratedVolume;
+
     // Load the current levels' music track
     playMusicTrack( folder.string(), engineContext.currentLevel);
 
@@ -2988,6 +2990,7 @@ static void updateRedPigmentDispenseCutscene( Engine &engineContext, float dt ) 
 }
 
 static void startMindTrapSequence(Engine& engineContext) {
+	g_musicVolume = 0.0f;
     initMindTrapPhases();
 
     g_mindTrapActive = true;
