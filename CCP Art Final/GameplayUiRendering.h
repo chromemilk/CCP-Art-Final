@@ -836,13 +836,13 @@ static void renderMindTrapInterface(Engine& engineContext) {
             int asciiY = my + (mh - asciiH) / 2 - 20;
 
             for (int i = 0; i < (int)currentFrame->lines.size(); ++i) {
-                drawStringTinyScaled(engineContext, asciiX, asciiY + (i * artLineH), currentFrame->lines[i], ink, artScale, 1, 1, false);
+                drawStringTinyScaled(engineContext, asciiX + 20, asciiY + (i * artLineH), currentFrame->lines[i], ink, artScale, 1, 1, false);
             }
 
             int subW = (int)currentFrame->subtitle.size() * charAdv;
             int subX = mx + (mw - subW) / 2;
             int subY = my + mh - 35;
-            drawStringTinyScaled(engineContext, subX, subY, currentFrame->subtitle, mindInk, 1, 1, 1, false);
+            drawStringTinyScaled(engineContext, subX + 10, subY, currentFrame->subtitle, mindInk, 2, 1, 1, false);
         }
     }
 
@@ -2529,7 +2529,7 @@ static void queueMindTrapPhasePrompt() {
     queueMindTrapTerminalLine("THOUGHT> " + phase.options[0]); 
     queueMindTrapTerminalLine("THOUGHT> " + phase.options[1]);
     queueMindTrapTerminalLine("THOUGHT> " + phase.options[2]);
-    queueMindTrapTerminalLine("VOICE> CHOOSE A RESPONSE");
+    queueMindTrapTerminalLine("VOICE>");
 
     g_mindTrapAwaitingChoice = false;
     g_mindTrapSelectedOption = std::clamp( g_mindTrapSelectedOption, 0, 2 );
