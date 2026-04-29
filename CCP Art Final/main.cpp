@@ -288,7 +288,7 @@ int main( int argc, char **argv ) {
     {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 0.72f, true, "Explore both floors and report to the statue"},
     {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.66f, true, "Explore both floors and report to the statue"},
     {"Transition", (assetRoot / "levels" / "transition").string(), "map.txt", 1.5f, 4.5f, 270.f, Levels::TRANSITION, rgb( 235, 235, 235 ), 0.62f, false, "Proceed through the tunnels"},
-    {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.58f, false, "Find the final journal fragment"}
+    {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.58f, false, "Escape"}
 
 
     };
@@ -1405,6 +1405,8 @@ int main( int argc, char **argv ) {
                             continue;
                         }
 
+
+                  
                         if (engineContext.currentLevel == Levels::MUSEUM && isPlayerNearGasCan( engineContext ))
                         {
                             g_gasCanCollected = true;
@@ -1720,6 +1722,15 @@ int main( int argc, char **argv ) {
                             playDoorCreak( levels[ engineContext.currentLevel ].folder );
                             triggerInteractionAnim( InteractionAnimType::DOOR_USE, "OPENING DOOR", 0.45f );
                         }
+
+                        if (engineContext.currentLevel == Levels::CAVE && isPlayerNearPoint(engineContext, kCaveFinalDoorSequenceX, kCaveFinalDoorSequenceY, 1.5f))
+                        {
+                            g_endGameStateAllowRevolver = true;
+                            g_showHeldWeapon = true;
+
+                            continue;
+                        }
+
 
    
                         if (toggled && engineContext.currentLevel == Levels::TRANSITION)

@@ -316,6 +316,10 @@ static constexpr float kUpperEntryX = 20.6f;
 static constexpr float kUpperEntryY = 9.3f;
 static constexpr float kUpperEntryRadius = 0.85f;
 
+
+static constexpr float kCaveFinalDoorSequenceX = 8.5f;
+static constexpr float kCaveFinalDoorSequenceY = 5.4f;
+
 static LevelTransitionState g_levelTransition;
 static InteractionAnimState g_interactionAnim;
 static bool g_perfLowMode = false;

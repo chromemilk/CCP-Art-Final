@@ -306,11 +306,11 @@ static void initMindTrapMovies() {
         {{"    .----.    ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "A MERCY DENIED TO YOU.", 4.80f},
         {{"   x.----.x   ", "  x/  RIP \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "A MERCY DENIED TO YOU.", 5.40f},
         // "THE FLESH CANNOT DECAY." (Screaming Face pushing thru)
-        {{"   x.----.x   ", "  x/ (  ) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 6.00f},
-        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 6.60f},
-        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x|xxxx|x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 7.20f},
-        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| == |x   ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 7.80f},
-        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| ==== |x  ", " x_|_----_|_x "}, "THE FLESH CANNOT DECAY.", 8.40f},
+        {{"   x.----.x   ", "  x/ (  ) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "YOU CANNOT DECAY.", 6.00f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xxxxxx|   ", "  x|xxxx|x   ", " x_|_----_|_x "}, "YOU CANNOT DECAY.", 6.60f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x|xxxx|x   ", " x_|_----_|_x "}, "YOU CANNOT DECAY.", 7.20f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| == |x   ", " x_|_----_|_x "}, "YOU CANNOT DECAY.", 7.80f},
+        {{"   x.----.x   ", "  x/ (OO) \\x  ", "  |xx || xx|  ", "  x| ==== |x  ", " x_|_----_|_x "}, "YOU CANNOT DECAY.", 8.40f},
         // "YOU WILL NEVER ROT." (Fusing with Metal)
         {{"   /-.--.-\\   ", "  |/ (OO) \\|  ", "  |x  ||  x|  ", "  x| ==== |x  ", " x_|_----_|_x "}, "YOU WILL NEVER ROT.", 9.00f},
         {{"   /-\\--/-\\   ", "  |  (OO)  |  ", "  |   ||   |  ", "   | ==== |   ", "  _|_----_|_  "}, "YOU WILL NEVER ROT.", 9.60f},
@@ -680,7 +680,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
     drawStringTinyScaled(engineContext, tx + 12, ty + 14, "[SYSTEM_DIAGNOSTIC::NEURAL_LINK]", ink, 1, 1, 1, false);
 
     Uint32 dirInk = (int(g_mindTrapFlickerTimer * 4.0f) % 2 == 0) ? dangerInk : ink;
-    drawStringTinyScaled(engineContext, tx + 12, ty + 26, "[USER_ID: THE_DIRECTOR]  [STATUS: CORRUPTING]", dirInk, 1, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + 12, ty + 26, "[USER_ID: DIRECTOR]  [STATUS: CORRUPTING]", dirInk, 1, 1, 1, false);
 
     drawStringTinyScaled(engineContext, tx + 12, ty + 38, "MEMORY", archiveInk, 1, 1, 1, false);
     drawStringTinyScaled(engineContext, tx + 62, ty + 38, "PSYCHE", mindInk, 1, 1, 1, false);
@@ -780,7 +780,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
 
     if (!g_mindTrapShowingResult)
     {
-        const std::vector<std::string> idleFace = {
+        const std::vector<std::string> faceIdle = {
             "    .----.    ",
             "   /      \\   ",
             "  |  _  _  |  ",
@@ -789,10 +789,102 @@ static void renderMindTrapInterface(Engine& engineContext) {
             "   \\    /   ",
             "   /____\\   "
         };
+
+        const std::vector<std::string> faceBlink = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  |        |  ",
+            "  |  -- --  |  ",
+            "  |  __    |  ",
+            "   \\    /   ",
+            "   /____\\   "
+        };
+
+        const std::vector<std::string> faceLookLeft = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  | _  _   |  ",
+            "  || || |  |  ",
+            "  |  __    |  ",
+            "   \\    /   ",
+            "   /____\\   "
+        };
+
+        const std::vector<std::string> faceLookRight = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  |   _  _ |  ",
+            "  |  | || ||  ",
+            "  |  __    |  ",
+            "   \\    /   ",
+            "   /____\\   "
+        };
+
+        const std::vector<std::string> faceLookUp = {
+            "    .----.    ",
+            "   / _  _ \\   ",
+            "  | | || | |  ",
+            "  |        |  ",
+            "  |  __    |  ",
+            "   \\    /   ",
+            "   /____\\   "
+        };
+
+        const std::vector<std::string> faceLookDown = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  |        |  ",
+            "  |  _  _  |  ",
+            "  | | || | |  ",
+            "   \\ __ /   ",
+            "   /____\\   "
+        };
+
+        const std::vector<std::string> faceScary = {
+            "    .----.    ",
+            "   /      \\   ",
+            "  |  O  O  |  ",
+            "  |  |  |  |  ",
+            "  | /VVVV\\ |  ",
+            "   \\      /   ",
+            "   /____\\   "
+        };
+
+        static int frameCounter = 0;
+        frameCounter++;
+
+        const std::vector<std::string>* currentFace = &faceIdle;
+
+        int lookCycle = (frameCounter / 120) % 10;
+
+        bool isBlinking = (frameCounter % 180) < 6;
+
+        bool isScary = (frameCounter % 1500) < 4;
+
+        if (isScary)
+        {
+            currentFace = &faceScary; // Highest priority: overrides everything
+        }
+        else if (isBlinking)
+        {
+            currentFace = &faceBlink; // Blinking overrides looking around
+        }
+        else
+        {
+            switch (lookCycle) {
+            case 2: currentFace = &faceLookLeft;  break;
+            case 5: currentFace = &faceLookRight; break;
+            case 7: currentFace = &faceLookUp;    break;
+            case 9: currentFace = &faceLookDown;  break;
+            default: currentFace = &faceIdle;     break; // Idle on 0, 1, 3, 4, 6, 8
+            }
+        }
+
         int artX = tx + (cols - 28) * charAdv;
         int artY = ty + 54;
-        for (int i = 0; i < (int)idleFace.size(); ++i) {
-            drawStringTinyScaled(engineContext, artX, artY + i * rowStep, idleFace[i], dimInk, 1, 1, 1, false);
+
+        for (int i = 0; i < (int)currentFace->size(); ++i) {
+            drawStringTinyScaled(engineContext, artX, artY + i * rowStep, (*currentFace)[i], dimInk, 1, 1, 1, false);
         }
     }
 
@@ -866,7 +958,7 @@ static void renderMindTrapInterface(Engine& engineContext) {
         if (tearP > 0.45f)
         {
             drawTextBox(engineContext, 0, (RENDER_H / 2) - 22, RENDER_W, 44, rgb(0, 0, 0), rgb(0, 0, 0));
-            drawString16x16(engineContext, (RENDER_W / 2) - 180, (RENDER_H / 2) - 4, "YOU ARE THE DIRECTOR.", rgb(245, 245, 245), 360, 1, 1, false);
+            drawString16x16(engineContext, (RENDER_W / 2) - 180, (RENDER_H / 2) - 4, "IT WAS YOUR HAND.", rgb(245, 245, 245), 360, 1, 1, false);
         }
     }
 
