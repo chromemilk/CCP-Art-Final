@@ -3542,22 +3542,22 @@ void renderGalleryCard( Engine &engineContext ) {
         if (py < 7.0f && px >= 7.0f && px <= 15.0f)
         {
             wingName = "North Wing";
-            wingDesc = "Baroque & Dutch Golden Age";
+            wingDesc = "Newer";
         }
         else if (py > 12.0f && px >= 7.0f && px <= 15.0f)
         {
             wingName = "South Wing";
-            wingDesc = "Prehistoric & Egyptian";
+            wingDesc = "Very, Very Old";
         }
         else if (px < 7.0f && py >= 7.0f && py <= 12.0f)
         {
             wingName = "West Wing";
-            wingDesc = "Antiquity & Roman Empire";
+            wingDesc = "Very Old";
         }
         else if (px > 15.0f && py >= 7.0f && py <= 12.0f)
         {
             wingName = "East Wing";
-            wingDesc = "Northern Renaissance";
+            wingDesc = "Modern";
         }
     }
 
@@ -3995,11 +3995,11 @@ static void renderNotesScreen( Engine &engineContext ) {
 static void renderCompass( Engine &engineContext ) {
     const int boxX = 10;
     const int boxY = 10;
-    const int boxW = 120;
-    const int boxH = 120;
+    const int boxW = 80;
+    const int boxH = 80;
     const int cx = boxX + boxW / 2;
     const int cy = boxY + boxH / 2;
-    const int r = 42;
+    const int r = 25;
 
     drawTextBox( engineContext, boxX, boxY, boxW, boxH, rgb( 14, 14, 18 ), rgb( 160, 140, 80 ) );
     for (int y = -r - 1; y <= r + 1; ++y)

@@ -285,8 +285,8 @@ int main( int argc, char **argv ) {
 
     std::vector<LevelDef> levels = {
     {"Museum Entrance", (assetRoot / "levels" / "entrance").string(), "map.txt", 11.5f, 15.5f, 270.f, Levels::ENTRANCE, rgb( 230, 238, 255 ), 0.78f, false, "Check in at the desk"},
-    {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 0.72f, true, "Explore both floors and report to the statue"},
-    {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.66f, true, "Explore both floors and report to the statue"},
+    {"Museum Ground", (assetRoot / "levels" / "museum").string(), "map.txt", 10.0f, 9.0f, 90.f, Levels::MUSEUM, rgb( 255, 242, 220 ), 0.72f, true, "Explore and view the art"},
+    {"Museum Upper", (assetRoot / "levels" / "museum_upper").string(), "map.txt", 3.8f, 9.3f, 0.f, Levels::MUSEUM_UPPER, rgb( 205, 225, 255 ), 0.66f, true, "Figure out what's going on"},
     {"Transition", (assetRoot / "levels" / "transition").string(), "map.txt", 1.5f, 4.5f, 270.f, Levels::TRANSITION, rgb( 235, 235, 235 ), 0.62f, false, "Proceed through the tunnels"},
     {"Cave", (assetRoot / "levels" / "cave").string(), "map.txt", 2.5f, 2.5f, 90.0f, Levels::CAVE, rgb( 200, 215, 255 ), 0.58f, false, "Escape"}
 
@@ -1617,7 +1617,7 @@ int main( int argc, char **argv ) {
                                     g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
                                     g_revolverAiming = false;
                                     g_dialogue.start( {
-                                        {"Why would the director have this? Doesn't matter.", 2.5f}
+                                        {"Why would the director have this? Eh, Doesn't matter.", 2.5f}
                                         } );
                                     showAccessPopup( "Director's Desk unlocked", 1900 );
                                     triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
@@ -1698,7 +1698,7 @@ int main( int argc, char **argv ) {
                                     {
                                         lock.unlocked = true;
                                         showAccessPopup( lock.requirement + " used.", 1600 );
-                                    triggerInteractionAnim( InteractionAnimType::KEY_USE, "USING " + lock.requirement, 1.25f );
+                                        triggerInteractionAnim( InteractionAnimType::KEY_USE, "USING " + lock.requirement, 1.25f );
                                     }
                                     else
                                     {
