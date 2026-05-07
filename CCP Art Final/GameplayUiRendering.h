@@ -1,4 +1,9 @@
 ﻿#pragma once
+
+#include "GameEngine.h"
+#include "GameDataTypes.h"
+#include "TextBitmap.h"
+
 static std::string normalizeMindTrapTerminalText( std::string s );
 static bool isMindTrapDenialOption( const std::string &optionText );
 static std::string mindTrapCorruptOptionText( std::string text, float intensity );
@@ -599,6 +604,50 @@ static void initMindTrapMovies() {
 
 }
 
+static void drawString11x16(Engine& engineContext, float x, float y, const std::string& text,
+    SDL_Color color, int scale = 1)
+{
+    SDL_SetRenderDrawBlendMode(engineContext.renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(engineContext.renderer, color.r, color.g, color.b, color.a);
+
+    float currentX = x;
+
+    for (char c : text) {
+        if (c == '\n') {
+            currentX = x;
+            y += (16.0f * scale) + (2.0f * scale);
+            continue;
+        }
+
+        // Calculate index (Font starts at ASCII 32 ' ')
+        int asciiIndex = static_cast<int>(c) - 32;
+        if (asciiIndex < 0 || asciiIndex >= 95) asciiIndex = 0;
+
+        // Loop through the 16 horizontal rows
+        for (int row = 0; row < 16; ++row) {
+            uint16_t rowData = fontData11x16_RowMajor[asciiIndex][row];
+
+            if (rowData == 0) continue; // Skip empty rows
+
+            // Loop through the 11 pixels in this row
+            for (int col = 0; col < 11; ++col) {
+                // Read from left to right (bit 10 down to bit 0)
+                if ((rowData >> (10 - col)) & 1) {
+                    SDL_FRect pixelRect = {
+                        currentX + (col * scale),
+                        y + (row * scale),
+                        (float)scale,
+                        (float)scale
+                    };
+                    SDL_RenderFillRect(engineContext.renderer, &pixelRect);
+                }
+            }
+        }
+
+        // Advance to the next letter (11 pixels + 1 padding)
+        currentX += (12.0f * scale);
+    }
+}
 
 static void renderCaveQuiz( Engine &engineContext ) {
     if (!g_caveQuizActive || g_caveQuiz.empty()) return;
@@ -1666,110 +1715,96 @@ static void initMuseumPuzzle(Engine& engineContext) {
 
     if (!g_stairWallOverlayReady)
     {
-        buildStairWallOverlay(g_stairWallOverlay);
+        buildStairWallOverlay( g_stairWallOverlay );
         g_stairWallOverlayReady = true;
     }
 
     g_keyPickups.clear();
 
     g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLUE PIGMENT", 9.9f, 2.9f, rgb( 90, 140, 220 ), "BluePigment.glb", Levels::MUSEUM_UPPER, 0.25f ) );
-    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLACK PIGMENT", 9.25f, 13.85f, rgb(90, 140, 220), "BlackPigment.glb", Levels::MUSEUM_UPPER, 0.30f));
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BLACK PIGMENT", 9.25f, 13.85f, rgb( 90, 140, 220 ), "BlackPigment.glb", Levels::MUSEUM_UPPER, 0.30f ) );
 
-        // Bronze Key in main atrium start
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "BRONZE KEY", 15.f, 8.f, rgb(180, 120, 40), "Bronze Key.glb"));
-        // Silver Key in North Wing
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "SILVER KEY", 10.5f, 3.5f, rgb(190, 190, 200), "Silver Key.glb"));
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "BRONZE KEY", 15.f, 8.f, rgb( 180, 120, 40 ), "Bronze Key.glb" ) );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "SILVER KEY", 10.5f, 3.5f, rgb( 190, 190, 200 ), "Silver Key.glb" ) );
+    g_keyPickups.push_back( addKeyPickupModelProxy( engineContext, "DIRECTOR'S KEY", 4.5f, 15.5f, rgb( 210, 170, 95 ), "Bronze Key.glb" ) );
 
-        g_keyPickups.push_back(addKeyPickupModelProxy(engineContext, "DIRECTOR'S KEY", 4.5f, 15.5f, rgb(210, 170, 95), "Bronze Key.glb"));
-        // Fallback Gold Key in North Wing so progression cannot dead-end
-       // g_keyPickups.push_back( {"GOLD KEY", 12.5f, 2.5f, false, addKeyPickupSprite( engineContext, 12.5f, 2.5f, "GOLD KEY", rgb( 255, 215, 0 ) )} );
+    g_safes.clear();
+    g_safeBoxIndices.clear();
+    g_safes.push_back( { "Director's Safe", "2026", 18.7f, 16.7f, false, "GOLD KEY" } );
+    addSafe3D( engineContext, 18.7f, 16.7f );
 
-        g_safes.clear();
-        g_safeBoxIndices.clear();
-        // Safe in SE Office
-        g_safes.push_back({ "Director's Safe", "2026", 18.7f, 16.7f, false, "GOLD KEY" });
-        addSafe3D(engineContext, 18.7f, 16.7f);
+    g_symbols.clear();
+    g_pedestalBoxIndices.clear();
+    g_symbols.push_back( { "Ancient Pedestal", { 0, 2, 1 }, 3.5f, 3.5f, false, "IRON KEY" } );
+    addPedestal3D( engineContext, 3.5f, 3.5f );
 
-        g_symbols.clear();
-        g_pedestalBoxIndices.clear();
-        // Pedestal in NW Archives
-        // 888
-        g_symbols.push_back({ "Ancient Pedestal", {0, 2, 1}, 3.5f, 3.5f, false, "IRON KEY" }); // HORSE(0) STAG(2) WOLF(1)
-        addPedestal3D(engineContext, 3.5f, 3.5f);
+    g_revolverPickup.weaponName = "REVOLVER";
+    g_revolverPickup.x = 17.95f;
+    g_revolverPickup.y = 16.1f;
+    g_revolverPickup.level = Levels::MUSEUM;
+    g_revolverPickup.collected = true;
+    g_revolverPickup.modelIndex = -1;
 
-        g_revolverPickup.weaponName = "REVOLVER";
-        g_revolverPickup.x = 17.95f;
-        g_revolverPickup.y = 16.1f;
-        g_revolverPickup.level = Levels::MUSEUM;
-        g_revolverPickup.collected = true;
-        g_revolverPickup.modelIndex = -1;
+    g_clueNotes.clear();
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Missed Calls",
+        "12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
+        10.0f, 10.3f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Archivist Notebook",
+        "The new centerpiece requires strict alignment before the locking mechanism engages. The Director was very specific about the symbolism. First, the vehicle of soldiers many centuries ago. Second, the cult of the woods, the hunted. Finally, the apex-predator of the wild forest. Align them in this order, or the vault remains sealed.",
+        3.5f, 8.5f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Security Log",
+        "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
+        4.5f, 10.5f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Director Memo",
+        "To the Board of Curators: We are on the verge of a breakthrough in absolute preservation. The flesh decays, but our new solvent arrests time entirely. To commemorate this milestone, my personal safe has been secured with the current calendar year. Inside is the key to my desk, and by extension, the future of our collection. Do not disturb me; I am preparing the newest acquisition.",
+        3.5f, 15.5f ) );
 
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Conservation Log A",
+        "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
+        7.8f, 6.8f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Conservation Log B",
+        "A perfect exhibit is one breath held forever. Preservation is mercy, not violence.",
+        14.7f, 6.2f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Conservation Log C",
+        "Stillness is purity. If they move, they suffer. If they freeze, they become art.",
+        11.4f, 13.8f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Janitor Note",
+        "Maintenance Request #44: I'm begging you to fix the keypad on the South Wing doors. The buttons are sticking again. If there's an emergency, I don't want to be fumbling to type 7-3-9-1 while the lockdown sirens are screaming. Also, please tell the night staff to stop moving the exhibits. I swear the stag was facing the other way yesterday.",
+        17.5f, 2.5f ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Spilled Solvent",
+        "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: One breath held forever",
+        5.5f, 8.7f,
+        Levels::MUSEUM_UPPER ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Entry #402",
+        "I can still see the fear in his eyes. The color drained from his body. The texture abandoned his face. He went limp. The Director's requests are becoming too much.",
+        11.1f, 4.5f,
+        Levels::MUSEUM_UPPER ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Scientist Note",
+        "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now... The taxidermy studio code is held within the triptych of both human pleasure and torture",
+        9.8f, 15.6f,
+        Levels::MUSEUM_UPPER ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Survivor Note",
+        "Look away. If you look it in the eye it will take you. We managed to lock it in the bioroom",
+        14.2f, 9.5f,
+        Levels::MUSEUM_UPPER ) );
+    g_clueNotes.push_back( makeClueNote( engineContext,
+        "Special Exhibit Intake Receipt",
+        "ACQUISITION LOG 804\nCondition: Subject is conscious, highly disoriented, exhibiting elevated heart rate.\nTreatment: Solvent applied. Paralysis setting in at standard rate.\nCurator Notes: The subject believes they are exploring the facility. Let them wander. The exertion accelerates the calcification process. By the time they reach the lower levels, their legs will turn to marble. We will display them in the West Wing.",
+        9.8f, 5.0f,
+        Levels::MUSEUM_UPPER ) );
 
-        g_clueNotes.clear();
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Missed Calls",
-            "12 missed calls. No signal. No contacts. Why is my battery dropping so fast?",
-            10.0f, 10.3f));
-        // West Wing Note
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Archivist Notebook",
-            "The new centerpiece requires strict alignment before the locking mechanism engages. The Director was very specific about the symbolism. First, the vehicle of soldiers many centuries ago. Second, the cult of the woods, the hunted. Finally, the apex-predator of the wild forest. Align them in this order, or the vault remains sealed.",
-            3.5f, 8.5f));
-        // West Wing progression note (guarantees early North Wing access)
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Security Log",
-            "The North Wing lockdown code is the year of the four rulers. Do not forget it.",
-            4.5f, 10.5f));
-        // SW Crypt Note
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Director Memo",
-            "To the Board of Curators: We are on the verge of a breakthrough in absolute preservation. The flesh decays, but our new solvent arrests time entirely. To commemorate this milestone, my personal safe has been secured with the current calendar year. Inside is the key to my desk, and by extension, the future of our collection. Do not disturb me; I am preparing the newest acquisition.",
-            3.5f, 15.5f));
-
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Conservation Log A",
-            "We preserve the beauty of the frozen moment. Time should stop before decay can argue.",
-            7.8f, 6.8f));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Conservation Log B",
-            "A perfect exhibit is one breath held forever. Preservation is mercy, not violence.",
-            14.7f, 6.2f));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Conservation Log C",
-            "Stillness is purity. If they move, they suffer. If they freeze, they become art.",
-            11.4f, 13.8f));
-        // NE Vault lore note so the room is still meaningful after progression rebalance
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Janitor Note",
-            "Maintenance Request #44: I’m begging you to fix the keypad on the South Wing doors. The buttons are sticking again. If there’s an emergency, I don’t want to be fumbling to type 7-3-9-1 while the lockdown sirens are screaming. Also, please tell the night staff to stop moving the exhibits. I swear the stag was facing the other way yesterday.",
-            17.5f, 2.5f));
-        // Restoration Wing lore notes
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Spilled Solvent",
-            "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: One breath held forever",
-            5.5f, 8.7f,
-            Levels::MUSEUM_UPPER));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Entry #402",
-            "I can still see the fear in his eyes. The color drained from his body. The texture abandoned his face. He went limp. The Director's requests are becoming too much. ",
-            11.1f, 4.5f,
-            Levels::MUSEUM_UPPER));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Scientist Note",
-            "It's alive. I don't know how it happened. The doors just locked. It's only a matter of time now... The taxidermy studio code is held within the triptych of both human pleasure and torture",
-            9.8f, 15.6f,
-            Levels::MUSEUM_UPPER));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Survivor Note",
-            "Look away. If you look it in the eye it will take you. We managed to lock it in the bioroom",
-            14.2f, 9.5f,
-            Levels::MUSEUM_UPPER));
-        g_clueNotes.push_back(makeClueNote(engineContext,
-            "Special Exhibit Intake Receipt",
-            "ACQUISITION LOG 804\nCondition: Subject is conscious, highly disoriented, exhibiting elevated heart rate.\nTreatment: Solvent applied. Paralysis setting in at standard rate.\nCurator Notes: The subject believes they are exploring the facility. Let them wander. The exertion accelerates the calcification process. By the time they reach the lower levels, their legs will turn to marble. We will display them in the West Wing. The look of dawning terror on their face is exactly the expression I want frozen forever.",
-            9.8f, 5.0f,
-            Levels::MUSEUM_UPPER));
-  
     g_museumPuzzleInitialized = true;
 }
 static void initCaveQuiz() {
@@ -2105,18 +2140,25 @@ static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty ) {
     return engineContext.map.tiles[ ty * engineContext.map.width + tx ] == 2;
 }
 
-static int getNearbyKeyPickup( Engine const &engineContext, float radius = 0.9f ) {
+static int getNearbyKeyPickup(Engine const& engineContext, float radius = 0.9f) {
     float radiusSq = radius * radius;
-    for (int i = 0; i < (int)g_keyPickups.size(); ++i)
-    {
-        const auto &k = g_keyPickups[ i ];
-        if (k.collected) continue;
-        if (k.level != engineContext.currentLevel) continue;
+    int closestIndex = -1;
+    float closestDistSq = radiusSq + 1.0f; // Start larger than max allowed
+
+    for (int i = 0; i < (int)g_keyPickups.size(); ++i) {
+        const auto& k = g_keyPickups[i];
+        if (k.collected || k.level != engineContext.currentLevel) continue;
+
         float dx = engineContext.positionX - k.x;
         float dy = engineContext.positionY - k.y;
-        if (dx * dx + dy * dy <= radiusSq) return i;
+        float distSq = dx * dx + dy * dy;
+
+        if (distSq <= radiusSq && distSq < closestDistSq) {
+            closestDistSq = distSq;
+            closestIndex = i;
+        }
     }
-    return -1;
+    return closestIndex;
 }
 
 static int getNearbyClueNote( Engine const &engineContext, float radius = 0.9f ) {
@@ -3361,15 +3403,14 @@ void updateMusicStream() {
     }
 }
 
-
-void renderPolishedPlacard( Engine &engineContext ) {
+void renderPolishedPlacard(Engine& engineContext) {
     if (!engineContext.placardOpen || engineContext.openArtId < 0) return;
     if (engineContext.openArtId >= (int)engineContext.artworks.size()) return;
 
     int artIndex = -1;
     for (size_t i = 0; i < engineContext.artworks.size(); ++i)
     {
-        if (engineContext.artworks[ i ].id == engineContext.openArtId)
+        if (engineContext.artworks[i].id == engineContext.openArtId)
         {
             artIndex = (int)i;
             break;
@@ -3379,7 +3420,7 @@ void renderPolishedPlacard( Engine &engineContext ) {
     // If we somehow didn't find it, bail out
     if (artIndex < 0) return;
 
-    const auto &art = engineContext.artworks[ artIndex ];
+    const auto& art = engineContext.artworks[artIndex];
 
     int panelW = (int)(RENDER_W * 0.40f);
     int textMargin = 25;
@@ -3390,69 +3431,69 @@ void renderPolishedPlacard( Engine &engineContext ) {
     estimatedHeight += 40;    // Meta/Location space
     estimatedHeight += 20;    // Divider
 
-    auto calcH = [&]( const std::string &t ) {
+    auto calcH = [&](const std::string& t) {
         int lines = ((int)t.length() * 5 / maxTextW) + 1; // 5px per char approx
-        return lines * 12;
+        return lines * 13;
         };
 
-    estimatedHeight += calcH( art.placard );
-    estimatedHeight += calcH( art.rationale );
-    estimatedHeight += calcH( art.reflection );
+    estimatedHeight += calcH(art.placard);
+    estimatedHeight += calcH(art.rationale);
+    estimatedHeight += calcH(art.reflection);
 
-    int panelH = std::min( estimatedHeight, RENDER_H - 40 );
+    int panelH = std::min(estimatedHeight, RENDER_H - 40);
     int panelX = 20; // 20px gap from left edge
-    int panelY = (RENDER_H - panelH) / 2; 
+    int panelY = (RENDER_H - panelH) / 2;
 
-    Uint32 bgCol = rgb( 12, 12, 15 );
-    Uint32 borderCol = rgb( 190, 160, 60 ); 
+    Uint32 bgCol = rgb(12, 12, 15);
+    Uint32 borderCol = rgb(190, 160, 60);
 
-    drawTranslucentBox( engineContext, panelX, panelY, panelW, panelH, bgCol, 0.90f );
+    drawTranslucentBox(engineContext, panelX, panelY, panelW, panelH, bgCol, 0.90f);
 
     for (int x = panelX; x < panelX + panelW; ++x)
     {
-        putPix( engineContext, x, panelY, borderCol );
-        putPix( engineContext, x, panelY + panelH - 1, borderCol );
+        putPix(engineContext, x, panelY, borderCol);
+        putPix(engineContext, x, panelY + panelH - 1, borderCol);
     }
     for (int y = panelY; y < panelY + panelH; ++y)
     {
-        putPix( engineContext, panelX, y, borderCol );
-        putPix( engineContext, panelX + panelW - 1, y, borderCol );
+        putPix(engineContext, panelX, y, borderCol);
+        putPix(engineContext, panelX + panelW - 1, y, borderCol);
     }
 
     int currentY = panelY + textMargin;
     int textX = panelX + textMargin;
 
-    drawString16x16( engineContext, textX, currentY, art.title, rgb( 255, 255, 255 ), maxTextW, 1, 1, false );
+    drawString16x16(engineContext, textX, currentY, art.title, rgb(255, 255, 255), maxTextW, 1, 1, false);
     currentY += 25;
 
     std::string meta = art.artist + ", " + art.date;
-    currentY = drawWrappedText( engineContext, textX, currentY, meta, borderCol, maxTextW );
+    currentY = drawWrappedText(engineContext, textX, currentY, meta, borderCol, maxTextW);
     currentY += 3;
 
-    currentY = drawWrappedText( engineContext, textX, currentY, art.location, rgb( 150, 150, 150 ), maxTextW );
+    currentY = drawWrappedText(engineContext, textX, currentY, art.location, rgb(150, 150, 150), maxTextW);
     currentY += 10;
 
-    for (int x = textX; x < textX + maxTextW; ++x) putPix( engineContext, x, currentY, rgb( 70, 70, 70 ) );
+    for (int x = textX; x < textX + maxTextW; ++x) putPix(engineContext, x, currentY, rgb(70, 70, 70));
     currentY += 15;
 
-    currentY = drawWrappedText( engineContext, textX, currentY, art.placard, rgb( 220, 220, 220 ), maxTextW );
+    currentY = drawWrappedText(engineContext, textX, currentY, art.placard, rgb(220, 220, 220), maxTextW);
     currentY += 20;
 
-    drawStringTinyScaled( engineContext, textX, currentY, "HISTORICAL CONTEXT", borderCol, 1 );
+    drawStringTinyScaled(engineContext, textX, currentY, "HISTORICAL CONTEXT", borderCol, 1);
     currentY += 12;
-    currentY = drawWrappedText( engineContext, textX, currentY, art.rationale, rgb( 200, 200, 200 ), maxTextW );
+    currentY = drawWrappedText(engineContext, textX, currentY, art.rationale, rgb(200, 200, 200), maxTextW);
     currentY += 20;
 
-    drawStringTinyScaled( engineContext, textX, currentY, "ANALYSIS", borderCol, 1 );
+    drawStringTinyScaled(engineContext, textX, currentY, "ANALYSIS", borderCol, 1);
     currentY += 12;
-    currentY = drawWrappedText( engineContext, textX, currentY, art.reflection, rgb( 170, 190, 220 ), maxTextW );
+    currentY = drawWrappedText(engineContext, textX, currentY, art.reflection, rgb(170, 190, 220), maxTextW);
 
-    const Image &artImg = engineContext.artImages[ artIndex ];
+    const Image& artImg = engineContext.artImages[artIndex];
     if (artImg.width > 0 && artImg.height > 0)
     {
-        int availX = panelX + panelW + 20;   
-        int availW = RENDER_W - availX - 20; 
-        int availH = RENDER_H - 40;       
+        int availX = panelX + panelW + 20;
+        int availW = RENDER_W - availX - 20;
+        int availH = RENDER_H - 40;
         int availY = 20;
 
         float imgAspect = (float)artImg.width / (float)artImg.height;
@@ -3470,30 +3511,30 @@ void renderPolishedPlacard( Engine &engineContext ) {
 
         for (int x = drawX - 1; x <= drawX + drawW; ++x)
         {
-            putPix( engineContext, x, drawY - 1, borderCol );
-            putPix( engineContext, x, drawY + drawH, borderCol );
+            putPix(engineContext, x, drawY - 1, borderCol);
+            putPix(engineContext, x, drawY + drawH, borderCol);
         }
         for (int y = drawY - 1; y <= drawY + drawH; ++y)
         {
-            putPix( engineContext, drawX - 1, y, borderCol );
-            putPix( engineContext, drawX + drawW, y, borderCol );
+            putPix(engineContext, drawX - 1, y, borderCol);
+            putPix(engineContext, drawX + drawW, y, borderCol);
         }
 
         for (int y = 0; y < drawH; ++y)
         {
-            float v = (float)y / std::max( 1.0f, (float)(drawH - 1) );
-            int texY = std::clamp( (int)(v * artImg.height), 0, artImg.height - 1 );
+            float v = (float)y / std::max(1.0f, (float)(drawH - 1));
+            int texY = std::clamp((int)(v * artImg.height), 0, artImg.height - 1);
 
             for (int x = 0; x < drawW; ++x)
             {
-                float u = (float)x / std::max( 1.0f, (float)(drawW - 1) );
-                int texX = std::clamp( (int)(u * artImg.width), 0, artImg.width - 1 );
+                float u = (float)x / std::max(1.0f, (float)(drawW - 1));
+                int texX = std::clamp((int)(u * artImg.width), 0, artImg.width - 1);
 
-                Uint32 color = artImg.sample( texX, texY );
+                Uint32 color = artImg.sample(texX, texY);
 
                 if (((color >> 16) & 255) == 255 && ((color >> 8) & 255) == 0 && (color & 255) == 255) continue;
 
-                putPix( engineContext, drawX + x, drawY + y, color );
+                putPix(engineContext, drawX + x, drawY + y, color);
             }
         }
     }
@@ -3920,6 +3961,9 @@ static void renderNotesScreen( Engine &engineContext ) {
 
     drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), 180.0f / 255.0f );
 
+
+
+
     int panelW = RENDER_W - 140;
     int panelH = RENDER_H - 110;
     int x = (RENDER_W - panelW) / 2;
@@ -3928,6 +3972,7 @@ static void renderNotesScreen( Engine &engineContext ) {
     drawTranslucentBox( engineContext, x + 8, y + 8, panelW, panelH, rgb( 0, 0, 0 ), 100.0f / 255.0f );
     drawTextBox( engineContext, x, y, panelW, panelH, rgb( 240, 240, 235 ), rgb( 212, 212, 206 ) );
     drawString16x16( engineContext, x + 18, y + 16, "NOTES", rgb( 30, 30, 30 ), panelW - 36, 1, 1, false );
+  
     drawStringTinyScaled( engineContext, x + panelW - 290, y + 22, "UP/DOWN SELECT  PGUP/PGDN SCROLL  N/ESC CLOSE", rgb( 70, 70, 70 ), 1, 1, 1, false );
 
     int listX = x + 16;
@@ -3971,21 +4016,29 @@ static void renderNotesScreen( Engine &engineContext ) {
 
     int selectedNoteIdx = g_foundNotes[ g_notesSelected ];
     if (selectedNoteIdx < 0 || selectedNoteIdx >= (int)g_clueNotes.size()) return;
+    const auto& selected = g_clueNotes[selectedNoteIdx];
+    drawString16x16(engineContext, bodyX + 12, bodyY + 10, selected.title, rgb(30, 30, 30), bodyW - 24, 1, 1, false);
 
-    const auto &selected = g_clueNotes[ selectedNoteIdx ];
-    drawString16x16( engineContext, bodyX + 12, bodyY + 10, selected.title, rgb( 30, 30, 30 ), bodyW - 24, 1, 1, false );
+    const int fontBaseWidth = 6;  // Base width of TinyScaled font at scale 1
+    const int fontBaseHeight = 12; // Base line height at scale 1
+    const int currentScale = 2;    // Your target scale
 
-    const int maxChars = std::max( 20, (bodyW - 24) / 6 );
-    std::vector<std::string> wrapped = wrapNoteTextLines( selected.body, maxChars );
-    const int visibleLines = std::max( 1, (bodyH - 50) / 12 );
-    const int maxScroll = std::max( 0, (int)wrapped.size() - visibleLines );
-    g_notesBodyScroll = std::clamp( g_notesBodyScroll, 0, maxScroll );
+    const int maxChars = std::max(10, (bodyW - 24) / (fontBaseWidth * currentScale));
 
-    int textY = bodyY + 34;
+    std::vector<std::string> wrapped = wrapNoteTextLines(selected.body, maxChars);
+
+    const int lineHeight = fontBaseHeight * currentScale;
+    const int visibleLines = std::max(1, (bodyH - 50) / lineHeight);
+
+    const int maxScroll = std::max(0, (int)wrapped.size() - visibleLines);
+    g_notesBodyScroll = std::clamp(g_notesBodyScroll, 0, maxScroll);
+
+    int textY = bodyY + 40; // Slightly more padding for the title
     for (int i = g_notesBodyScroll; i < (int)wrapped.size() && i < g_notesBodyScroll + visibleLines; ++i)
     {
-        drawStringTinyScaled( engineContext, bodyX + 12, textY, wrapped[ i ], rgb( 30, 30, 30 ), 1, 1, 1, false );
-        textY += 12;
+        // Render with both X and Y scale set to 2 for consistency
+        drawStringTinyScaled(engineContext, bodyX + 12, textY, wrapped[i], rgb(30, 30, 30), currentScale, currentScale, 1, false);
+        textY += lineHeight; // Move down by the scaled line height
     }
 
     std::string scroll = "LINE " + std::to_string( std::min( (int)wrapped.size(), g_notesBodyScroll + 1 ) ) + "/" + std::to_string( std::max( 1, (int)wrapped.size() ) );
@@ -4938,6 +4991,7 @@ static void render( Engine &engineContext, float dt ) {
 	// Walls (raycasted)
     for (int x = 0; x < RENDER_W; ++x)
     {
+
         // Build ray
         float camX = 2.0f * x / float( RENDER_W ) - 1.0f;
         float rayDirX = engineContext.directionX + engineContext.planeX * camX;
@@ -5928,8 +5982,8 @@ static void renderMenu(
 
     // Subtitle
     std::string sub = "Finally, a medium that breathes";
-    int subX = x + (width - (int)sub.length() * 6) / 2;
-    drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 1, 3, 1, false );
+    int subX = (x + (width - (int)sub.length() * 6) / 2) - 40;
+    drawStringTinyScaled( engineContext, subX, titleY + 25, sub, textCol, 2, 3, 1, false );
 
 
     int optY = y + 86;

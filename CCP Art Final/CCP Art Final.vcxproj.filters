@@ -86,6 +86,9 @@
     <ClInclude Include="LightingSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TextBitmap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Media Include="levels\museum\A_Night_To_Remember_Laufey.mp3" />

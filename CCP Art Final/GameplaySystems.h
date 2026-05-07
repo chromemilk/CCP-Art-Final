@@ -1,5 +1,21 @@
 #pragma once
 
+#include "GameEngine.h"
+#include "GameDataTypes.h"
+
+static bool getDoorAheadTile( Engine const &engineContext, int &tx, int &ty );
+static int findDoorLockIndex( Levels level, int tx, int ty );
+static int pickArtworkUnderCrosshair( Engine const &engineContext );
+static int findNearestArtwork( Engine &engineContext );
+static void artworkMountedCenter( const Engine &engineContext, const Artwork &art, float &centerX, float &centerY );
+static void hideExactInteractableVisualsAt( Engine &engineContext, float exactX, float exactY );
+static void beginLevelTransition( Levels target, float seconds = 1.05f );
+static bool toggleDoorAhead( Engine &engineContext );
+static bool isRestorationGateDoorTile( int tx, int ty );
+static void startSolventLabUnlockCutscene( Engine &engineContext );
+static void triggerInteractionAnim( InteractionAnimType type, const std::string &label, float seconds = 0.55f );
+void handleLevelChange(Engine& engineContext, std::vector<LevelDef> levels, Levels desiredLevel);
+
 static std::string makeEditorModelsFileNameForLevel( int levelId, const std::string &mapFile ) {
     std::string stem = std::filesystem::path( mapFile.empty() ? "map.txt" : mapFile ).stem().string();
     if (stem.empty()) stem = "map";
@@ -627,8 +643,7 @@ static std::string resolveFirstExistingAsset( std::initializer_list<const char *
     for (const char *candidate : assetCandidates)
     {
         const std::string path = resolveAssetModelPath( candidate );
-        if (std::filesystem::exists( path ))
-        {
+        if (std::filesystem::exists( path )){
             return path;
         }
     }
@@ -684,6 +699,442 @@ static bool isRevolverNearby( Engine const &engineContext, float radius = 1.0f )
     float dx = engineContext.positionX - g_revolverPickup.x;
     float dy = engineContext.positionY - g_revolverPickup.y;
     return (dx * dx + dy * dy) <= (radius * radius);
+}
+
+enum class ContextualActionKind
+{
+    NONE,
+    ARTWORK,
+    DOOR,
+    DIRECTOR_DESK,
+    SOLVENT_COOLER,
+    GAS_CAN,
+    GENERATOR,
+    KEY_PICKUP,
+    NOTE_PICKUP,
+    REVOLVER_PICKUP,
+    SAFE_ENTRY,
+    SYMBOL_ENTRY,
+    UPPER_ENTRY,
+    RETURN_ENTRY,
+    CAVE_STATUE
+};
+
+struct ContextualActionTarget
+{
+    ContextualActionKind kind = ContextualActionKind::NONE;
+    int index = -1;
+    int tx = -1;
+    int ty = -1;
+    float score = std::numeric_limits<float>::max();
+    std::string label;
+
+    bool valid() const { return kind != ContextualActionKind::NONE; }
+};
+
+static ContextualActionTarget resolveContextualActionTarget( const Engine &engineContext ) {
+    ContextualActionTarget best;
+
+    auto considerPoint = [&]( ContextualActionKind kind, float x, float y, float radius, const std::string &label, int index = -1, int tx = -1, int ty = -1, float bias = 0.0f ) {
+        const float dx = engineContext.positionX - x;
+        const float dy = engineContext.positionY - y;
+        const float d2 = dx * dx + dy * dy;
+        const float r2 = radius * radius;
+        if (d2 > r2) return;
+        const float score = d2 + bias;
+        if (score < best.score)
+        {
+            best.kind = kind;
+            best.index = index;
+            best.tx = tx;
+            best.ty = ty;
+            best.score = score;
+            best.label = label;
+        }
+    };
+
+    if (engineContext.currentLevel == Levels::MUSEUM)
+    {
+        if (!g_gasCanCollected && !g_generatorFueled)
+        {
+            considerPoint( ContextualActionKind::GAS_CAN, kMuseumGasCanX, kMuseumGasCanY, 1.15f, "to Pick Up Gas Can", -1, -1, -1, 0.00f );
+        }
+
+        considerPoint( ContextualActionKind::GENERATOR, kMuseumGeneratorX, kMuseumGeneratorY, 1.45f, g_generatorFueled ? "Generator Running" : (g_gasCanCollected ? "to Fill Generator" : "to Check Generator"), -1, -1, -1, 0.01f );
+        considerPoint( ContextualActionKind::DIRECTOR_DESK, 16.36f, 16.55f, 1.55f, g_directorDeskUnlocked ? "Director's Desk Open" : "to Unlock Director's Desk", -1, -1, -1, 0.02f );
+        considerPoint( ContextualActionKind::UPPER_ENTRY, kUpperEntryX, kUpperEntryY, kUpperEntryRadius + 0.35f, "to Go To Upper Gallery", -1, -1, -1, 0.00f );
+    }
+    else if (engineContext.currentLevel == Levels::MUSEUM_UPPER)
+    {
+        considerPoint( ContextualActionKind::RETURN_ENTRY, 3.5f, 9.3f, 1.35f, "to Go Back To Ground Floor", -1, -1, -1, 0.00f );
+
+        if (isPlayerNearSolventCooler( engineContext ))
+        {
+            considerPoint( ContextualActionKind::SOLVENT_COOLER, 11.3f, 16.05f, 1.25f, g_playerKeys.contains( "RED PIGMENT" ) ? "Solvent Cooler Idle" : "to Use Solvent Cooler", -1, -1, -1, 0.00f );
+        }
+    }
+
+    if (engineContext.currentLevel == Levels::CAVE)
+    {
+        considerPoint( ContextualActionKind::CAVE_STATUE, 11.1f, 9.5f, 1.35f, g_caveQuizPassed ? "WARDEN: PATH OPEN" : "to Answer Warden Questions", -1, -1, -1, 0.00f );
+    }
+
+    if (isRevolverNearby( engineContext ))
+    {
+        considerPoint( ContextualActionKind::REVOLVER_PICKUP, g_revolverPickup.x, g_revolverPickup.y, 1.15f, "to Pick Up Revolver", -1, -1, -1, 0.00f );
+    }
+
+    for (int i = 0; i < (int)g_keyPickups.size(); ++i)
+    {
+        const auto &k = g_keyPickups[ i ];
+        if (k.collected || k.level != engineContext.currentLevel) continue;
+        considerPoint( ContextualActionKind::KEY_PICKUP, k.x, k.y, 1.15f, "to Pick Up " + k.keyName, i, -1, -1, 0.01f );
+    }
+
+    for (int i = 0; i < (int)g_clueNotes.size(); ++i)
+    {
+        const auto &n = g_clueNotes[ i ];
+        if (n.collected || n.level != engineContext.currentLevel) continue;
+        considerPoint( ContextualActionKind::NOTE_PICKUP, n.x, n.y, 1.12f, "to Collect Note", i, -1, -1, 0.02f );
+    }
+
+    for (int i = 0; i < (int)g_safes.size(); ++i)
+    {
+        const auto &s = g_safes[ i ];
+        if (s.solved || engineContext.currentLevel != Levels::MUSEUM) continue;
+        considerPoint( ContextualActionKind::SAFE_ENTRY, s.x, s.y, 1.85f, "to Open Safe", i, -1, -1, 0.03f );
+    }
+
+    for (int i = 0; i < (int)g_symbols.size(); ++i)
+    {
+        const auto &s = g_symbols[ i ];
+        if (s.solved || engineContext.currentLevel != Levels::MUSEUM) continue;
+        considerPoint( ContextualActionKind::SYMBOL_ENTRY, s.x, s.y, 1.85f, "to Examine Pedestal", i, -1, -1, 0.03f );
+    }
+
+    if (isMuseumLikeLevel( engineContext.currentLevel ))
+    {
+        int doorTx = 0;
+        int doorTy = 0;
+        if (getDoorAheadTile( engineContext, doorTx, doorTy ))
+        {
+            const int lockIndex = findDoorLockIndex( engineContext.currentLevel, doorTx, doorTy );
+            const float doorX = float( doorTx ) + 0.5f;
+            const float doorY = float( doorTy ) + 0.5f;
+
+            if (lockIndex >= 0)
+            {
+                const auto &lock = g_roomLocks[ lockIndex ];
+                std::string doorLabel = "to Open Door";
+                if (!lock.unlocked)
+                {
+                    doorLabel = (lock.type == LockType::KEY) ? ("to Use " + lock.requirement) : "to Enter Code";
+                }
+                considerPoint( ContextualActionKind::DOOR, doorX, doorY, 1.95f, doorLabel, lockIndex, doorTx, doorTy, 0.01f );
+            }
+            else
+            {
+                considerPoint( ContextualActionKind::DOOR, doorX, doorY, 1.95f, "to Open Door", -1, doorTx, doorTy, 0.01f );
+            }
+        }
+    }
+
+    const int artId = pickArtworkUnderCrosshair( engineContext );
+    int chosenArtId = artId;
+    if (chosenArtId < 0)
+    {
+        chosenArtId = findNearestArtwork( const_cast<Engine &>( engineContext ) );
+    }
+
+    if (chosenArtId >= 0)
+    {
+        for (const auto &art : engineContext.artworks)
+        {
+            if (art.id != chosenArtId) continue;
+            float centerX = 0.0f;
+            float centerY = 0.0f;
+            artworkMountedCenter( engineContext, art, centerX, centerY );
+            considerPoint( ContextualActionKind::ARTWORK, centerX, centerY, 2.5f, "to View Artwork", chosenArtId, -1, -1, 0.05f );
+            break;
+        }
+    }
+
+    return best;
+}
+
+static bool performContextualAction( Engine &engineContext, std::vector<LevelDef> &levels, GameState &currentState ) {
+    const ContextualActionTarget target = resolveContextualActionTarget( engineContext );
+    if (!target.valid()) return false;
+
+    switch (target.kind)
+    {
+    case ContextualActionKind::GAS_CAN:
+        g_gasCanCollected = true;
+        if (g_gasCanModelIndex >= 0 && g_gasCanModelIndex < (int)g_worldModels.size())
+        {
+            g_worldModels[ g_gasCanModelIndex ].visible = false;
+        }
+        showAccessPopup( "Acquired gas can.", 1700 );
+        triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED GAS CAN", 0.55f );
+        return true;
+
+    case ContextualActionKind::GENERATOR:
+        if (g_generatorFueled)
+        {
+            showAccessPopup( "Generator is fueled.", 1200 );
+            return true;
+        }
+        if (!g_gasCanCollected)
+        {
+            if (!g_generatorNeedsGasLinePlayed)
+            {
+                g_generatorNeedsGasLinePlayed = true;
+                g_dialogue.start( { { "Looks like it needs some gas", 2.4f } } );
+            }
+            else
+            {
+                showAccessPopup( "Generator is empty.", 1800 );
+            }
+            return true;
+        }
+        g_generatorFueled = true;
+        g_gasCanCollected = false;
+        g_powerRestoreFlickerActive = true;
+        g_powerRestoreFlickerTimer = 0.0f;
+        playGeneratorStartSound( levels[ engineContext.currentLevel ].folder );
+        if (g_generatorModelIndex >= 0 && g_generatorModelIndex < (int)g_worldModels.size())
+        {
+            g_worldModels[ g_generatorModelIndex ].tint = rgb( 225, 225, 205 );
+        }
+        showAccessPopup( "Power has been restored to all levels", 2500 );
+        triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORING POWER", 0.85f );
+        g_dialogue.start( { { "That should get the lights back on", 2.1f } } );
+        return true;
+
+    case ContextualActionKind::DIRECTOR_DESK:
+        if (g_directorDeskUnlocked)
+        {
+            showAccessPopup( "Director's Desk already searched.", 1800 );
+            return true;
+        }
+        if (g_playerKeys.contains( "DIRECTOR'S KEY" ))
+        {
+            g_directorDeskUnlocked = true;
+            if (!g_combatState.hasRevolver)
+            {
+                g_combatState.active = true;
+                g_combatState.hasRevolver = true;
+                g_combatState.loadedAmmo = 6;
+                g_combatState.reserveAmmo = 0;
+                g_revolverInspectCutsceneActive = true;
+                g_revolverInspectCutsceneTimer = 0.0f;
+                g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
+                g_revolverAiming = false;
+                g_dialogue.start( { { "Why would the director have this? Eh, Doesn't matter.", 2.5f } } );
+                showAccessPopup( "Director's Desk unlocked", 1900 );
+                triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
+            }
+            else
+            {
+                showAccessPopup( "Director's Desk already searched.", 1800 );
+            }
+        }
+        else
+        {
+            showAccessPopup( "The desk is locked", 2200 );
+        }
+        return true;
+
+    case ContextualActionKind::SOLVENT_COOLER:
+        if (g_playerKeys.contains( "RED PIGMENT" ) || g_redPigmentDispenseCutsceneActive) return true;
+        g_solventCoolerEntryActive = true;
+        g_solventCoolerBuffer.clear();
+        SDL_StartTextInput( engineContext.window );
+        return true;
+
+    case ContextualActionKind::UPPER_ENTRY:
+        triggerInteractionAnim( InteractionAnimType::DOOR_USE, "ASCENDING TO UPPER GALLERY", 0.9f );
+        beginLevelTransition( Levels::MUSEUM_UPPER, 1.0f );
+        return true;
+
+    case ContextualActionKind::RETURN_ENTRY:
+        triggerInteractionAnim( InteractionAnimType::DOOR_USE, "RETURNING TO GROUND FLOOR", 0.9f );
+        beginLevelTransition( Levels::MUSEUM, 1.0f );
+        return true;
+
+    case ContextualActionKind::KEY_PICKUP:
+        if (target.index < 0 || target.index >= (int)g_keyPickups.size()) return false;
+        {
+            auto &k = g_keyPickups[ target.index ];
+            k.collected = true;
+            g_playerKeys.insert( k.keyName );
+            if (k.propIndex >= 0 && k.propIndex < (int)engineContext.props.size()) engineContext.props[ k.propIndex ].scale = 0.0f;
+            if (k.modelIndex >= 0 && k.modelIndex < (int)g_worldModels.size()) g_worldModels[ k.modelIndex ].visible = false;
+            showAccessPopup( "Acquired " + k.keyName + ".", 1800 );
+            playPickup( levels[ engineContext.currentLevel ].folder );
+            triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "ACQUIRED " + k.keyName, 0.50f );
+            hideExactInteractableVisualsAt( engineContext, k.x, k.y );
+        }
+        return true;
+
+    case ContextualActionKind::REVOLVER_PICKUP:
+        if (g_revolverPickup.collected) return true;
+        g_revolverPickup.collected = true;
+        if (g_revolverPickup.modelIndex >= 0 && g_revolverPickup.modelIndex < (int)g_worldModels.size()) g_worldModels[ g_revolverPickup.modelIndex ].visible = false;
+        g_revolverPickup.modelIndex = -1;
+        g_combatState.active = true;
+        g_combatState.hasRevolver = true;
+        g_combatState.loadedAmmo = 6;
+        g_combatState.reserveAmmo = 0;
+        g_revolverInspectCutsceneActive = true;
+        g_revolverInspectCutsceneTimer = 0.0f;
+        g_revolverInspectBaseYaw = std::atan2( engineContext.directionY, engineContext.directionX ) + kRevolverFacingYawOffset;
+        g_revolverAiming = false;
+        g_dialogue.start( { { "Why would the director have this?", 2.5f } } );
+        showAccessPopup( "Revolver acquired.", 1700 );
+        triggerInteractionAnim( InteractionAnimType::ITEM_PICKUP, "REVOLVER ACQUIRED", 0.6f );
+        return true;
+
+    case ContextualActionKind::NOTE_PICKUP:
+        if (target.index < 0 || target.index >= (int)g_clueNotes.size()) return false;
+        {
+            auto &n = g_clueNotes[ target.index ];
+            n.collected = true;
+            g_foundNotes.push_back( target.index );
+            g_notesCollectedRun++;
+            if (n.propIndex >= 0 && n.propIndex < (int)engineContext.props.size()) engineContext.props[ n.propIndex ].scale = 0.0f;
+            if (n.modelIndex >= 0 && n.modelIndex < (int)g_worldModels.size()) g_worldModels[ n.modelIndex ].visible = false;
+            showAccessPopup( "Collected note: " + n.title, 2200 );
+            playPaperRustle( levels[ engineContext.currentLevel ].folder );
+            triggerInteractionAnim( InteractionAnimType::NOTE_COLLECT, "READING NOTE", 0.5f );
+            hideExactInteractableVisualsAt( engineContext, n.x, n.y );
+        }
+        return true;
+
+    case ContextualActionKind::SAFE_ENTRY:
+        if (target.index < 0 || target.index >= (int)g_safes.size()) return false;
+        g_codeEntryActive = true;
+        g_safeEntryIndex = target.index;
+        g_codeEntryLockIndex = -1;
+        g_symbolEntryIndex = -1;
+        g_codeEntryBuffer.clear();
+        return true;
+
+    case ContextualActionKind::SYMBOL_ENTRY:
+        if (target.index < 0 || target.index >= (int)g_symbols.size()) return false;
+        g_codeEntryActive = true;
+        g_symbolEntryIndex = target.index;
+        g_codeEntryLockIndex = -1;
+        g_safeEntryIndex = -1;
+        g_symbolFocus = 0;
+        g_codeEntryBuffer.clear();
+        return true;
+
+    case ContextualActionKind::DOOR:
+        if (target.tx < 0 || target.ty < 0) return false;
+        {
+            const int lockIndex = findDoorLockIndex( engineContext.currentLevel, target.tx, target.ty );
+            if (engineContext.currentLevel == Levels::MUSEUM_UPPER && isRestorationGateDoorTile( target.tx, target.ty ) && !g_restorationWingUnlocked)
+            {
+                if (hasRestorationPigments())
+                {
+                    g_restorationWingUnlocked = true;
+                    const int idx = target.ty * engineContext.map.width + target.tx;
+                    if ((unsigned)idx < (unsigned)engineContext.map.tiles.size() && engineContext.map.tiles[ idx ] == 2) engineContext.map.tiles[ idx ] = 0;
+                    showAccessPopup( "Access override.", 2400 );
+                    triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORATION WING UNSEALED", 1.0f );
+                    startSolventLabUnlockCutscene( engineContext );
+                }
+                else
+                {
+                    showAccessPopup( "Seal active.", 2300 );
+                }
+                return true;
+            }
+
+            if (lockIndex >= 0 && !g_roomLocks[ lockIndex ].unlocked)
+            {
+                if (!g_firstLockedDoorDialogueShown)
+                {
+                    g_dialogue.start( { { "Why is this locked?", 2.0f } } );
+                    g_firstLockedDoorDialogueShown = true;
+                }
+
+                auto &lock = g_roomLocks[ lockIndex ];
+                if (lock.type == LockType::KEY)
+                {
+                    if (g_playerKeys.contains( lock.requirement ))
+                    {
+                        lock.unlocked = true;
+                        showAccessPopup( lock.requirement + " used.", 1600 );
+                        triggerInteractionAnim( InteractionAnimType::KEY_USE, "USING " + lock.requirement, 1.25f );
+                    }
+                    else
+                    {
+                        showAccessPopup( lock.requirement + " required." );
+                        return true;
+                    }
+                }
+                else
+                {
+                    g_codeEntryActive = true;
+                    g_codeEntryLockIndex = lockIndex;
+                    g_codeEntryBuffer.clear();
+                    return true;
+                }
+            }
+
+            bool toggled = toggleDoorAhead( engineContext );
+            if (toggled)
+            {
+                playDoorCreak( levels[ engineContext.currentLevel ].folder );
+                triggerInteractionAnim( InteractionAnimType::DOOR_USE, "OPENING DOOR", 0.45f );
+            }
+
+            if (toggled && engineContext.currentLevel == Levels::TRANSITION)
+            {
+                handleLevelChange( engineContext, levels, Levels::CAVE );
+            }
+        }
+        return true;
+
+    case ContextualActionKind::CAVE_STATUE:
+        if (!g_caveFinalNoteCollected)
+        {
+            showAccessPopup( "The statue whispers: Bring me the final journal fragment.", 2400 );
+        }
+        else if (g_caveQuizPassed)
+        {
+            currentState = STATE_ENDING;
+        }
+        else
+        {
+            g_caveQuizQuestionIndex = 0;
+            g_caveQuizActive = true;
+        }
+        return true;
+
+    case ContextualActionKind::ARTWORK:
+        if (target.index < 0) return false;
+        if (engineContext.placardOpen && engineContext.openArtId == target.index)
+        {
+            engineContext.placardOpen = false;
+            engineContext.lastPlacardTick = SDL_GetTicks();
+        }
+        else
+        {
+            engineContext.openArtId = target.index;
+            engineContext.placardOpen = true;
+            engineContext.lastPlacardTick = SDL_GetTicks();
+            mesuemObjectives.markViewed( target.index );
+        }
+        return true;
+
+    default:
+        break;
+    }
+
+    return false;
 }
 
 static void updateHeldRevolverModel( Engine &engineContext ) {
@@ -798,7 +1249,7 @@ static void applyUnlockAllDoorsOverride( Engine &engineContext ) {
     g_restorationWingUnlocked = true;
 }
 
-static void beginLevelTransition( Levels target, float seconds = 1.05f ) {
+static void beginLevelTransition( Levels target, float seconds ) {
     g_levelTransition.active = true;
     g_levelTransition.switched = false;
     g_levelTransition.t = 0.0f;
@@ -806,7 +1257,7 @@ static void beginLevelTransition( Levels target, float seconds = 1.05f ) {
     g_levelTransition.targetLevel = target;
 }
 
-static void triggerInteractionAnim( InteractionAnimType type, const std::string &label, float seconds = 0.55f ) {
+static void triggerInteractionAnim( InteractionAnimType type, const std::string &label, float seconds ) {
     if (type == InteractionAnimType::ITEM_PICKUP &&
         ((label.find( "ACQUIRED" ) != std::string::npos) ||
             (label.find( "Acquired" ) != std::string::npos) ||

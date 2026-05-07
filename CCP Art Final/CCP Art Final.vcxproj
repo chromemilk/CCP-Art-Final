@@ -153,6 +153,7 @@
     <ClInclude Include="PhysicsHelpers.h" />
     <ClInclude Include="RendererHelpers.h" />
     <ClInclude Include="Settings.h" />
+    <ClInclude Include="TextBitmap.h" />
     <ClInclude Include="WalkBot.h" />
   </ItemGroup>
   <ItemGroup>

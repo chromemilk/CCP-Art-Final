@@ -1,4 +1,5 @@
 #include "GameEngine.h"
+#include "GameEngine.h"
 #include "RendererHelpers.h"
 #include "PhysicsHelpers.h"
 #include "MusicSystem.h"
@@ -24,6 +25,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
 
 #ifndef TINYGLTF_IMPLEMENTATION
 #define TINYGLTF_IMPLEMENTATION
@@ -105,6 +107,8 @@ static int g_mindTrapForcedOption = -1;
 static float g_mindTrapChoiceJitterTimer = 0.0f;
 static bool g_mindTrapTearActive = false;
 static float g_mindTrapTearTimer = 0.0f;
+static bool g_museumPuzzleInitialized = false;
+static bool g_unlockAllDoorsOverride = false;
 static bool g_solventLabUnlockCutsceneActive = false;
 static int g_solventLabUnlockCutsceneStage = 0;
 static float g_solventLabUnlockCutsceneTimer = 0.0f;
@@ -118,20 +122,37 @@ static bool g_redPigmentDispenseCutsceneActive = false;
 static float g_redPigmentDispenseCutsceneTimer = 0.0f;
 static int g_redPigmentDispenseModelIndex = -1;
 static float g_redPigmentDispenseBaseYaw = 0.0f;
-static bool g_museumPuzzleInitialized = false;
 static bool g_restorationWingUnlocked = false;
-static bool g_unlockAllDoorsOverride = false;
 static bool g_wakeCutsceneActive = false;
 static float g_wakeCutsceneTimer = 0.0f;
-static constexpr float kWakeCutsceneDuration = 8.5f;
+static constexpr float kWakeCutsceneDuration = 14.35f;
 static int g_wakeCutsceneStage = 0;
 static float g_wakeCutsceneStageTimer = 0.0f;
 static float g_wakeCutsceneInitialYaw = 0.0f;
 static float g_wakeCutsceneTurnStartYaw = 0.0f;
 static float g_wakeCutsceneReturnStartYaw = 0.0f;
-static int g_wakeMonsterModelIndex = -1;
-static std::shared_ptr<sf::Sound> g_wakeGeneratorHumSound;
 static float g_wakeDarknessOverride = -1.0f;
+static std::shared_ptr<sf::Sound> g_wakeGeneratorHumSound;
+static int g_wakeMonsterModelIndex = -1;
+static bool g_startupBriefingActive = false;
+static int g_startupBriefingStage = 0;
+static float g_startupBriefingTimer = 0.0f;
+static std::vector<std::string> g_startupBriefingLog;
+static std::deque<std::string> g_startupBriefingTypeQueue;
+static std::string g_startupBriefingTypingLine;
+static size_t g_startupBriefingTypingChars = 0;
+static float g_startupBriefingTypingAccumulator = 0.0f;
+static float g_startupBriefingPostLinePause = 0.0f;
+static bool g_startupBriefingAwaitingContinue = false;
+static bool g_rosesCutsceneActive = false;
+static int g_rosesCutsceneStage = 0;
+static float g_rosesCutsceneTimer = 0.0f;
+static float g_rosesCutsceneInitialYaw = 0.0f;
+static float g_rosesCutsceneTurnStartYaw = 0.0f;
+static float g_rosesCutsceneReturnStartYaw = 0.0f;
+static int g_rosesMonsterModelIndex = -1;
+static std::shared_ptr<sf::Sound> g_rosesGeneratorHumSound;
+static float g_rosesDarknessOverride = -1.0f;
 static bool g_generatorNeedsGasLinePlayed = false;
 static bool g_gasCanCollected = false;
 static bool g_generatorFueled = false;
@@ -239,6 +260,9 @@ int main( int argc, char **argv ) {
     engineContext.backbuffer.resize( RENDER_W * RENDER_H );
     engineContext.window = SDL_CreateWindow( "Still Life", RENDER_W * WIN_SCALE, RENDER_H * WIN_SCALE, 0 );
     SDL_SetWindowPosition( engineContext.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED );
+
+    SDL_SetWindowRelativeMouseMode(engineContext.window, false);
+
 
     if (!engineContext.window)
     {
@@ -758,6 +782,7 @@ int main( int argc, char **argv ) {
                 }
             }
         }
+        SDL_SetWindowRelativeMouseMode(engineContext.window, true);
 
         while (SDL_PollEvent( &ev ))
         {
@@ -785,6 +810,8 @@ int main( int argc, char **argv ) {
                     case SDLK_KP_ENTER:
                         if (currentMenuSelection == 0) // "Play"
                         {
+                   
+
                             startNewMuseumRun( engineContext, levels );
                             currentState = STATE_GAME;
                         }
@@ -894,6 +921,13 @@ int main( int argc, char **argv ) {
                         nudgeSelectedEditorModel( dx, dy, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
                     }
                     continue;
+                }
+                else if (!g_levelEditorMode && ev.type == SDL_EVENT_MOUSE_MOTION) {
+                    const float lookSpeedY = 1.0f; // Adjust sensitivity as needed
+                    engineContext.pitchOffset -= ev.motion.yrel * lookSpeedY;
+
+                    // Clamp the pitch to prevent the camera from flipping or shearing too far
+                    engineContext.pitchOffset = std::clamp(engineContext.pitchOffset, -250.0f, 250.0f);
                 }
 
                 if (g_levelEditorMode && ev.type == SDL_EVENT_MOUSE_WHEEL)
@@ -1792,6 +1826,8 @@ int main( int argc, char **argv ) {
             }
         }
 
+ 
+
         if (currentState == STATE_GAME)
         {
             const bool *ks = SDL_GetKeyboardState( nullptr );
@@ -1800,13 +1836,13 @@ int main( int argc, char **argv ) {
             {
                 ms += 0.8f * dt;
             }
-            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive || g_solventCoolerEntryActive || g_redPigmentDispenseCutsceneActive) ms = 0.0f;
+            if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ms = 0.0f;
             if (g_solventLabUnlockCutsceneActive) ms = 0.0f;
             float ts = TURN_SPEED * dt;
             if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
-                float ang = -ts;
+              /*  float ang = -ts;
                 engineContext.yaw += ang;
                 if (engineContext.yaw > 360)
                 {
@@ -1819,10 +1855,11 @@ int main( int argc, char **argv ) {
                 // re-derive plane to stay perfectly perpendicular and correct FOV
                 engineContext.planeX = -engineContext.directionY * FOV_TAN;
                 engineContext.planeY = engineContext.directionX * FOV_TAN;
+                */
             }
             if (ks[ SDL_SCANCODE_RIGHT ])
             {
-                float ang = ts;
+                /*float ang = ts;
                 engineContext.yaw += ang;
                 if (engineContext.yaw < 0)
                 {
@@ -1833,7 +1870,7 @@ int main( int argc, char **argv ) {
                 engineContext.directionX = ndx;
                 engineContext.directionY = ndy;
                 engineContext.planeX = -engineContext.directionY * FOV_TAN;
-                engineContext.planeY = engineContext.directionX * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;*/
             }
             // move: W/S
             float nx = engineContext.positionX, ny = engineContext.positionY;
@@ -1852,15 +1889,45 @@ int main( int argc, char **argv ) {
             // strafe: A/D
             if (ks[ SDL_SCANCODE_A ])
             {
-                nx += engineContext.directionY * ms;
-                ny += -engineContext.directionX * ms;
-                engineContext.isMoving = true;
+
+                float ang = -ts;
+                engineContext.yaw += ang;
+                if (engineContext.yaw > 360)
+                {
+                    engineContext.yaw = 0;
+                }
+                float ndx = engineContext.directionX * std::cos(ang) - engineContext.directionY * std::sin(ang);
+                float ndy = engineContext.directionX * std::sin(ang) + engineContext.directionY * std::cos(ang);
+                engineContext.directionX = ndx;
+                engineContext.directionY = ndy;
+                // re-derive plane to stay perfectly perpendicular and correct FOV
+                engineContext.planeX = -engineContext.directionY * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;
+
+
+               // nx += engineContext.directionY * ms;
+                //ny += -engineContext.directionX * ms;
+               // engineContext.isMoving = true;
             }
             if (ks[ SDL_SCANCODE_D ])
             {
-                nx += -engineContext.directionY * ms;
-                ny += engineContext.directionX * ms;
-                engineContext.isMoving = true;
+
+                float ang = ts;
+                engineContext.yaw += ang;
+                if (engineContext.yaw < 0)
+                {
+                    engineContext.yaw = 360;
+                }
+                float ndx = engineContext.directionX * std::cos(ang) - engineContext.directionY * std::sin(ang);
+                float ndy = engineContext.directionX * std::sin(ang) + engineContext.directionY * std::cos(ang);
+                engineContext.directionX = ndx;
+                engineContext.directionY = ndy;
+                engineContext.planeX = -engineContext.directionY * FOV_TAN;
+                engineContext.planeY = engineContext.directionX * FOV_TAN;
+
+                //nx += -engineContext.directionY * ms;
+               // ny += engineContext.directionX * ms;
+               // engineContext.isMoving = true;
             }
             auto pass = [&]( float x, float y ) {
                 int mx = int( x ), my = int( y );
@@ -2081,6 +2148,15 @@ int main( int argc, char **argv ) {
     SDL_Quit();
     return 0;
 }
+
+
+
+
+
+
+
+
+
 
 
 

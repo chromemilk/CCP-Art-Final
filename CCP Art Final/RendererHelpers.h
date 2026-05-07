@@ -1314,7 +1314,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
     std::string line = "";
     int currentY = y;
     int charW = 4; // Width of your tiny font characters
-    int lineH = 10; // Spacing between lines
+    int lineH = 12; // Spacing between lines
 
     for (size_t i = 0; i <= text.length(); ++i)
     {
