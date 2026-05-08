@@ -1857,6 +1857,13 @@ static void initCaveFinalObjective(Engine& engineContext) {
     g_caveQuizActive = false;
     g_caveQuizPassed = false;
     g_caveQuizQuestionIndex = 0;
+    g_caveTimeoutActive = false;
+    g_caveTimeoutTimer = 0.0f;
+    g_caveTimeoutStage = 0;
+    g_caveTimeoutFlashTimer = 0.0f;
+    g_caveTimeoutTypedChars = 0;
+    g_caveTimeoutTypingAccumulator = 0.0f;
+    g_caveTimeoutCreditsTimer = 0.0f;
     initCaveQuiz();
 }
 
@@ -1923,6 +1930,13 @@ g_codeEntryBuffer.clear();
     g_solventLabMonsterModelIndex = -1;
     g_museumPuzzleInitialized = false;
     g_caveTimerActive = false;
+    g_caveTimeoutActive = false;
+    g_caveTimeoutTimer = 0.0f;
+    g_caveTimeoutStage = 0;
+    g_caveTimeoutFlashTimer = 0.0f;
+    g_caveTimeoutTypedChars = 0;
+    g_caveTimeoutTypingAccumulator = 0.0f;
+    g_caveTimeoutCreditsTimer = 0.0f;
     g_restorationWingUnlocked = false;
     g_directorDeskUnlocked = false;
     g_revolverPickup = {};
@@ -3406,7 +3420,6 @@ void updateMusicStream() {
 
 void renderPolishedPlacard(Engine& engineContext) {
     if (!engineContext.placardOpen || engineContext.openArtId < 0) return;
-    if (engineContext.openArtId >= (int)engineContext.artworks.size()) return;
 
     int artIndex = -1;
     for (size_t i = 0; i < engineContext.artworks.size(); ++i)
@@ -3675,7 +3688,7 @@ static void renderCaveHUD( Engine &engineContext ) {
     int mins = (int)g_caveTimerSeconds / 60;
     int secs = (int)g_caveTimerSeconds % 60;
     char buf[ 32 ];
-    snprintf( buf, sizeof( buf ), "Memory Left %02d:%02d", mins, secs );
+    snprintf( buf, sizeof( buf ), "Escape %02d:%02d", mins, secs );
     drawString16x16( engineContext, x + 17, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
 }
 
@@ -4127,6 +4140,129 @@ static void renderLevelEditorOverlay( Engine &engineContext ) {
     drawStringTinyScaled( engineContext, x + 12, y + 88, "F2 TO EXIT [ ] CYCLE ASSET ENTER PLACE TAB SELECT DEL DELETE", rgb( 170, 170, 190 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 104, "MOUSE MOVE X/Y  WHEEL Z  |  WASD X/Y  R/F Z  Q/E YAW  Z/X PITCH  C/V ROLL  -/= SIZE", rgb( 170, 170, 190 ), 1, 1, 1, false );
     drawStringTinyScaled( engineContext, x + 12, y + 120, "CTRL+S SAVE TO " + g_currentEditorModelsFile + " (current level)", rgb( 170, 170, 190 ), 1, 1, 1, false );
+}
+
+
+static void renderCaveTimeoutEndingScreen(Engine& engineContext) {
+    drawTextBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(0, 0, 0), rgb(0, 0, 0));
+
+    static float localSequenceTimer = 0.0f;
+
+    if (g_caveTimeoutStage == 1) {
+        // Reset our local timer during the flash so it starts fresh every time
+        localSequenceTimer = 0.0f;
+
+        const float flashP = std::clamp(g_caveTimeoutFlashTimer / std::max(0.001f, kCaveTimeoutFlashDuration), 0.0f, 1.0f);
+        const float alpha = std::clamp(1.0f - flashP, 0.0f, 1.0f);
+        drawTranslucentBox(engineContext, 0, 0, RENDER_W, RENDER_H, rgb(255, 255, 255), alpha);
+        return;
+    }
+
+    // Advance the local timer. 
+    localSequenceTimer += 0.5f;
+    int clock = (int)localSequenceTimer;
+
+    // Colors
+    const Uint32 ink = rgb(210, 210, 210);
+    const Uint32 creditsInk = rgb(150, 160, 180);
+    const Uint32 statueInk = rgb(110, 115, 125);
+	const Uint32 finalLineInk = rgb(255, 0, 0);
+
+    int topLineLen = (int)g_caveTimeoutLine.size();
+    int topVisible = std::clamp(clock, 0, topLineLen);
+    if (topVisible > 0) {
+        std::string typedTopLine = g_caveTimeoutLine.substr(0, topVisible);
+        drawString16x16(engineContext, 40, 40, typedTopLine, ink, RENDER_W - 80, 1, 1, false);
+    }
+    clock -= topLineLen; // Subtract to hold the sequence until this line finishes
+
+    std::vector<std::string> statueArt = {
+       "            *    .  *       ",
+       "      .  *    *    *   .   ",
+       "   *     .       .    *    ",
+       "        )  *  *  *  (      ",
+       "       .--\"\"\"\"\"--. ",
+       "      /  .-. .-.  \\       ",
+       "     |  (o ) (o )  |      ",
+       "      \\   '---'   /       ",
+       "       '-.___.-'          ",
+       "          |||             ",
+       "    _____||||____         ",
+       "   /    |||||    \\       ",
+       "  / \\   | | |   / \\    ",
+       " |   |  |   |  |   |      ",
+       "o|   |  |   |  |   |o     ",
+       "|    \\__|___|__/    |     ",
+       " \\      [___]      /      ",
+       "  \\    /     \\    /      ",
+       "   \\  / ,   . \\  /       ",
+       "    \\/  |   |  \\/        ",
+       "         |   |             ",
+       "        /|   |\\           ",
+       "       /_|___|_\\          ",
+       "  ___________________     ",
+       " |===================|    ",
+       " |       Y O U       |   ",
+       " |===================|    ",
+       "_|___________________|_   "
+    };
+
+    int statueY = 100;
+    int statueX = 40;
+    for (const auto& line : statueArt) {
+        int lineLen = (int)line.size();
+        int visible = std::clamp(clock, 0, lineLen);
+
+        if (visible > 0) {
+            std::string typedLine = line.substr(0, visible);
+            drawStringTinyScaled(engineContext, statueX, statueY, typedLine, statueInk, 2, 1, 1, false);
+        }
+
+        statueY += 12;
+        clock -= lineLen;
+    }
+
+    std::vector<std::string> credits = {
+        "CREDITS",
+        "Lines of code: 18,000",
+        "Hours: 200 (8 months)",
+        "Total Assets: 148",
+        "Project Size: 18.9 GB",
+        "Total Music: 6",
+        "Total SFX: 11",
+        "Play Time: 20-40 Mins",
+        "",
+        "Special Thanks:",
+        "Google Gemini 3.1 Pro (coding)",
+        "OpenAI ChatGPT-Codex (coding)"
+    };
+
+    int creditX = RENDER_W / 2 + 30;
+    int creditY = 105;
+    for (const auto& line : credits) {
+        int lineLen = (int)line.size();
+        // Add a small extra delay budget for empty strings so it pauses briefly on blanks
+        if (lineLen == 0) lineLen = 5;
+
+        int visible = std::clamp(clock, 0, lineLen);
+        if (visible > 0) {
+            std::string typedLine = line.substr(0, visible);
+            drawStringTinyScaled(engineContext, creditX, creditY, typedLine, creditsInk, 2, 1, 1, false);
+        }
+
+        creditY += 18;
+        clock -= lineLen;
+    }
+
+    std::string finalSentence = "You are finally ready for display.";
+    int finalLen = (int)finalSentence.size();
+    int finalVisible = std::clamp(clock, 0, finalLen);
+
+    if (finalVisible > 0) {
+        std::string typedFinal = finalSentence.substr(0, finalVisible);
+        int finalX = (RENDER_W / 2) - (finalSentence.size() * 4); // Basic centering calculation
+        drawString16x16(engineContext, finalX - 90, RENDER_H - 80, typedFinal, finalLineInk, RENDER_W, 1, 1, false);
+    }
 }
 
 static void renderEndingScreen( Engine &engineContext ) {

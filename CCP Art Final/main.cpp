@@ -75,6 +75,16 @@ static bool g_caveQuizActive = false;
 static bool g_caveQuizPassed = false;
 static int g_caveQuizQuestionIndex = 0;
 static std::vector<CaveQuizQuestion> g_caveQuiz;
+static bool g_caveTimeoutActive = false;
+static float g_caveTimeoutTimer = 0.0f;
+static constexpr float kCaveTimeoutDuration = 10.0f;
+static int g_caveTimeoutStage = 0;
+static float g_caveTimeoutFlashTimer = 0.0f;
+static constexpr float kCaveTimeoutFlashDuration = 0.85f;
+static std::string g_caveTimeoutLine = "Time's up. There was never an escape, thank you for letting go";
+static size_t g_caveTimeoutTypedChars = 0;
+static float g_caveTimeoutTypingAccumulator = 0.0f;
+static float g_caveTimeoutCreditsTimer = 0.0f;
 static std::vector<MindTrapPhase> g_mindTrapPhases;
 static bool g_mindTrapActive = false;
 static bool g_mindTrapTriggerConsumed = false;
@@ -125,7 +135,7 @@ static float g_redPigmentDispenseBaseYaw = 0.0f;
 static bool g_restorationWingUnlocked = false;
 static bool g_wakeCutsceneActive = false;
 static float g_wakeCutsceneTimer = 0.0f;
-static constexpr float kWakeCutsceneDuration = 14.35f;
+static constexpr float kWakeCutsceneDuration = 11.35f;
 static int g_wakeCutsceneStage = 0;
 static float g_wakeCutsceneStageTimer = 0.0f;
 static float g_wakeCutsceneInitialYaw = 0.0f;
@@ -245,6 +255,90 @@ static void clearPuzzleState();
 
 #include "GameplaySystems.h"
 #include "GameplayUiRendering.h"
+
+static void applyCaveTimeoutEffect( Engine &engineContext, float progress ) {
+    progress = std::clamp( progress, 0.0f, 1.0f );
+    if (progress <= 0.0f) return;
+
+    const float desat = std::clamp( progress * 1.1f, 0.0f, 1.0f );
+    const float staticAmp = std::clamp( 0.08f + progress * 0.42f, 0.08f, 0.55f );
+    const float fade = std::clamp( 1.0f - progress, 0.0f, 1.0f );
+    const Uint32 timeSeed = SDL_GetTicks();
+
+    for (int y = 0; y < RENDER_H; ++y)
+    {
+        for (int x = 0; x < RENDER_W; ++x)
+        {
+            const int idx = y * RENDER_W + x;
+            const Uint32 c = engineContext.backbuffer[ idx ];
+            float r = float( (c >> 16) & 255 );
+            float g = float( (c >> 8) & 255 );
+            float b = float( c & 255 );
+            const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+
+            r = r * (1.0f - desat) + lum * desat;
+            g = g * (1.0f - desat) + lum * desat;
+            b = b * (1.0f - desat) + lum * desat;
+
+            const Uint32 noiseSeed = (Uint32(x) * 73856093u) ^ (Uint32(y) * 19349663u) ^ (timeSeed * 83492791u);
+            const float noise = (float( noiseSeed & 255 ) / 255.0f - 0.5f) * 2.0f;
+            const float staticOffset = noise * 255.0f * staticAmp;
+
+            r = (r + staticOffset) * fade;
+            g = (g + staticOffset) * fade;
+            b = (b + staticOffset) * fade;
+
+            engineContext.backbuffer[ idx ] = rgb(
+                Uint8( std::clamp( r, 0.0f, 255.0f ) ),
+                Uint8( std::clamp( g, 0.0f, 255.0f ) ),
+                Uint8( std::clamp( b, 0.0f, 255.0f ) ) );
+        }
+    }
+}
+
+static void updateCaveTimeoutEndingSequence( float dt ) {
+    if (g_caveTimeoutStage == 1)
+    {
+        g_caveTimeoutFlashTimer += dt;
+        if (g_caveTimeoutFlashTimer >= kCaveTimeoutFlashDuration)
+        {
+            g_caveTimeoutFlashTimer = kCaveTimeoutFlashDuration;
+            g_caveTimeoutStage = 2;
+            g_caveTimeoutTypedChars = 0;
+            g_caveTimeoutTypingAccumulator = 0.0f;
+            g_caveTimeoutCreditsTimer = 0.0f;
+        }
+        return;
+    }
+
+    if (g_caveTimeoutStage == 2)
+    {
+        auto charCost = []( char c ) -> float {
+            if (c == ' ') return 0.45f;
+            if (c == '.' || c == ',' || c == ':' || c == ';') return 1.7f;
+            if (c == '?' || c == '!') return 2.1f;
+            return 1.0f;
+        };
+
+        g_caveTimeoutTypingAccumulator += dt * 48.0f;
+        while (g_caveTimeoutTypedChars < g_caveTimeoutLine.size())
+        {
+            const float cost = charCost( g_caveTimeoutLine[ g_caveTimeoutTypedChars ] );
+            if (g_caveTimeoutTypingAccumulator < cost) break;
+            ++g_caveTimeoutTypedChars;
+            g_caveTimeoutTypingAccumulator -= cost;
+        }
+
+        if (g_caveTimeoutTypedChars >= g_caveTimeoutLine.size())
+        {
+            g_caveTimeoutCreditsTimer += dt;
+            if (g_caveTimeoutCreditsTimer >= 1.0f)
+            {
+                g_caveTimeoutStage = 3;
+            }
+        }
+    }
+}
 
 int main( int argc, char **argv ) {
     (void)argc; (void)argv;
@@ -384,17 +478,36 @@ int main( int argc, char **argv ) {
         if (currentState == STATE_GAME) 
         {
             g_runElapsedSeconds += dt;
-            if (g_caveTimerActive && !g_caveQuizPassed)
+            if (g_caveTimeoutActive)
+            {
+                g_caveTimeoutTimer += dt;
+                if (g_caveTimeoutTimer >= kCaveTimeoutDuration)
+                {
+                    g_caveTimeoutActive = false;
+                    g_caveTimeoutTimer = 0.0f;
+                    g_caveTimeoutStage = 1;
+                    g_caveTimeoutFlashTimer = 0.0f;
+                    currentState = STATE_ENDING;
+                }
+            }
+            else if (g_caveTimerActive && !g_caveQuizPassed)
             {
                 g_caveTimerSeconds -= dt;
                 if (g_caveTimerSeconds <= 0.0f)
                 {
                     g_caveTimerActive = false;
-                    showAccessPopup( "Time's up.", 4000 );
-                    currentState = STATE_ENDING;
+                    g_caveTimerSeconds = 0.0f;
+                    g_caveTimeoutActive = true;
+                    g_caveTimeoutTimer = 0.0f;
+                    g_caveTimeoutStage = 0;
+                    g_caveTimeoutFlashTimer = 0.0f;
+                    g_caveTimeoutTypedChars = 0;
+                    g_caveTimeoutTypingAccumulator = 0.0f;
+                    g_caveTimeoutCreditsTimer = 0.0f;
                 }
             }
         }
+        updateCaveTimeoutEndingSequence( dt );
         // Input
         SDL_Event ev;
         float actualSpeed = MOVE_SPEED;
@@ -1839,9 +1952,9 @@ int main( int argc, char **argv ) {
                 ms += 0.8f * dt;
             }
             if (g_codeEntryActive || g_notesOpen || g_caveQuizActive || g_levelTransition.active || g_interactionAnim.active || g_levelEditorMode || g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ms = 0.0f;
-            if (g_solventLabUnlockCutsceneActive) ms = 0.0f;
+            if (g_solventLabUnlockCutsceneActive || g_caveTimeoutActive || g_caveTimeoutStage > 0) ms = 0.0f;
             float ts = TURN_SPEED * dt;
-            if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive) ts = 0.0f;
+            if (g_cutsceneController.isCameraLockActive() || g_revolverInspectCutsceneActive || g_wakeCutsceneActive || g_caveTimeoutActive || g_caveTimeoutStage > 0) ts = 0.0f;
             if (ks[ SDL_SCANCODE_LEFT ])
             {
               /*  float ang = -ts;
@@ -2045,11 +2158,19 @@ int main( int argc, char **argv ) {
         {
             render( engineContext, dt );
             applyPostAAMode( engineContext );
+            if (g_caveTimeoutActive && g_caveTimeoutStage == 0)
+            {
+                const float progress = std::clamp( g_caveTimeoutTimer / std::max( 0.001f, kCaveTimeoutDuration ), 0.0f, 1.0f );
+                applyCaveTimeoutEffect( engineContext, progress );
+            }
         }
 
         if (currentState == STATE_GAME)
         {
-            renderGameplayUiPass( engineContext );
+            if (!g_caveTimeoutActive)
+            {
+                renderGameplayUiPass( engineContext );
+            }
         }
         else if (currentState == STATE_MENU)
         {
@@ -2067,7 +2188,10 @@ int main( int argc, char **argv ) {
         }
         else if (currentState == STATE_ENDING)
         {
-            renderEndingScreen( engineContext );
+            if (g_caveTimeoutStage > 0)
+            {
+                renderCaveTimeoutEndingScreen( engineContext );
+            }
         }
         else if (currentState == STATE_MIND_TRAP)
         {
