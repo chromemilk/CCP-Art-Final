@@ -206,5 +206,4 @@ enum GameState
     STATE_GAME,
     STATE_ENDING,
     STATE_MIND_TRAP,
-    STATE_BRIEFING
 };

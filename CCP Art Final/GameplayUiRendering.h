@@ -677,6 +677,7 @@ static void renderCaveQuiz( Engine &engineContext ) {
 
     drawStringTinyScaled( engineContext, x + 16, y + panelH - 22, "Press 1-4 To Answer   ESC To Cancel", rgb( 130, 130, 145 ), 1, 1, 1, false );
 }
+
 static void renderMindTrapInterface(Engine& engineContext) {
     if (!g_mindTrapActive) return;
     if (g_mindTrapPhaseIndex < 0 || g_mindTrapPhaseIndex >= (int)g_mindTrapPhases.size()) return;
@@ -2409,7 +2410,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
         {
             initCaveFinalObjective( engineContext );
             g_caveTimerActive = true;
-            g_caveTimerSeconds = 120.0f;
+            g_caveTimerSeconds = 80.0f;
         }
     }
 
@@ -3667,15 +3668,15 @@ static void renderCaveHUD( Engine &engineContext ) {
 
     int w = 180;
     int h = 40;
-    int x = RENDER_W - w - 10;
+    int x = RENDER_W - w - 15;
     int y = 10;
     drawTextBox( engineContext, x, y, w, h, rgb( 20, 10, 10 ), rgb( 180, 50, 50 ) );
 
     int mins = (int)g_caveTimerSeconds / 60;
     int secs = (int)g_caveTimerSeconds % 60;
     char buf[ 32 ];
-    snprintf( buf, sizeof( buf ), "Time 2 Deletion %02d:%02d", mins, secs );
-    drawString16x16( engineContext, x + 12, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
+    snprintf( buf, sizeof( buf ), "Memory Left %02d:%02d", mins, secs );
+    drawString16x16( engineContext, x + 17, y + 12, buf, rgb( 255, 100, 100 ), w, 1, 1, false );
 }
 
 static void renderDialogueSubtitle( Engine &engineContext ) {
@@ -4134,15 +4135,39 @@ static void renderEndingScreen( Engine &engineContext ) {
     int x = (RENDER_W - w) / 2;
     int y = (RENDER_H - h) / 2;
     drawTextBox( engineContext, x, y, w, h, rgb( 10, 10, 14 ), rgb( 190, 160, 80 ) );
-    drawString16x16( engineContext, x + 20, y + 20, "THE EXHIBIT IS COMPLETE", rgb( 255, 230, 120 ), w - 40, 1, 1, false );
+    drawString16x16( engineContext, x + 20, y + 20, "YOU FAILED TO ESCAPE", rgb( 255, 230, 120 ), w - 40, 1, 1, false );
     int cy = y + 60;
-    cy = drawWrappedText( engineContext, x + 20, cy, "Final note decoded: You are beneath the museum in buried foundation tunnels.", rgb( 220, 220, 220 ), w - 40 );
+    cy = drawWrappedText( engineContext, x + 20, cy, "There was never an escape, it's all in your head. The museum was your brain's last ditch effort at salvation.", rgb( 220, 220, 220 ), w, 2);
     cy += 14;
-    std::string stats = "Art Viewed: " + std::to_string( mesuemObjectives.viewedArtworks.size() ) +
-        "   Notes Found: " + std::to_string( g_notesCollectedRun ) +
-        "   Time: " + std::to_string( int( g_runElapsedSeconds ) ) + "s";
-    drawStringTinyScaled( engineContext, x + 20, cy, stats, rgb( 170, 190, 220 ), 2, 1, 1, false );
-    drawString16x16( engineContext, x + 20, y + h - 34, "[R] Restart   [ESC] Menu", rgb( 210, 210, 210 ), w - 40, 1, 1, false );
+
+    std::vector<std::string> statLines = {
+        "Time: " + std::to_string(int(g_runElapsedSeconds)) + "s",
+        "Total Lines of Code: 15,000",
+        "Total Functions: 10,000",
+        "Hours Spent: 200",
+        "Total 3D Assets: 88",
+        "Total Music Assets: 6",
+        "Total Sound Effects: 11",
+        "Total Art Assets: 20",
+        "Total Sprites and 2D assets: 23",
+        "Total Source Files: 28",
+        "Total Assets: 148",
+        "Total Project Size: 18.9 GB",
+        "Total Files: 14,011",
+        "Total Folders: 1,616",
+        "Accelerated by ChatGPT-Codex and Gemini 1.5 Pro"
+    };
+
+    int currentY = cy;
+    int lineSpacing = 15; 
+
+    for (const std::string& line : statLines) {
+        drawStringTinyScaled(engineContext, x + 20, currentY, line, rgb(170, 190, 220), 2, 1, 1, false);
+        currentY += lineSpacing; // Move the next line down
+    }
+
+    // Draw the footer buttons as before
+    drawString16x16(engineContext, x + 20, y + h - 34, "[R] Restart    [ESC] Menu", rgb(210, 210, 210), w - 40, 1, 1, false);
 }
 
 static int wrapTextureCoord( int value, int size ) {
@@ -4657,7 +4682,7 @@ static void dispatchRasterWorkers(
     } );
 }
 
-static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset ) {
+static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset) {
     if (g_worldModels.empty()) return;
 
     std::vector<float> wallInvDepthBuffer;
@@ -5065,7 +5090,7 @@ static void render( Engine &engineContext, float dt ) {
         // Column geometry
         int lineH = int( RENDER_H / std::max( perpWallDist, 1e-3f ) );
 
-    int bob = half + (int)effectivePitchOffset;
+        int bob = half + (int)effectivePitchOffset;
         int drawStart = std::max( 0, -lineH / 2 + bob );
         int drawEnd = std::min( RENDER_H - 1, lineH / 2 + bob );
         clipTop[ x ] = std::min( clipTop[ x ], drawStart );
@@ -5146,17 +5171,22 @@ static void render( Engine &engineContext, float dt ) {
 
                     float uLocal = (wallX - u0) / std::max(0.0001f, (u1 - u0));
 
+                    float horizon = (RENDER_H / 2.0f) + engineContext.pitchOffset;
+
                     int bandH = std::max(1, int(lineH * art.vHeight));
-                    int bandCenter = RENDER_H / 2 + int( (art.vCenter - 0.5f) * lineH );
-                    int bandStart = std::clamp( bandCenter - bandH / 2, 0, RENDER_H - 1 );
-                    int bandEnd = std::clamp( bandStart + bandH - 1, 0, RENDER_H - 1 );
+                    int bandCenter = int(horizon + (art.vCenter - 0.5f) * lineH);
+                    int bandStart = bandCenter - bandH / 2;
+                    int bandEnd = bandStart + bandH - 1;
+
+                    int drawStart = std::clamp(bandStart, 0, RENDER_H - 1);
+                    int drawEnd = std::clamp(bandEnd, 0, RENDER_H - 1);
 
                     float uLeftFrameEdge = FRAME_U;
                     float uRightFrameEdge = 1.0f - FRAME_U;
                     float uLeftMatEdge = FRAME_U + MAT_U;
                     float uRightMatEdge = 1.0f - (FRAME_U + MAT_U);
 
-                    for (int y = bandStart; y <= bandEnd; ++y)
+                    for (int y = drawStart; y <= drawEnd; ++y)
                     {
                         float vLocal = (y - bandStart) / float(std::max(1, bandH - 1));
                         float vTopFrameEdge = FRAME_V;

@@ -206,8 +206,7 @@ struct Engine
     float planeX = -directionY * FOV_TAN;
     float planeY = directionX * FOV_TAN;
 	float pitchOffset = 0.0f;
-	float pitchOffsetShear = 0.0f;
-    float yawOffsetShear = 0.0f;
+    float yawOffset = 0.0f;
     std::vector<float> zbuffer; // SSAO
 
     bool showHelp = true;

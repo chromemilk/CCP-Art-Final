@@ -326,7 +326,7 @@ static bool pointBlockedByWorldModel( float px, float py, float playerRadius ) {
 
 #include "ModelLoadingTools.h"
 
-static float g_caveTimerSeconds = 120.0f;
+static float g_caveTimerSeconds = 80.0f;
 static bool g_caveTimerActive = false;
 static constexpr float kUpperEntryX = 20.6f;
 static constexpr float kUpperEntryY = 9.3f;

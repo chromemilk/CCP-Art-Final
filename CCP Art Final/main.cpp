@@ -345,7 +345,7 @@ int main( int argc, char **argv ) {
         startWakeCutscene( engineContext );
     }
 
-   int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=AA, 5=quality, 6=gpu mode, 7=multithreading, 8=school, 9=quit
+    int currentMenuSelection = 0; // 0=Play, 1=Music, 2=Volume, 3=viewbobbing, 4=AA, 5=quality, 6=gpu mode, 7=multithreading, 8=school, 9=quit
     const int numMenuOptions = 10;
     float musicVolume = getMusicVolume(); 
     g_notesCollectedRun = 0;
@@ -391,7 +391,7 @@ int main( int argc, char **argv ) {
                 {
                     g_caveTimerActive = false;
                     showAccessPopup( "Time's up.", 4000 );
-                    startNewMuseumRun( engineContext, levels );
+                    currentState = STATE_ENDING;
                 }
             }
         }
@@ -923,10 +923,9 @@ int main( int argc, char **argv ) {
                     continue;
                 }
                 else if (!g_levelEditorMode && ev.type == SDL_EVENT_MOUSE_MOTION) {
-                    const float lookSpeedY = 1.0f; // Adjust sensitivity as needed
+                    const float lookSpeedY = 1.0f; 
                     engineContext.pitchOffset -= ev.motion.yrel * lookSpeedY;
 
-                    // Clamp the pitch to prevent the camera from flipping or shearing too far
                     engineContext.pitchOffset = std::clamp(engineContext.pitchOffset, -250.0f, 250.0f);
                 }
 
@@ -1632,6 +1631,9 @@ int main( int argc, char **argv ) {
                                 engineContext.statueChatStartTick = SDL_GetTicks();
                             }
                         }
+                    }
+                    else if (ev.key.scancode == SDL_SCANCODE_M) {
+                        currentState = STATE_ENDING;
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
