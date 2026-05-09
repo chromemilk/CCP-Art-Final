@@ -22,9 +22,11 @@ enum MusicTypes
 namespace MusicOptions
 {
 	std::vector<std::string> jazzTracks = {
-		"Scary_Jazz.mp3",
+		"St_James_Infirmary_Blues.mp3",
 		"Misty_Laufey.mp3",
+		"Scary_Jazz.mp3",
 		"Nocture_Interlude_Laufey.mp3",
+		"Midnight_stars_and_you.mp3",
 		"A_Night_To_Remember_Laufey.mp3",
 		"I_Wish_You_Love_Laufey.mp3",
 	};
@@ -265,7 +267,7 @@ void playNextTrack() {
 		return;
 	}
 
-	music.setSpatializationEnabled(false);
+	music.setSpatializationEnabled(true);
 	applyMusicMix();
 	music.play();
 }
@@ -328,4 +330,39 @@ void playPaperRustle(const std::string& baseMusicDirectory) {
 		playSFX(soundPath);
 		break;
 	}
+}
+
+static sf::SoundBuffer g_heartbeatBuffer;
+static bool g_heartbeatBufferReady = false;
+static std::shared_ptr<sf::Sound> g_heartbeatSound;
+static std::string g_heartbeatBaseDirectory;
+
+static void stopHeartbeat() {
+	if (g_heartbeatSound)
+	{
+		g_heartbeatSound->stop();
+		g_heartbeatSound.reset();
+	}
+}
+
+static void playHeartbeat(const std::string& baseMusicDirectory) {
+	const std::string soundPath = baseMusicDirectory + "\\heartbeat.wav";
+
+	if (!g_heartbeatBufferReady || g_heartbeatBaseDirectory != baseMusicDirectory)
+	{
+		g_heartbeatBaseDirectory = baseMusicDirectory;
+		g_heartbeatBufferReady = g_heartbeatBuffer.loadFromFile(soundPath);
+	}
+
+	if (!g_heartbeatBufferReady)
+	{
+		return;
+	}
+
+	stopHeartbeat();
+
+	g_heartbeatSound = std::make_shared<sf::Sound>(g_heartbeatBuffer);
+	g_heartbeatSound->setLooping(true);
+	g_heartbeatSound->setVolume(100.0f);
+	g_heartbeatSound->play();
 }

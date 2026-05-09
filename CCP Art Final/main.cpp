@@ -1,10 +1,10 @@
 #include "GameEngine.h"
-#include "GameEngine.h"
 #include "RendererHelpers.h"
 #include "PhysicsHelpers.h"
 #include "MusicSystem.h"
 #include "GameDataTypes.h"
 #include "DialogueSystem.h"
+
 #include <iostream>
 #include <filesystem> 
 #include <thread>
@@ -256,6 +256,289 @@ static void clearPuzzleState();
 #include "GameplaySystems.h"
 #include "GameplayUiRendering.h"
 
+static float g_randomFootstepTimer = 0.0f;
+static constexpr float kRandomFootstepCheckInterval = 30.0f;  // Check every 30 seconds
+static constexpr float kRandomFootstepChance = 0.40f;          // 40% chance
+
+
+static void updateRandomFootsteps(Engine& engineContext, float dt, const std::string& baseLevelFolder) {
+    if (engineContext.currentLevel != Levels::MUSEUM && engineContext.currentLevel != Levels::MUSEUM_UPPER) {
+        g_randomFootstepTimer = 0.0f;
+        return;
+    }
+
+    g_randomFootstepTimer += dt;
+    if (g_randomFootstepTimer < kRandomFootstepCheckInterval) {
+        return;
+    }
+
+    g_randomFootstepTimer = 0.0f;
+
+    // 40% chance to play footstep
+    const float roll = float(std::rand()) / float(RAND_MAX);
+    if (roll > kRandomFootstepChance) {
+        return;
+    }
+
+    // Pick random location on map
+    if (engineContext.map.width <= 0 || engineContext.map.height <= 0) {
+        return;
+    }
+
+    int randomTx = std::rand() % engineContext.map.width;
+    int randomTy = std::rand() % engineContext.map.height;
+
+    // Make sure tile is walkable
+    const int tile = engineContext.map.tiles[randomTy * engineContext.map.width + randomTx];
+    if (tile != 0) {
+        return;  // Wall or obstacle
+    }
+
+    // Pick a location near the tile that's far from the player
+    const float randomX = float(randomTx) + 0.3f + (float(std::rand()) / float(RAND_MAX)) * 0.4f;
+    const float randomY = float(randomTy) + 0.3f + (float(std::rand()) / float(RAND_MAX)) * 0.4f;
+
+    // Only play if far enough from player
+    const float dx = engineContext.positionX - randomX;
+    const float dy = engineContext.positionY - randomY;
+    const float distSq = dx * dx + dy * dy;
+    if (distSq < (8.0f * 8.0f)) {
+        return;  // Too close to player
+    }
+
+    // Play directional footstep sound at this location
+    playFootstep(baseLevelFolder);
+}
+
+static void registerWepingStatue(int modelIndex);
+
+static sf::SoundBufferRecorder g_volumeSpikeRecorder;
+static float g_lastAverageAmplitude = 0.0f;
+static float g_volumeSpikeCheckTimer = 0.0f;
+static constexpr float kVolumeSpikeCheckInterval = 0.5f;  // Check every 0.5 seconds
+static constexpr float kVolumeSpikeThreshold = 0.35f;     // Spike threshold (normalized 0-1)
+static constexpr float kVolumeSpikeBaselineMultiplier = 1.8f;
+
+static void updateActiveRecording(Engine& engineContext, float dt) {
+    if (!config::autoMusicVolume) {
+        return;
+    }
+
+    // Start recording if not already
+    static bool recordingStarted = false;
+    if (!recordingStarted && sf::SoundBufferRecorder::isAvailable()) {
+        if (g_volumeSpikeRecorder.start(22050)) {
+            recordingStarted = true;
+        }
+    }
+
+    if (!recordingStarted) {
+        return;
+    }
+
+    g_volumeSpikeCheckTimer += dt;
+    if (g_volumeSpikeCheckTimer < kVolumeSpikeCheckInterval) {
+        return;
+    }
+
+    g_volumeSpikeCheckTimer = 0.0f;
+
+    const sf::SoundBuffer& buf = g_volumeSpikeRecorder.getBuffer();
+    const auto* samples = buf.getSamples();
+    size_t count = buf.getSampleCount();
+
+    if (!samples || count == 0) {
+        return;
+    }
+
+    // Calculate RMS of recent samples
+    const size_t sampleWindow = std::min(size_t(4410), count);  // ~0.2 seconds at 22050 Hz
+    const size_t startIdx = count > sampleWindow ? count - sampleWindow : 0;
+
+    double sumSq = 0.0;
+    for (size_t i = startIdx; i < count; ++i) {
+        double s = double(samples[i]) / 32768.0;
+        sumSq += s * s;
+    }
+    double rms = std::sqrt(sumSq / double(sampleWindow));
+    float currentAmplitude = float(std::clamp(rms, 0.0, 1.0));
+
+    // Detect spike: current is significantly higher than baseline
+    const bool isSpike = currentAmplitude > (g_lastAverageAmplitude * kVolumeSpikeBaselineMultiplier) &&
+        currentAmplitude > kVolumeSpikeThreshold;
+
+    // Smooth average
+    g_lastAverageAmplitude = g_lastAverageAmplitude * 0.7f + currentAmplitude * 0.3f;
+
+    if (isSpike) {
+        // Play dialogue about being too loud
+        const bool canSpeak =
+            !g_dialogue.isActive() &&
+            !g_cutsceneController.isCameraLockActive() &&
+            !g_revolverInspectCutsceneActive &&
+            !g_wakeCutsceneActive &&
+            !g_codeEntryActive &&
+            !g_notesOpen &&
+            !g_caveQuizActive;
+
+        if (canSpeak) {
+            g_dialogue.start({ { "I'm being too loud, it might hear me", 3.0f } });
+        }
+    }
+}
+
+
+
+
+static float g_doorCreakTimer = 0.0f;
+static constexpr float kDoorCreakCheckInterval = 120.0f;  // 2 minutes
+static constexpr float kDoorCreakChance = 0.30f;           // 30% chance
+
+static void updateRandomDoorCreaks(Engine& engineContext, float dt, const std::string& baseLevelFolder) {
+    if (engineContext.currentLevel != Levels::MUSEUM && engineContext.currentLevel != Levels::MUSEUM_UPPER) {
+        g_doorCreakTimer = 0.0f;
+        return;
+    }
+
+    g_doorCreakTimer += dt;
+    if (g_doorCreakTimer < kDoorCreakCheckInterval) {
+        return;
+    }
+
+    g_doorCreakTimer = 0.0f;
+
+    // 30% chance to play door creak
+    const float roll = float(std::rand()) / float(RAND_MAX);
+    if (roll > kDoorCreakChance) {
+        return;
+    }
+
+    playDoorCreak(baseLevelFolder);
+}
+
+
+
+
+static void updatePanicAttack(Engine& engineContext, float dt) {
+    if (!g_panicAttack.active)
+    {
+        return;
+    }
+
+    g_panicAttack.timer += dt;
+    const float progress = std::clamp(g_panicAttack.timer / g_panicAttack.duration, 0.0f, 1.0f);
+
+    if (progress >= 1.0f)
+    {
+        g_panicAttack.active = false;
+        g_panicAttack.blurIntensity = 0.0f;
+        stopHeartbeat();
+        return;
+    }
+
+    const float rampUp = std::clamp(progress / 0.18f, 0.0f, 1.0f);
+    const float rampDown = std::clamp((1.0f - progress) / 0.20f, 0.0f, 1.0f);
+    g_panicAttack.blurIntensity = std::min(rampUp, rampDown) * kPanicAttackBlurMax;
+}
+
+
+
+static float getPanicAttackBlurIntensity() {
+    return g_panicAttack.blurIntensity;
+}
+
+
+static void updateHorrorElements(Engine& engineContext, float dt, const std::string& baseLevelFolder) {
+    updateRandomFootsteps(engineContext, dt, baseLevelFolder);
+    updateActiveRecording(engineContext, dt);
+    updateWepingStatues(engineContext, dt);
+    updateRandomDoorCreaks(engineContext, dt, baseLevelFolder);
+    updatePanicAttack(engineContext, dt);
+}
+
+static void applyPanicAttackBlur(Engine& engineContext, float intensity) {
+    if (intensity <= 0.001f) return;
+    if (engineContext.backbuffer.size() != size_t(RENDER_W * RENDER_H)) return;
+
+    const float normalized = std::clamp(intensity / std::max(0.001f, kPanicAttackBlurMax), 0.0f, 1.0f);
+    const int radius = std::clamp(1 + int(std::round(normalized * 3.0f)), 1, 4);
+    const float mix = std::clamp(0.22f + normalized * 0.58f, 0.0f, 0.80f);
+
+    static std::vector<Uint32> scratch;
+    static std::vector<Uint32> temp;
+
+    scratch = engineContext.backbuffer;
+    temp.resize(scratch.size());
+
+    auto sample = [](const std::vector<Uint32>& src, int x, int y) -> Uint32 {
+        x = std::clamp(x, 0, RENDER_W - 1);
+        y = std::clamp(y, 0, RENDER_H - 1);
+        return src[y * RENDER_W + x];
+        };
+
+    for (int y = 0; y < RENDER_H; ++y)
+    {
+        for (int x = 0; x < RENDER_W; ++x)
+        {
+            float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f, sumW = 0.0f;
+            for (int ox = -radius; ox <= radius; ++ox)
+            {
+                const float w = float(radius + 1 - std::abs(ox));
+                const Uint32 c = sample(scratch, x + ox, y);
+                sumR += float((c >> 16) & 255) * w;
+                sumG += float((c >> 8) & 255) * w;
+                sumB += float(c & 255) * w;
+                sumW += w;
+            }
+
+            const int idx = y * RENDER_W + x;
+            temp[idx] = rgb(
+                Uint8(std::clamp(sumR / std::max(0.001f, sumW), 0.0f, 255.0f)),
+                Uint8(std::clamp(sumG / std::max(0.001f, sumW), 0.0f, 255.0f)),
+                Uint8(std::clamp(sumB / std::max(0.001f, sumW), 0.0f, 255.0f)));
+        }
+    }
+
+    for (int y = 0; y < RENDER_H; ++y)
+    {
+        for (int x = 0; x < RENDER_W; ++x)
+        {
+            float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f, sumW = 0.0f;
+            for (int oy = -radius; oy <= radius; ++oy)
+            {
+                const float w = float(radius + 1 - std::abs(oy));
+                const Uint32 c = sample(temp, x, y + oy);
+                sumR += float((c >> 16) & 255) * w;
+                sumG += float((c >> 8) & 255) * w;
+                sumB += float(c & 255) * w;
+                sumW += w;
+            }
+
+            const int idx = y * RENDER_W + x;
+            const Uint32 blurred = rgb(
+                Uint8(std::clamp(sumR / std::max(0.001f, sumW), 0.0f, 255.0f)),
+                Uint8(std::clamp(sumG / std::max(0.001f, sumW), 0.0f, 255.0f)),
+                Uint8(std::clamp(sumB / std::max(0.001f, sumW), 0.0f, 255.0f)));
+
+            const Uint32 original = scratch[idx];
+            const float invMix = 1.0f - mix;
+
+            const float orR = float((original >> 16) & 255);
+            const float orG = float((original >> 8) & 255);
+            const float orB = float(original & 255);
+
+            const float blR = float((blurred >> 16) & 255);
+            const float blG = float((blurred >> 8) & 255);
+            const float blB = float(blurred & 255);
+
+            engineContext.backbuffer[idx] = rgb(
+                Uint8(std::clamp(orR * invMix + blR * mix, 0.0f, 255.0f)),
+                Uint8(std::clamp(orG * invMix + blG * mix, 0.0f, 255.0f)),
+                Uint8(std::clamp(orB * invMix + blB * mix, 0.0f, 255.0f)));
+        }
+    }
+}
+
 static void applyCaveTimeoutEffect( Engine &engineContext, float progress ) {
     progress = std::clamp( progress, 0.0f, 1.0f );
     if (progress <= 0.0f) return;
@@ -339,6 +622,9 @@ static void updateCaveTimeoutEndingSequence( float dt ) {
         }
     }
 }
+
+
+
 
 int main( int argc, char **argv ) {
     (void)argc; (void)argv;
@@ -562,6 +848,7 @@ int main( int argc, char **argv ) {
         {
             updateSolventLabUnlockCutscene( engineContext, currentState, dt );
             updateRedPigmentDispenseCutscene( engineContext, dt );
+            updateHorrorElements( engineContext, dt, levels[ engineContext.currentLevel ].folder );
         }
 
         g_revolverShotCooldown = std::max( 0.0f, g_revolverShotCooldown - dt );
@@ -1569,7 +1856,7 @@ int main( int argc, char **argv ) {
                         {
                             if (g_generatorFueled)
                             {
-                                showAccessPopup( "Generator is fueled.", 1200 );
+                               // showAccessPopup( "Generator is fueled.", 1200 );
                                 continue;
                             }
 
@@ -1600,11 +1887,12 @@ int main( int argc, char **argv ) {
                                 g_worldModels[ g_generatorModelIndex ].tint = rgb( 225, 225, 205 );
                             }
 
-                            showAccessPopup( "Power has been restored to all levels", 2500 );
                             triggerInteractionAnim( InteractionAnimType::KEY_USE, "RESTORING POWER", 0.85f );
                             g_dialogue.start( {
                                 {"That should get the lights back on", 2.1f}
                                 } );
+                            showAccessPopup("Power has been restored to all levels", 3200);
+
                             continue;
                         }
 
@@ -1892,11 +2180,15 @@ int main( int argc, char **argv ) {
                     {
                         handleLevelChange( engineContext, levels, static_cast<Levels>((static_cast<int>(engineContext.currentLevel) + 1) % static_cast<int>(Levels::COUNT)));
                     }
-                    else if (ev.key.scancode == SDL_SCANCODE_L)
-                    {
-                        startMindTrapSequence(engineContext);
-                        currentState = STATE_MIND_TRAP;
-                    }
+             //       else if (ev.key.scancode == SDL_SCANCODE_L)
+            //        {
+              //          startMindTrapSequence(engineContext);
+            //            currentState = STATE_MIND_TRAP;
+             //       }
+                //    else if (ev.key.scancode == SDL_SCANCODE_J)
+                //    {
+                //        tryTriggerPanicAttack(engineContext, levels[engineContext.currentLevel].folder);
+                   // }
                 }
             }
             else if (currentState == STATE_ENDING)
@@ -2167,10 +2459,19 @@ int main( int argc, char **argv ) {
 
         if (currentState == STATE_GAME)
         {
+
+       
+
             if (!g_caveTimeoutActive)
             {
                 renderGameplayUiPass( engineContext );
             }
+
+            if (g_panicAttack.active)
+            {
+                applyPanicAttackBlur(engineContext, g_panicAttack.blurIntensity);
+            }
+
         }
         else if (currentState == STATE_MENU)
         {
@@ -2274,6 +2575,43 @@ int main( int argc, char **argv ) {
     SDL_Quit();
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

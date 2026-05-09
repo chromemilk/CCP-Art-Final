@@ -2117,9 +2117,7 @@ static void rebuildMuseumInteractableVisualsForLevel(Engine& engineContext, Leve
         addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 8.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
         addWorldModelInstance(resolveAssetModelPath("SimplePillar.glb"), 13.5, 10.5, 1.1f, rgb(116, 101, 60), 3.1415926, 0, 0, false, 0, -0.05f);
 
-        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 16.4f, 14.9f, 0.22f, rgb(224, 214, 188), 0.45f, 0, 0, false, 0, -0.05f);
         addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.1f, 14.4f, 0.20f, rgb(220, 210, 182), -0.20f, 0, 0, false, 0, -0.05f);
-        addWorldModelInstance(resolveAssetModelPath("Scattered Paper.glb"), 17.8f, 15.0f, 0.18f, rgb(226, 216, 190), 0.95f, 0, 0, false, 0, -0.05f);
     }
 
     if (g_revolverPickup.collected)
@@ -2241,6 +2239,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.quads.clear();
     engineContext.benches3D.clear();
     g_worldModels.clear();
+    g_wepingStatues.clear();
     g_heldRevolverModelIndex = -1;
     g_revolverInspectModelIndex = -1;
     g_revolverInspectBaseYaw = 0.0f;
@@ -2258,6 +2257,7 @@ static bool loadLevel( Engine &engineContext, const LevelDef &level ) {
     engineContext.hasFloorStains = false;
     engineContext.hasWallStains = false;
     engineContext.hasWallOverlay = false;
+
 
     fs::path folder = level.folder;
     g_currentLevelFolder = folder.string();
@@ -4185,8 +4185,8 @@ static void renderCaveTimeoutEndingScreen(Engine& engineContext) {
        "      /  .-. .-.  \\       ",
        "     |  (o ) (o )  |      ",
        "      \\   '---'   /       ",
-       "       '-.___.-'          ",
-       "          |||             ",
+       "       '-.___.-'--/         ",
+       "         ||||             ",
        "    _____||||____         ",
        "   /    |||||    \\       ",
        "  / \\   | | |   / \\    ",
@@ -4225,11 +4225,11 @@ static void renderCaveTimeoutEndingScreen(Engine& engineContext) {
     std::vector<std::string> credits = {
         "CREDITS",
         "Lines of code: 18,000",
-        "Hours: 200 (8 months)",
+        "Hours: 200 (4 months)",
         "Total Assets: 148",
-        "Project Size: 18.9 GB",
-        "Total Music: 6",
-        "Total SFX: 11",
+        "Project Size: 19 GB",
+        "Total Music Tracks: 8",
+        "Total SFX: 13",
         "Play Time: 20-40 Mins",
         "",
         "Special Thanks:",
@@ -5955,14 +5955,14 @@ static void renderGameplayUiPass( Engine &engineContext ) {
 
         drawTranslucentBox( engineContext, 0, 0, RENDER_W, RENDER_H, rgb( 0, 0, 0 ), std::clamp( 0.55f - p * 0.55f, 0.0f, 0.55f ) );
 
-        if (p > 0.38f && p < 0.92f)
+        if (p > 0.38f && p < 0.85f)
         {
             drawStringTinyScaled( engineContext, (RENDER_W / 2) - 45, RENDER_H - 44, "...where am I?", rgb( 185, 185, 200 ), 2, 1, 1, false );
         }
 
-        if (p > 0.95f)
+        if (p > 0.85f)
         {
-            drawStringTinyScaled(engineContext, (RENDER_W / 2) - 100, RENDER_H - 44, "Wait, what was that thing?", rgb(185, 185, 200), 2, 1, 1, false);
+            drawStringTinyScaled(engineContext, (RENDER_W / 2) - 150, RENDER_H - 44, "Wait, what was that thing? I should probably check the generator.", rgb(185, 185, 200), 2, 1, 1, false);
         }
     }
 
@@ -6053,7 +6053,7 @@ static void renderGameplayUiPass( Engine &engineContext ) {
     {
         std::string req = hasRestorationPigments()
             ? "[F] Unseal Restoration Wing"
-            : "[F] Need Black, Blue, Red Pigment";
+            : "[F] Missing Key Items";
         drawString16x16( engineContext, (RENDER_W / 2) - 155, (RENDER_H / 2) + 65, req, rgb( 255, 170, 170 ), RENDER_W, 1, 2, true, rgb( 20, 20, 20 ) );
     }
 

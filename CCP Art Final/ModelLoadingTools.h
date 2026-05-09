@@ -542,6 +542,134 @@ static float modelScaleOverride( const std::string &modelPath ) {
     return 1.0f;
 }
 
+struct WepingStatueState {
+    int modelIndex = -1;
+    float baseX = 0.0f;
+    float baseY = 0.0f;
+    float basePitch = 0.0f;
+    float baseYaw = 0.0f;
+    float baseRoll = 0.0f;
+    float lastLookedAwayTime = 0.0f;
+    float rotationX = 0.0f;
+    float rotationY = 0.0f;
+    float rotationZ = 0.0f;
+    float positionOffsetX = 0.0f;
+    float positionOffsetY = 0.0f;
+    bool wasLookedAt = false;
+};
+
+
+
+static std::vector<WepingStatueState> g_wepingStatues;
+static constexpr float kStatueRotationSpeed = 0.4f;
+static constexpr float kStatueMaxRotation = 0.3f;
+static constexpr float kStatueMovementSpeed = 0.05f;
+static constexpr float kStatueMaxMovement = 0.15f;
+static constexpr float kStatueLookDistance = 8.0f;
+
+
+static bool isPlayerLookingAtStatue(const Engine& engineContext, const WorldModelInstance& statue) {
+    const float dx = statue.x - engineContext.positionX;
+    const float dy = statue.y - engineContext.positionY;
+    const float distSq = dx * dx + dy * dy;
+
+    if (distSq > (kStatueLookDistance * kStatueLookDistance)) {
+        return false;
+    }
+
+    const float dotProduct = (dx * engineContext.directionX + dy * engineContext.directionY);
+    return dotProduct > 0.3f;
+}
+static void updateWepingStatues(Engine& engineContext, float dt) {
+    for (auto& statue : g_wepingStatues)
+    {
+        if (statue.modelIndex < 0 || statue.modelIndex >= (int)g_worldModels.size())
+        {
+            continue;
+        }
+
+        auto& model = g_worldModels[statue.modelIndex];
+        const bool isLookedAt = isPlayerLookingAtStatue(engineContext, model);
+
+        if (isLookedAt)
+        {
+            statue.wasLookedAt = true;
+            statue.lastLookedAwayTime = 0.0f;
+        }
+        else if (statue.wasLookedAt)
+        {
+            statue.lastLookedAwayTime += dt;
+
+            if (statue.lastLookedAwayTime > 0.18f)
+            {
+                const float rotationAmount = kStatueRotationSpeed * dt;
+                const float movementAmount = kStatueMovementSpeed * dt;
+
+                auto jitter = []() -> float {
+                    return float(std::rand() % 101 - 50) / 100.0f;
+                    };
+
+                statue.rotationX = std::clamp(
+                    statue.rotationX + jitter() * rotationAmount,
+                    -kStatueMaxRotation,
+                    kStatueMaxRotation);
+
+                statue.rotationY = std::clamp(
+                    statue.rotationY + jitter() * rotationAmount,
+                    -kStatueMaxRotation,
+                    kStatueMaxRotation);
+
+                statue.rotationZ = std::clamp(
+                    statue.rotationZ + jitter() * rotationAmount,
+                    -kStatueMaxRotation,
+                    kStatueMaxRotation);
+
+                statue.positionOffsetX = std::clamp(
+                    statue.positionOffsetX + jitter() * movementAmount,
+                    -kStatueMaxMovement,
+                    kStatueMaxMovement);
+
+                statue.positionOffsetY = std::clamp(
+                    statue.positionOffsetY + jitter() * movementAmount,
+                    -kStatueMaxMovement,
+                    kStatueMaxMovement);
+            }
+        }
+
+        model.pitch = statue.basePitch + statue.rotationX;
+        model.yaw = statue.baseYaw + statue.rotationY;
+        model.roll = statue.baseRoll + statue.rotationZ;
+        model.x = statue.baseX + statue.positionOffsetX;
+        model.y = statue.baseY + statue.positionOffsetY;
+    }
+}
+
+
+static void registerWepingStatue(int modelIndex) {
+    for (const auto& statue : g_wepingStatues)
+    {
+        if (statue.modelIndex == modelIndex)
+        {
+            return;
+        }
+    }
+
+    if (modelIndex < 0 || modelIndex >= (int)g_worldModels.size())
+    {
+        return;
+    }
+
+    const auto& model = g_worldModels[modelIndex];
+    WepingStatueState statue;
+    statue.modelIndex = modelIndex;
+    statue.baseX = model.x;
+    statue.baseY = model.y;
+    statue.basePitch = model.pitch;
+    statue.baseYaw = model.yaw;
+    statue.baseRoll = model.roll;
+    g_wepingStatues.push_back(statue);
+}
+
 static int addWorldModelInstance(
     const std::string &modelPath,
     float x,
@@ -579,5 +707,17 @@ static int addWorldModelInstance(
     inst.editorTargetScale = targetWorldSize;
     int index = (int)g_worldModels.size();
     g_worldModels.push_back( std::move( inst ) );
+
+    const std::string lowerPath = toLowerCopy(modelPath);
+    if (lowerPath.find("statue") != std::string::npos ||
+        lowerPath.find("warden") != std::string::npos ||
+        lowerPath.find("angel") != std::string::npos)
+    {
+        registerWepingStatue(index);
+    }
+
+
+
+
     return index;
 }

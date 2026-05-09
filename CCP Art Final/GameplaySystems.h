@@ -107,6 +107,59 @@ static void resetWhisperAmbience() {
     g_whisperNextDelay = randomRange01( 24.0f, 40.0f );
 }
 
+static bool g_panicking = false;
+
+struct PanicAttackState {
+    bool active = false;
+    float duration = 5.0f;
+    float timer = 0.0f;
+    float originalFov = 0.0f;
+    float blurIntensity = 0.0f;
+};
+
+static PanicAttackState g_panicAttack;
+static constexpr float kPanicAttackDuration = 7.5f;
+static constexpr float kPanicAttackChance = 0.15f;
+static constexpr float kPanicAttackFovReduction = 0.65f;
+static constexpr float kPanicAttackBlurMax = 10.0f;
+
+static void startPanicAttack(float originalFov, const std::string& baseLevelFolder) {
+    g_panicAttack.active = true;
+    g_panicAttack.timer = 0.0f;
+    g_panicAttack.duration = kPanicAttackDuration;
+    g_panicAttack.originalFov = originalFov;
+    g_panicAttack.blurIntensity = 0.0f;
+
+    static const std::array<std::string, 6> attackLines = {
+    "My heart is racing.",
+    "Breathe, deep breaths.",
+    "I need to calm down.",
+    "I wish I had my inhaler.",
+    "Just gotta hold on a little but longer.",
+    "Please, please go away."
+    };
+
+    const int index = std::rand() % (int)attackLines.size();
+    g_dialogue.start({ { attackLines[index], 3.5f } });
+
+    playHeartbeat(baseLevelFolder);
+}
+
+static void tryTriggerPanicAttack(Engine& engineContext, const std::string& baseLevelFolder) {
+    const float roll = float(std::rand()) / float(RAND_MAX);
+    if (roll > kPanicAttackChance)
+    {
+        return;
+    }
+
+    if (!g_panicAttack.active)
+    {
+        startPanicAttack(1, baseLevelFolder);
+    }
+}
+
+
+
 static void updateWhisperAmbience( Engine &engineContext, float dt ) {
     if (engineContext.currentLevel != Levels::MUSEUM && engineContext.currentLevel != Levels::MUSEUM_UPPER)
     {
@@ -148,6 +201,9 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
         !g_caveQuizActive);
     if (!shouldSpeak || !canSpeak) return;
 
+    tryTriggerPanicAttack(engineContext, g_currentLevelFolder);
+
+
     static const std::array<std::string, 6> whisperLines = {
         "I'm losing it.",
         "What was that?",
@@ -159,6 +215,7 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
 
     const int index = std::rand() % (int)whisperLines.size();
     g_dialogue.start( { { whisperLines[ index ], 2.2f } } );
+    g_panicking = true;
 }
 
 static const std::vector<EditorAssetDef> &editorAssetCatalog() {
@@ -500,7 +557,7 @@ static void showAccessPopup( const std::string &msg, Uint32 durationMs = 2200 ) 
     g_accessPopupUntil = SDL_GetTicks() + durationMs;
 }
 
-static bool isPlayerNearPoint( Engine const &engineContext, float px, float py, float tolerance = 1.0f ) {
+static bool isPlayerNearPoint( Engine const &engineContext, float px, float py, float tolerance = 0.8f ) {
     float dx = engineContext.positionX - px;
     float dy = engineContext.positionY - py;
     return (dx * dx + dy * dy) <= (tolerance * tolerance);
