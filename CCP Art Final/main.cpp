@@ -257,7 +257,7 @@ static void clearPuzzleState();
 #include "GameplayUiRendering.h"
 
 static float g_randomFootstepTimer = 0.0f;
-static constexpr float kRandomFootstepCheckInterval = 30.0f;  // Check every 30 seconds
+static constexpr float kRandomFootstepCheckInterval = 40.0f;  // Check every 40 seconds
 static constexpr float kRandomFootstepChance = 0.40f;          // 40% chance
 
 

@@ -25,7 +25,7 @@ public:
     void triggerStudioCutscene( Engine &engineContext, DialogueSystem &dialogue ) {
         if (studioCutsceneTriggered) return;
         studioCutsceneTriggered = true;
-        triggerScriptedPanCutscene( engineContext, dialogue, "What the hell happened here?", 3.5f, 0.02f );
+        triggerScriptedPanCutscene( engineContext, dialogue, "Oh my.... what happened here?", 3.5f, 0.02f );
     }
 
     bool hasTriggeredStudioCutscene() const {
