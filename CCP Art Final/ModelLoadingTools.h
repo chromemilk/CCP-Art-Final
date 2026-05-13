@@ -646,10 +646,28 @@ static void updateWepingStatues(Engine& engineContext, float dt) {
 
 
 static void registerWepingStatue(int modelIndex) {
-    for (const auto& statue : g_wepingStatues)
+    for (size_t i = 0; i < g_wepingStatues.size(); ++i)
     {
-        if (statue.modelIndex == modelIndex)
+        if (g_wepingStatues[i].modelIndex == modelIndex)
         {
+            auto& model = g_worldModels[modelIndex];
+            g_wepingStatues[i].baseX = model.x;
+            g_wepingStatues[i].baseY = model.y;
+            g_wepingStatues[i].basePitch = model.pitch;
+            g_wepingStatues[i].baseYaw = model.yaw;
+            g_wepingStatues[i].baseRoll = model.roll;
+            g_wepingStatues[i].rotationX = 0.0f;
+            g_wepingStatues[i].rotationY = 0.0f;
+            g_wepingStatues[i].rotationZ = 0.0f;
+            g_wepingStatues[i].positionOffsetX = 0.0f;
+            g_wepingStatues[i].positionOffsetY = 0.0f;
+            g_wepingStatues[i].wasLookedAt = false;
+            g_wepingStatues[i].lastLookedAwayTime = 0.0f;
+            model.pitch = g_wepingStatues[i].basePitch;
+            model.yaw = g_wepingStatues[i].baseYaw;
+            model.roll = g_wepingStatues[i].baseRoll;
+            model.x = g_wepingStatues[i].baseX;
+            model.y = g_wepingStatues[i].baseY;
             return;
         }
     }
@@ -667,6 +685,13 @@ static void registerWepingStatue(int modelIndex) {
     statue.basePitch = model.pitch;
     statue.baseYaw = model.yaw;
     statue.baseRoll = model.roll;
+    statue.rotationX = 0.0f;
+    statue.rotationY = 0.0f;
+    statue.rotationZ = 0.0f;
+    statue.positionOffsetX = 0.0f;
+    statue.positionOffsetY = 0.0f;
+    statue.wasLookedAt = false;
+    statue.lastLookedAwayTime = 0.0f;
     g_wepingStatues.push_back(statue);
 }
 

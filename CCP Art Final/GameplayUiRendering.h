@@ -698,18 +698,24 @@ static void renderMindTrapInterface(Engine& engineContext) {
     const Uint32 subjectInk = rgb(150, 220, 165);
     const Uint32 noteInk = rgb(205, 175, 235);
 
-    int panelX = 88;
-    int panelY = 44;
-    int panelW = RENDER_W - 176;
-    int panelH = RENDER_H - 88;
+    const int mindTrapScale = 2;
+    const float layoutScale = static_cast<float>(mindTrapScale) / 2.0f;
+    auto px = [&](int value) { return int(std::round(value * layoutScale)); };
+
+    int panelX = px(88);
+    int panelY = px(44);
+    int panelW = RENDER_W - (panelX * 2);
+    int panelH = RENDER_H - (panelY * 2);
     drawTranslucentBox(engineContext, panelX, panelY, panelW, panelH, rgb(0, 0, 0), 0.68f);
 
-    const int charAdv = 8;
-    const int rowStep = 10;
-    const int cols = std::max(40, (panelW - 20) / charAdv);
-    const int rows = std::max(20, (panelH - 20) / rowStep);
-    const int tx = panelX + 10;
-    const int ty = panelY + 8;
+    const int charAdv = 4 * mindTrapScale;
+    const int glyphHeight = 5 * mindTrapScale;
+    const int rowStep = glyphHeight + px(2);
+    int textOffsetY = (rowStep - glyphHeight) / 2;
+    const int cols = std::max(40, (panelW - px(20)) / charAdv);
+    const int rows = std::max(20, (panelH - px(20)) / rowStep);
+    const int tx = panelX + px(10);
+    const int ty = panelY + px(8);
 
     const bool fractured = (std::sin(g_mindTrapFlickerTimer * 3.9f) > 0.84f);
     std::string topBorder = "+" + std::string(cols - 2, '-') + "+";
@@ -719,27 +725,27 @@ static void renderMindTrapInterface(Engine& engineContext) {
         topBorder.replace(cols / 2 - 4, 8, "/V\\/\\/");
     }
 
-    drawStringTinyScaled(engineContext, tx, ty, topBorder, ink, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx, ty, topBorder, ink, mindTrapScale, 1, 1, false);
     for (int r = 1; r < rows - 1; ++r)
     {
-        drawStringTinyScaled(engineContext, tx, ty + r * rowStep, "|", dimInk, 2, 1, 1, false);
-        drawStringTinyScaled(engineContext, tx + (cols - 1) * charAdv, ty + r * rowStep, "|", dimInk, 2, 1, 1, false);
+        drawStringTinyScaled(engineContext, tx, ty + r * rowStep, "|", dimInk, mindTrapScale, 1, 1, false);
+        drawStringTinyScaled(engineContext, tx + (cols - 1) * charAdv, ty + r * rowStep, "|", dimInk, mindTrapScale, 1, 1, false);
     }
-    drawStringTinyScaled(engineContext, tx, ty + (rows - 1) * rowStep, botBorder, ink, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx, ty + (rows - 1) * rowStep, botBorder, ink, mindTrapScale, 1, 1, false);
 
-    drawStringTinyScaled(engineContext, tx + 12, ty + 20, "[SYSTEM_DIAGNOSTIC::NEURAL_LINK]", ink, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(12), ty + px(20), "[SYSTEM_DIAGNOSTIC::NEURAL_LINK]", ink, mindTrapScale, 1, 1, false);
 
     Uint32 dirInk = (int(g_mindTrapFlickerTimer * 4.0f) % 2 == 0) ? dangerInk : ink;
-    drawStringTinyScaled(engineContext, tx + 12, ty + 32, "[USER_ID: DIRECTOR]  [STATUS: CORRUPTING]", dirInk, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(12), ty + px(32), "[USER_ID: DIRECTOR]  [STATUS: CORRUPTING]", dirInk, mindTrapScale, 1, 1, false);
 
-    drawStringTinyScaled(engineContext, tx + 12, ty + 50, "MEMORY", archiveInk, 2, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 67, ty + 50, "PSYCHE", mindInk, 2, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 117, ty + 50, "GUILT", subjectInk, 2, 1, 1, false);
-    drawStringTinyScaled(engineContext, tx + 167, ty + 50, "NOTE", noteInk, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(12), ty + px(50), "MEMORY", archiveInk, mindTrapScale, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(67), ty + px(50), "PSYCHE", mindInk, mindTrapScale, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(117), ty + px(50), "GUILT", subjectInk, mindTrapScale, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(167), ty + px(50), "NOTE", noteInk, mindTrapScale, 1, 1, false);
 
     if (((int)(g_mindTrapFlickerTimer * 2.0f) % 5) == 1)
     {
-        drawTranslucentBox(engineContext, tx + 12 * charAdv, ty + 26, 10 * charAdv, rowStep - 2, rgb(0, 0, 0), 0.96f);
+        drawTranslucentBox(engineContext, tx + 12 * charAdv, ty + px(26), 10 * charAdv, rowStep - px(2), rgb(0, 0, 0), 0.96f);
     }
 
     auto cleanLine = [&](const std::string& raw) {
@@ -751,10 +757,12 @@ static void renderMindTrapInterface(Engine& engineContext) {
         return normalizeMindTrapTerminalText(out);
         };
 
-    const int logX = tx + 12;
-    const int logY = ty + 48;
+    const int logX = tx + px(12);
+    const int logY = ty + px(64);
     const int logWChars = std::max(26, cols - 30);
-    const int logRows = std::max(8, rows - 12);
+    const int galleryY = ty + (rows - 7) * rowStep;
+    const int maxLogRows = std::max(4, (galleryY - logY) / rowStep - 1);
+    const int logRows = std::min(std::max(8, rows - 12), maxLogRows);
     const int visibleLines = std::max(1, logRows);
 
     int start = 0;
@@ -773,9 +781,9 @@ static void renderMindTrapInterface(Engine& engineContext) {
         else if (line.rfind("NOTE>", 0) == 0) { col = noteInk; marker = noteInk; }
         if (line.find("CRITICAL_LOGIC_FAIL") != std::string::npos) col = dangerInk;
 
-        drawTranslucentBox(engineContext, logX - 8, ly - 1, 4, rowStep - 2, marker, 0.95f);
-        drawTranslucentBox(engineContext, logX - 2, ly - 1, (logWChars * charAdv) + 4, rowStep - 2, rgb(0, 0, 0), 0.35f);
-        drawStringTinyScaled(engineContext, logX, ly + 18, line, col, 2, 1, 1, false);
+        drawTranslucentBox(engineContext, logX - px(8), ly - px(1), px(4), rowStep - px(2), marker, 0.95f);
+        drawTranslucentBox(engineContext, logX - px(2), ly - px(1), (logWChars * charAdv) + px(4), rowStep - px(2), rgb(0, 0, 0), 0.35f);
+        drawStringTinyScaled(engineContext, logX, ly + textOffsetY, line, col, mindTrapScale, 1, 1, false);
 
         ly += rowStep;
         if (ly > logY + (logRows - 1) * rowStep) break;
@@ -790,13 +798,12 @@ static void renderMindTrapInterface(Engine& engineContext) {
         else if (typed.rfind("MIND>", 0) == 0) typeCol = mindInk;
         else if (typed.rfind("SUBJECT>", 0) == 0) typeCol = subjectInk;
         else if (typed.rfind("NOTE>", 0) == 0) typeCol = noteInk;
-        drawTranslucentBox(engineContext, logX - 2, ly - 1, (logWChars * charAdv) + 4, rowStep - 2, rgb(0, 0, 0), 0.35f);
-        drawStringTinyScaled(engineContext, logX, ly + 18, typed, typeCol, 2, 1, 1, false);
+        drawTranslucentBox(engineContext, logX - px(2), ly - px(1), (logWChars * charAdv) + px(4), rowStep - px(2), rgb(0, 0, 0), 0.35f);
+        drawStringTinyScaled(engineContext, logX, ly + textOffsetY, typed, typeCol, mindTrapScale, 1, 1, false);
     }
 
     const MindTrapPhase& phase = g_mindTrapPhases[g_mindTrapPhaseIndex];
-    const int galleryY = ty + (rows - 7) * rowStep;
-    drawStringTinyScaled(engineContext, tx + 12, galleryY - 15, "[SELECTION_GALLERY::INTERPRETATIONS]", ink, 2, 1, 1, false);
+    drawStringTinyScaled(engineContext, tx + px(12), galleryY - px(15), "[SELECTION_GALLERY::INTERPRETATIONS]", ink, mindTrapScale, 1, 1, false);
 
     if (g_mindTrapAwaitingChoice)
     {
@@ -818,14 +825,14 @@ static void renderMindTrapInterface(Engine& engineContext) {
             std::string line = std::to_string(i + 1) + ") " + opt;
             if ((int)line.size() > (cols - 18)) line = line.substr(0, cols - 21) + "...";
             const Uint32 col = selected ? (g_mindTrapForcedCorrectionActive ? dangerInk : ink) : dimInk;
-            drawTranslucentBox(engineContext, tx + 12, galleryY + i * rowStep - 1, (cols - 22) * charAdv, rowStep - 2, rgb(0, 0, 0), selected ? 0.55f : 0.30f);
-            drawStringTinyScaled(engineContext, tx + 14 + jitter, galleryY + i * rowStep, line, col, 2, 1, 1, false);
+            drawTranslucentBox(engineContext, tx + px(12), galleryY + i * rowStep - px(1), (cols - 22) * charAdv, rowStep - px(2), rgb(0, 0, 0), selected ? 0.55f : 0.30f);
+            drawStringTinyScaled(engineContext, tx + px(14) + jitter, galleryY + i * rowStep + textOffsetY, line, col, mindTrapScale, 1, 1, false);
         }
     }
 
     if (g_mindTrapForcedCorrectionActive)
     {
-        drawStringTinyScaled(engineContext, tx + 12, galleryY + 3 * rowStep + 2, "CRITICAL_LOGIC_FAIL: SUBJECT_MEMORY_CORRUPTED", dangerInk, 2, 1, 1, false);
+        drawStringTinyScaled(engineContext, tx + px(12), galleryY + 3 * rowStep + textOffsetY, "CRITICAL_LOGIC_FAIL: SUBJECT_MEMORY_CORRUPTED", dangerInk, mindTrapScale, 1, 1, false);
     }
 
     if (!g_mindTrapShowingResult)
@@ -931,10 +938,10 @@ static void renderMindTrapInterface(Engine& engineContext) {
         }
 
         int artX = tx + (cols - 28) * charAdv;
-        int artY = ty + 54;
+        int artY = ty + px(54);
 
         for (int i = 0; i < (int)currentFace->size(); ++i) {
-            drawStringTinyScaled(engineContext, artX, artY + i * rowStep, (*currentFace)[i], dimInk, 1, 1, 1, false);
+            drawStringTinyScaled(engineContext, artX, artY + i * rowStep, (*currentFace)[i], dimInk, mindTrapScale, 1, 1, false);
         }
     }
 
@@ -967,24 +974,24 @@ static void renderMindTrapInterface(Engine& engineContext) {
             for (int x = mx; x < mx + mw; ++x) { putPix(engineContext, x, my, borderCol); putPix(engineContext, x, my + mh - 1, borderCol); }
             for (int y = my; y < my + mh; ++y) { putPix(engineContext, mx, y, borderCol); putPix(engineContext, mx + mw - 1, y, borderCol); }
 
-            drawStringTinyScaled(engineContext, mx + 10, my + 10, "[ VISUAL_RESPONSE_PLAYBACK ]", borderCol, 1, 1, 1, false);
+            drawStringTinyScaled(engineContext, mx + px(10), my + px(10), "[ VISUAL_RESPONSE_PLAYBACK ]", borderCol, mindTrapScale, 1, 1, false);
 
-            int artScale = 2;
+            int artScale = mindTrapScale;
             int artCharW = 6 * artScale;
             int artLineH = 12 * artScale;
             int asciiW = (int)currentFrame->lines[0].size() * artCharW;
             int asciiH = (int)currentFrame->lines.size() * artLineH;
             int asciiX = mx + (mw - asciiW) / 2;
-            int asciiY = my + (mh - asciiH) / 2 - 20;
+            int asciiY = my + (mh - asciiH) / 2 - px(20);
 
             for (int i = 0; i < (int)currentFrame->lines.size(); ++i) {
-                drawStringTinyScaled(engineContext, asciiX + 20, asciiY + (i * artLineH), currentFrame->lines[i], ink, artScale, 1, 1, false);
+                drawStringTinyScaled(engineContext, asciiX + px(20), asciiY + (i * artLineH), currentFrame->lines[i], ink, artScale, 1, 1, false);
             }
 
             int subW = (int)currentFrame->subtitle.size() * charAdv;
             int subX = mx + (mw - subW) / 2;
-            int subY = my + mh - 35;
-            drawStringTinyScaled(engineContext, subX, subY, currentFrame->subtitle, mindInk, 2, 1, 1, false);
+            int subY = my + mh - px(35);
+            drawStringTinyScaled(engineContext, subX, subY, currentFrame->subtitle, mindInk, mindTrapScale, 1, 1, false);
         }
     }
 
@@ -2816,7 +2823,7 @@ static void initMindTrapPhases() {
         // Phase 1: The Horrific Realization
         {
             "THINK OF THE HORSE, THE STAG, THE WOLF. DID THEY LOOK SCARED TO YOU? DID THEY LOOK REAL?",
-            { "THEY'RE JUST SOME STATUES", "IT WAS CREEPY, THEY WERE JUST LOOKING AT ME", "I THINK THEY LOOKED VERY REAL" },
+            { "THEY'RE JUST SOME STATUES", "IT WAS CREEPY, THEY WERE JUST LOOKING AT ME", "THEY LOOKED SO REAL" },
             {
                 "[ JUST STATUES ]",
                 "[ THEY STARED AT ME ]",
@@ -2842,7 +2849,7 @@ static void initMindTrapPhases() {
         // Phase 3: Reveal 1 - The Architect
         {
             "WHO FILLED THE VATS? WHO POURED THE SOLVENT? LOOK AT YOUR HANDS.",
-            { "THE DIRECTOR DID, THE DOCTORS DID, THOSE MONSTERS DID", "THE MONSTER", "I DID" },
+            { "THE DIRECTOR DID", "THE MONSTER", "I DID" },
             {
                 "[ THE DIRECTOR DID ]",
                 "[ A MONSTER ]",
@@ -3166,10 +3173,10 @@ static void startMindTrapSequence(Engine& engineContext) {
     engineContext.openArtId = -1;
     engineContext.statueChatActive = false;
 
-    queueMindTrapTerminalLine("...it's so cold...");
-    queueMindTrapTerminalLine("...i feel heavy...");
-    queueMindTrapTerminalLine("...the air smells like chemicals...");
-    queueMindTrapTerminalLine("...why can't I blink?...");
+    queueMindTrapTerminalLine("...it's so cold");
+    queueMindTrapTerminalLine("...i feel heavy");
+    queueMindTrapTerminalLine("...the air smells like chemicals");
+    queueMindTrapTerminalLine("...why can't I blink?");
     queueMindTrapTerminalLine("");
     queueMindTrapTerminalLine("VOICE> HELLO.");
     queueMindTrapTerminalLine("");
