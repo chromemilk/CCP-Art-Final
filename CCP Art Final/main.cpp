@@ -2034,7 +2034,7 @@ int main( int argc, char **argv ) {
                         }
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_M) {
-                        currentState = STATE_ENDING;
+                     //   currentState = STATE_ENDING;
                     }
                     else if (ev.key.scancode == SDL_SCANCODE_F)
                     {
@@ -2180,11 +2180,11 @@ int main( int argc, char **argv ) {
                     {
                         handleLevelChange( engineContext, levels, static_cast<Levels>((static_cast<int>(engineContext.currentLevel) + 1) % static_cast<int>(Levels::COUNT)));
                     }
-             //       else if (ev.key.scancode == SDL_SCANCODE_L)
-            //        {
-              //          startMindTrapSequence(engineContext);
-            //            currentState = STATE_MIND_TRAP;
-             //       }
+                    else if (ev.key.scancode == SDL_SCANCODE_L)
+                    {
+                        startMindTrapSequence(engineContext);
+                        currentState = STATE_MIND_TRAP;
+                    }
                 //    else if (ev.key.scancode == SDL_SCANCODE_J)
                 //    {
                 //        tryTriggerPanicAttack(engineContext, levels[engineContext.currentLevel].folder);

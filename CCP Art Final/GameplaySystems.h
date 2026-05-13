@@ -119,7 +119,7 @@ struct PanicAttackState {
 
 static PanicAttackState g_panicAttack;
 static constexpr float kPanicAttackDuration = 7.5f;
-static constexpr float kPanicAttackChance = 0.15f;
+static constexpr float kPanicAttackChance = 0.20f;
 static constexpr float kPanicAttackFovReduction = 0.65f;
 static constexpr float kPanicAttackBlurMax = 10.0f;
 

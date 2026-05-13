@@ -1325,7 +1325,7 @@ int drawWrappedText( Engine &engineContext, int x, int y, const std::string &tex
             int lineWidth = (int)(line.length() + word.length() + 1) * charW;
             if (lineWidth > maxWidth && !line.empty())
             {
-                drawStringTinyScaled( engineContext, x, currentY, line, color, scale);
+                drawStringTinyScaled( engineContext, x, currentY, line, color, scale, 1, 1, false);
                 currentY += lineH;
                 line = word + " ";
             }

@@ -677,7 +677,8 @@ inline bool quadprop_local_uv( const QuadProp &quad, float wx, float wy,
     const float dU = dx * quad.ux + dy * quad.uy;
     const float dV = dx * quad.vx + dy * quad.vy;
 
-    // Map to normalized UV where -1 -> +1 corresponds 0 -> 1
+    // Map to normalized UV 
+    // -1 -> +1 corresponds 0 -> 1
     u = 0.5f + dU / (2.0f * UdotU);
     v = 0.5f + dV / (2.0f * VdotV);
 
