@@ -1760,7 +1760,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         10.0f, 10.3f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Archivist Notebook",
-        "The new centerpiece requires strict alignment before the locking mechanism engages. The Director was very specific about the symbolism. First, the vehicle of soldiers many centuries ago. Second, the cult of the woods, the hunted. Finally, the apex-predator of the wild forest. Align them in this order, or the vault remains sealed.",
+        "The new pedestal requires strict alignment before the locking mechanism engages. The Director was very specific about the symbolism. First, the vehicle of soldiers many centuries ago. Second, the cult of the woods, the hunted. Finally, the apex-predator of the wild forest.",
         3.5f, 8.5f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Security Log",
@@ -1768,7 +1768,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         4.5f, 10.5f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Director Memo",
-        "To the Board of Curators: We are on the verge of a breakthrough in absolute preservation. The flesh decays, but our new solvent arrests time entirely. To commemorate this milestone, my personal safe has been secured with the current calendar year. Inside is the key to my desk, and by extension, the future of our collection. Do not disturb me; I am preparing the newest acquisition.",
+        "To the Board of Curators: We are on the verge of a breakthrough. The flesh decays, but our new solvent arrests time entirely. To commemorate this milestone, my personal safe has been secured with the current calendar year. Inside is the key to the upstairs, and by extension, the future of our collection. Do not disturb me; I am preparing the newest acquisition.",
         3.5f, 15.5f ) );
 
     g_clueNotes.push_back( makeClueNote( engineContext,
@@ -1777,7 +1777,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         7.8f, 6.8f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Conservation Log B",
-        "A perfect exhibit is one breath held forever. Preservation is mercy, not violence.",
+        "Preservation is mercy, not violence.",
         14.7f, 6.2f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Conservation Log C",
@@ -1789,12 +1789,12 @@ static void initMuseumPuzzle(Engine& engineContext) {
         17.5f, 2.5f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Spilled Solvent",
-        "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: TIME STOPS FOR MASTERPIECES",
+        "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: TIME STOPS FOR MASTERPIECES",
         5.5f, 8.7f,
         Levels::MUSEUM_UPPER ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Entry #402",
-        "I can still see the fear in his eyes. The color drained from his body. The texture abandoned his face. He went limp. The Director's requests are becoming too much.",
+        "I can still see the fear in his eyes. The color drained from his body. The texture abandoned his face. He went limp.",
         11.1f, 4.5f,
         Levels::MUSEUM_UPPER ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
@@ -4366,10 +4366,17 @@ static void renderWorldModelsRange(
         return std::clamp( int( v * 256.0f + 0.5f ), 0, 256 );
     };
 
+    const float timeSeconds = SDL_GetTicks() * 0.001f;
+    thread_local std::vector<CpuProjVert> projected;
+    thread_local std::vector<glm::vec3> transformed;
+
     for (const auto &inst : g_worldModels)
     {
         if (!inst.visible || !inst.model || inst.model->indices.size() < 3) continue;
         if (shouldGpuRenderModel( engineContext, inst )) continue;
+
+        const size_t vertexCount = inst.model->vertices.size();
+        if (vertexCount == 0) continue;
 
         const glm::vec3 modelHalfExtents = glm::max( (inst.model->boundsMax - inst.model->boundsMin) * 0.5f, glm::vec3( 0.0001f ) ) * inst.scale;
         const float modelRadius = std::max( 0.05f, glm::length( modelHalfExtents ) );
@@ -4377,11 +4384,14 @@ static void renderWorldModelsRange(
 
         const float centerDx = inst.x - engineContext.positionX;
         const float centerDy = inst.y - engineContext.positionY;
+        const float centerDistSq = centerDx * centerDx + centerDy * centerDy;
+        const float maxRenderDist = g_worldModelRenderDistance + modelRadius;
+        if (centerDistSq > (maxRenderDist * maxRenderDist)) continue;
+
         const float centerTx = invDet * (engineContext.directionY * centerDx - engineContext.directionX * centerDy);
         const float centerTz = invDet * (-engineContext.planeY * centerDx + engineContext.planeX * centerDy);
 
         if ((centerTz + modelRadius) <= nearClip) continue;
-        if ((centerTz - modelRadius) > g_worldModelRenderDistance) continue;
 
         const float txRadius = modelRadius / std::max( 0.001f, FOV_TAN );
         const float horizontalLimit = (1.0f + kViewPreload) * std::max( centerTz, nearClip );
@@ -4395,10 +4405,11 @@ static void renderWorldModelsRange(
             continue;
         }
 
-        std::vector<CpuProjVert> projected( inst.model->vertices.size() );
-        std::vector<glm::vec3> transformed( inst.model->vertices.size(), glm::vec3( 0.0f ) );
+        projected.clear();
+        projected.resize( vertexCount );
+        transformed.clear();
+        transformed.resize( vertexCount );
 
-        const float timeSeconds = SDL_GetTicks() * 0.001f;
         const float yawNow = inst.yaw + (inst.spinYaw ? (inst.spinSpeed * timeSeconds) : 0.0f);
         const glm::quat qYaw = glm::angleAxis( yawNow, glm::vec3( 0.0f, 1.0f, 0.0f ) );
         const glm::quat qPitch = glm::angleAxis( inst.pitch, glm::vec3( 1.0f, 0.0f, 0.0f ) );
@@ -4410,7 +4421,7 @@ static void renderWorldModelsRange(
             (inst.model->boundsMin.z + inst.model->boundsMax.z) * 0.5f );
 
         float modelMinY = std::numeric_limits<float>::max();
-        for (size_t vi = 0; vi < inst.model->vertices.size(); ++vi)
+        for (size_t vi = 0; vi < vertexCount; ++vi)
         {
             const glm::vec3 local = (inst.model->vertices[ vi ] - pivot) * inst.scale;
             transformed[ vi ] = q * local;
@@ -4425,7 +4436,7 @@ static void renderWorldModelsRange(
         float modelMaxSy = std::numeric_limits<float>::lowest();
         float modelNearestZ = std::numeric_limits<float>::max();
 
-        for (size_t vi = 0; vi < inst.model->vertices.size(); ++vi)
+        for (size_t vi = 0; vi < vertexCount; ++vi)
         {
             const glm::vec3 r = transformed[ vi ];
 
@@ -4492,6 +4503,7 @@ static void renderWorldModelsRange(
         const int triStride = std::max( 1, g_meshTriangleStride );
         const int rasterStep = std::max( 1, g_meshRasterStep );
 
+        const float centerDist = std::sqrt( centerDistSq );
         for (size_t ii = 0; ii + 2 < inst.model->indices.size(); ii += 3)
         {
             const int triIdx = int( ii / 3 );
@@ -4526,8 +4538,7 @@ static void renderWorldModelsRange(
                 const int triH = maxY - minY + 1;
                 if ((triW * triH) <= 2) continue;
 
-                const float triMidZ = (a.z + b.z + c.z) * (1.0f / 3.0f);
-                if (triMidZ > (g_worldModelRenderDistance * 0.55f) && (triIdx & 1))
+                if (centerDist > (g_worldModelRenderDistance * 0.55f) && (triIdx & 1))
                 {
                     continue;
                 }
@@ -4841,8 +4852,11 @@ static void dispatchRasterWorkers(
 static void renderWorldModels( Engine &engineContext, std::vector<float> &meshDepthBuffer, float pitchOffset) {
     if (g_worldModels.empty()) return;
 
-    std::vector<float> wallInvDepthBuffer;
-    wallInvDepthBuffer.resize( RENDER_W, 0.0f );
+    static std::vector<float> wallInvDepthBuffer;
+    if (wallInvDepthBuffer.size() != static_cast<size_t>(RENDER_W))
+    {
+        wallInvDepthBuffer.resize( RENDER_W, 0.0f );
+    }
     for (int x = 0; x < RENDER_W; ++x)
     {
         const float wz = engineContext.zbuffer[ x ];
@@ -4915,9 +4929,12 @@ static void renderWorldModelsGpu( Engine &engineContext, float pitchOffset ) {
 
         const float centerDx = inst.x - engineContext.positionX;
         const float centerDy = inst.y - engineContext.positionY;
+        const float centerDistSq = centerDx * centerDx + centerDy * centerDy;
+        const float maxRenderDist = g_worldModelRenderDistance + modelRadius;
+        if (centerDistSq > (maxRenderDist * maxRenderDist)) continue;
+
         const float centerTz = invDet * (-engineContext.planeY * centerDx + engineContext.planeX * centerDy);
         if ((centerTz + modelRadius) <= nearClip) continue;
-        if ((centerTz - modelRadius) > g_worldModelRenderDistance) continue;
 
         std::vector<GpuVert> projected;
         projected.resize( inst.model->vertices.size() );
@@ -5159,6 +5176,7 @@ static void render( Engine &engineContext, float dt ) {
     updateHeldRevolverModel( engineContext );
 
     const int half = RENDER_H / 2;
+    const float wallHorizon = (RENDER_H * 0.5f) + engineContext.pitchOffset;
     engineContext.zbuffer.assign( RENDER_W, 1e9f );
 
     static int clipTop[ RENDER_W ];
@@ -5224,7 +5242,7 @@ static void render( Engine &engineContext, float dt ) {
                 side = 1;
             }
 
-            const float rayTravel = std::min( sideDistX, sideDistY );
+            const float rayTravel = (side == 0) ? sideDistX : sideDistY;
             if (rayTravel > g_wallRenderDistance)
             {
                 break;
@@ -5256,16 +5274,6 @@ static void render( Engine &engineContext, float dt ) {
             ? (engineContext.positionY + perpWallDist * rayDirY)
             : (engineContext.positionX + perpWallDist * rayDirX);
         wallX -= std::floor( wallX );
-
-        float wallShade = 1.0f;
-        if (engineContext.caveMode) {
-            wallShade = caveLight(perpWallDist);
-        }
-        else {
-            wallShade = 1.0f / (1.0f + engineContext.indoorShadeLinear * perpWallDist + engineContext.indoorShadeQuadratic * perpWallDist * perpWallDist);
-            wallShade = std::clamp(wallShade, engineContext.indoorShadeMin, 1.0f);
-        }
-        if (side == 1) wallShade *= 0.75f; // Apply side shading for depth
 
         // Texture selection
         const Image &wallTexture = (hitTile == 2) ? engineContext.doorTexture : engineContext.wallTex;
@@ -5327,10 +5335,8 @@ static void render( Engine &engineContext, float dt ) {
 
                     float uLocal = (wallX - u0) / std::max(0.0001f, (u1 - u0));
 
-                    float horizon = (RENDER_H / 2.0f) + engineContext.pitchOffset;
-
                     int bandH = std::max(1, int(lineH * art.vHeight));
-                    int bandCenter = int(horizon + (art.vCenter - 0.5f) * lineH);
+                    int bandCenter = int(wallHorizon + (art.vCenter - 0.5f) * lineH);
                     int bandStart = bandCenter - bandH / 2;
                     int bandEnd = bandStart + bandH - 1;
 

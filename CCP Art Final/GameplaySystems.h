@@ -145,17 +145,19 @@ static void startPanicAttack(float originalFov, const std::string& baseLevelFold
     playHeartbeat(baseLevelFolder);
 }
 
-static void tryTriggerPanicAttack(Engine& engineContext, const std::string& baseLevelFolder) {
+static bool tryTriggerPanicAttack(Engine& engineContext, const std::string& baseLevelFolder) {
     const float roll = float(std::rand()) / float(RAND_MAX);
-    if (roll > kPanicAttackChance)
+     if (roll > kPanicAttackChance)
     {
-        return;
-    }
+        return false;
+    } 
 
     if (!g_panicAttack.active)
     {
         startPanicAttack(1, baseLevelFolder);
+        return true;
     }
+    return false;
 }
 
 
@@ -189,7 +191,7 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
 
     playWeaponBufferedSound( g_whisperBuffer, g_mindTrapActive ? 1.0f : 13.0f );
 
-    const bool shouldSpeak = (std::rand() % 100) < 70;
+    const bool shouldSpeak = (std::rand() % 100) < 60;
     const bool canSpeak =
         (g_mindTrapActive ||
         !g_dialogue.isActive() &&
@@ -201,21 +203,22 @@ static void updateWhisperAmbience( Engine &engineContext, float dt ) {
         !g_caveQuizActive);
     if (!shouldSpeak || !canSpeak) return;
 
-    tryTriggerPanicAttack(engineContext, g_currentLevelFolder);
-
-
+    if (tryTriggerPanicAttack(engineContext, g_currentLevelFolder)) {
+        g_panicking = true;
+    }
+    else {
     static const std::array<std::string, 6> whisperLines = {
         "I'm losing it.",
         "What was that?",
         "I'm not alone down here.",
         "Did someone just whisper my name?",
-        "No, no... keep it together.",
+        "Where is that?",
         "Something is following me."
     };
 
     const int index = std::rand() % (int)whisperLines.size();
     g_dialogue.start( { { whisperLines[ index ], 2.2f } } );
-    g_panicking = true;
+    }
 }
 
 static const std::vector<EditorAssetDef> &editorAssetCatalog() {

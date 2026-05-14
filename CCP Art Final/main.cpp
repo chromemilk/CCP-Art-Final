@@ -1473,7 +1473,7 @@ int main( int argc, char **argv ) {
                         continue;
                     }
 
-                    if (ev.key.key == SDLK_F2)
+                /*   if (ev.key.key == SDLK_F2)
                     {
                         g_levelEditorMode = !g_levelEditorMode;
                         if (g_levelEditorMode)
@@ -1490,14 +1490,15 @@ int main( int argc, char **argv ) {
                         }
                         continue;
                     }
-
+                    */
+                    /*
                     if (ev.key.key == SDLK_F3)
                     {
                         g_unlockAllDoorsOverride = true;
                         applyUnlockAllDoorsOverride( engineContext );
                         showAccessPopup( "Door override enabled", 2200 );
                         continue;
-                    }
+                    }*/
 
                     if (g_levelEditorMode)
                     {
@@ -1812,6 +1813,7 @@ int main( int argc, char **argv ) {
                     {
                         engineContext.showHelp = !engineContext.showHelp;
                     }
+
                     else if (ev.key.scancode == SDL_SCANCODE_E)
                     {
                         if (engineContext.currentLevel == Levels::MUSEUM_UPPER && isPlayerNearSolventCooler( engineContext ) &&
@@ -2175,7 +2177,7 @@ int main( int argc, char **argv ) {
                             handleLevelChange( engineContext, levels, Levels::CAVE );
                         }
                     }
-           
+           /*
                     else if (ev.key.scancode == SDL_SCANCODE_K)
                     {
                         handleLevelChange( engineContext, levels, static_cast<Levels>((static_cast<int>(engineContext.currentLevel) + 1) % static_cast<int>(Levels::COUNT)));
@@ -2185,6 +2187,7 @@ int main( int argc, char **argv ) {
                         startMindTrapSequence(engineContext);
                         currentState = STATE_MIND_TRAP;
                     }
+                    */
                 //    else if (ev.key.scancode == SDL_SCANCODE_J)
                 //    {
                 //        tryTriggerPanicAttack(engineContext, levels[engineContext.currentLevel].folder);
@@ -2283,6 +2286,7 @@ int main( int argc, char **argv ) {
             float nx = engineContext.positionX, ny = engineContext.positionY;
             if (ks[ SDL_SCANCODE_W ])
             {
+
                 nx += engineContext.directionX * ms;
                 ny += engineContext.directionY * ms;
                 engineContext.isMoving = true;
