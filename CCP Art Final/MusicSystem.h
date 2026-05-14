@@ -219,7 +219,7 @@ bool calibrateMusicVolumeFromMic(int captureMs = 1200, bool userReset = false) {
 	double rms = std::sqrt(sumSq / double(count));
 	float ambient = float(std::clamp(rms, 0.0, 0.18));
 	float norm = ambient / 0.18f;
-	float target = 8.0f + norm * 44.0f;
+	float target = 11.0f + norm * 44.0f;
 
 	setMusicVolume(target);
 	config::musicVolume = target;

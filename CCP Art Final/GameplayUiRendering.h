@@ -1789,7 +1789,7 @@ static void initMuseumPuzzle(Engine& engineContext) {
         17.5f, 2.5f ) );
     g_clueNotes.push_back( makeClueNote( engineContext,
         "Spilled Solvent",
-        "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: One breath held forever",
+        "The red stains won't come up with standard bleach. The Director says it's 'Special Oil.' It smells like a hospital. I don't understand what the director wants. We take the consciousness out of people like a modern lobotomy. We have failed to capture the mind of any subject. I hope rumors of the escapee are false, we've already lost three. Maybe the subject is looking for the humanity we took. As the director says: TIME STOPS FOR MASTERPIECES",
         5.5f, 8.7f,
         Levels::MUSEUM_UPPER ) );
     g_clueNotes.push_back( makeClueNote( engineContext,

@@ -742,7 +742,7 @@ static std::string normalizePhraseInput( const std::string &input ) {
 }
 
 static bool isSolventCoolerPhraseCorrect( const std::string &input ) {
-    return normalizePhraseInput( input ) == "ONE BREATH HELD FOREVER";
+    return normalizePhraseInput( input ) == "TIME STOPS FOR MASTERPIECES";
 }
 
 static bool isPlayerInsideUpperStudio( Engine const &engineContext ) {
